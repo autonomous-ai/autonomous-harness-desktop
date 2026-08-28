@@ -61,7 +61,7 @@ void main() {
   });
 
   test(
-    'link Generate invokes cli.js as direct argv and reads its token',
+    'remote-password status invokes cli.js as direct argv and reads its JSON result',
     () async {
       final home = Directory('${scratch.path}/home')..createSync();
       final harnessHome = Directory('${home.path}/.harness')..createSync();
@@ -85,19 +85,20 @@ void main() {
             return ProcessResult(
               42,
               0,
-              'Machine-link token (valid for 7 days):\n\n  tok_abc\n\n'
-                  'fingerprint  1234ABCD\n',
+              '{"hasPassword":true,"fingerprint":"1234ABCD",'
+                  '"setAt":1700000000000}\n',
               '',
             );
           },
         ),
-      ).create();
+      ).remotePasswordStatus();
 
       expect(executable, node.path);
-      expect(arguments, [cli.path, 'link', 'create']);
+      expect(arguments, [cli.path, 'remote-password', 'status', '--json']);
       expect(result.error, isNull);
-      expect(result.token, 'tok_abc');
+      expect(result.hasPassword, isTrue);
       expect(result.fingerprint, '1234ABCD');
+      expect(result.setAt, DateTime.fromMillisecondsSinceEpoch(1700000000000));
     },
   );
 }

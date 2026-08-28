@@ -503,7 +503,8 @@ void main() {
     expect(find.text('Link this machine'), findsOneWidget);
     expect(
       find.text(
-        'remote-mac is online, but it is not linked to this computer yet.',
+        "This computer isn't linked to remote-mac yet. Enter the remote password set "
+        'on that machine to connect.',
       ),
       findsOneWidget,
     );
@@ -560,7 +561,8 @@ void main() {
     expect(find.text('Link this machine'), findsOneWidget);
     expect(
       find.text(
-        'link-mac is online, but it is not linked to this computer yet.',
+        "This computer isn't linked to link-mac yet. Enter the remote password set "
+        'on that machine to connect.',
       ),
       findsOneWidget,
     );

@@ -8,14 +8,30 @@ import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/link_machine_screen.dart';
 
 class _FakeCliLink implements CliLink {
-  final Future<CliLinkImportResult> Function(String token) onImport;
-  _FakeCliLink(this.onImport);
+  final Future<CliLinkConnectResult> Function(
+    String machineId,
+    String password,
+  )
+  onConnect;
+  _FakeCliLink(this.onConnect);
 
   @override
-  Future<CliLinkImportResult> import(String token) => onImport(token);
+  Future<CliLinkConnectResult> connect(
+    String machineId,
+    String password, {
+    void Function(String stage)? onProgress,
+  }) => onConnect(machineId, password);
 
   @override
-  Future<CliLinkCreateResult> create() async => const CliLinkCreateResult();
+  Future<RemotePasswordSetResult> setRemotePassword(String password) async =>
+      const RemotePasswordSetResult();
+
+  @override
+  Future<RemotePasswordStatus> remotePasswordStatus() async =>
+      const RemotePasswordStatus(hasPassword: false);
+
+  @override
+  Future<String?> clearRemotePassword() async => null;
 
   @override
   Future<CliLinkListResult> list() async => const CliLinkListResult();
@@ -47,11 +63,11 @@ void main() {
     return notifier;
   }
 
-  testWidgets('shows a clear three-step guide for the target machine', (
+  testWidgets('shows a clear password prompt for the target machine', (
     tester,
   ) async {
     final notifier = notifierFor(
-      _FakeCliLink((_) async => const CliLinkImportResult()),
+      _FakeCliLink((_, _) async => const CliLinkConnectResult()),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -67,21 +83,13 @@ void main() {
     expect(find.text('Link this machine'), findsOneWidget);
     expect(
       find.text(
-        'remote-mac is online, but it is not linked to this computer yet.',
+        "This computer isn't linked to remote-mac yet. Enter the remote password set "
+        'on that machine to connect.',
       ),
       findsOneWidget,
     );
-    expect(find.text('On remote-mac, open Harness.'), findsOneWidget);
-    expect(
-      find.text('Go to the account menu and generate a code'),
-      findsOneWidget,
-    );
-    expect(find.text('Paste the code here'), findsOneWidget);
-    expect(find.text('Copy the code it shows you.'), findsOneWidget);
-    expect(find.textContaining('Account'), findsOneWidget);
-    expect(find.textContaining('Remote into another machine…'), findsOneWidget);
-    expect(find.textContaining('Generate'), findsOneWidget);
-    expect(find.text('Paste code from remote-mac'), findsOneWidget);
+    expect(find.byKey(const Key('remote-password-connect-field')), findsOneWidget);
+    expect(find.text('Remote password for remote-mac'), findsOneWidget);
     expect(find.text('Link machine'), findsOneWidget);
     expect(
       find.text(
@@ -103,7 +111,7 @@ void main() {
 
   testWidgets('tapping Close dismisses the link prompt', (tester) async {
     final notifier = notifierFor(
-      _FakeCliLink((_) async => const CliLinkImportResult()),
+      _FakeCliLink((_, _) async => const CliLinkConnectResult()),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -124,13 +132,13 @@ void main() {
   });
 
   testWidgets(
-    'submitting a token calls importLinkToken and clears needsLink on success',
+    'submitting a password calls connectWithPassword and clears needsLink on success',
     (tester) async {
-      String? importedToken;
+      String? connectedPassword;
       final notifier = notifierFor(
-        _FakeCliLink((token) async {
-          importedToken = token;
-          return CliLinkImportResult(linkedMachineId: machine.machineId);
+        _FakeCliLink((machineId, password) async {
+          connectedPassword = password;
+          return CliLinkConnectResult(linkedMachineId: machineId);
         }),
       );
       await tester.pumpWidget(
@@ -145,13 +153,13 @@ void main() {
       );
 
       await tester.enterText(
-        find.byKey(const Key('link-token-field')),
-        'tok_abc123',
+        find.byKey(const Key('remote-password-connect-field')),
+        'correct horse battery staple',
       );
-      await tester.tap(find.byKey(const Key('link-import-button')));
+      await tester.tap(find.byKey(const Key('remote-password-connect-button')));
       await tester.pumpAndSettle();
 
-      expect(importedToken, 'tok_abc123');
+      expect(connectedPassword, 'correct horse battery staple');
       expect(notifier.machineStates[machine.machineId]!.needsLink, isFalse);
       notifier.dispose();
     },
@@ -162,8 +170,8 @@ void main() {
   ) async {
     final notifier = notifierFor(
       _FakeCliLink(
-        (_) async => const CliLinkImportResult(
-          error: 'That token is invalid, expired, or missing a machine id.',
+        (_, _) async => const CliLinkConnectResult(
+          error: 'Incorrect password',
         ),
       ),
     );
@@ -179,16 +187,13 @@ void main() {
     );
 
     await tester.enterText(
-      find.byKey(const Key('link-token-field')),
-      'bad-token',
+      find.byKey(const Key('remote-password-connect-field')),
+      'wrong-password',
     );
-    await tester.tap(find.byKey(const Key('link-import-button')));
+    await tester.tap(find.byKey(const Key('remote-password-connect-button')));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('That token is invalid, expired, or missing a machine id.'),
-      findsOneWidget,
-    );
+    expect(find.text('Incorrect password'), findsOneWidget);
     expect(notifier.machineStates[machine.machineId]!.needsLink, isTrue);
     notifier.dispose();
   });

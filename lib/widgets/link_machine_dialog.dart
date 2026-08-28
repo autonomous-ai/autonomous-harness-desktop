@@ -1,16 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../auth/cli_link.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
-/// Generates a code for THIS machine, for another machine to paste into its own `LinkMachineScreen`
-/// ("Link this machine"). Pasting a code to link a specific machine lives only there — reached by
-/// selecting that machine (see `machine_rail.dart`'s `selectMachineForSetup`), not duplicated here —
-/// so this dialog has exactly one job: generate, and say where to take the result.
+/// Sets (or manages) THIS machine's remote password, so another machine can later connect to it
+/// with `harness link connect` — no code to copy/paste. To link a specific machine FROM here
+/// instead, select it in the sidebar (see `machine_rail.dart`'s `selectMachineForSetup`), not
+/// duplicated here — that flow lives in `link_machine_screen.dart`.
 Future<void> showLinkMachineDialog(BuildContext context, AppNotifier notifier) {
   return showDialog<void>(
     context: context,
@@ -28,43 +27,125 @@ class _LinkMachineDialog extends StatefulWidget {
 }
 
 class _LinkMachineDialogState extends State<_LinkMachineDialog> {
-  bool _generating = false;
-  CliLinkCreateResult? _generated;
-  String? _generateError;
-  bool _copied = false;
+  bool _statusLoading = true;
+  RemotePasswordStatus? _status;
+  String? _statusError;
+
+  // Set/change form state.
+  bool _editing = false;
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  bool _obscure = true;
+  bool _submitting = false;
+  String? _formError;
+
+  bool _clearing = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(widget.notifier.refreshLinkedMachines());
+    unawaited(_loadStatus());
   }
 
-  Future<void> _generate() async {
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadStatus() async {
     setState(() {
-      _generating = true;
-      _generateError = null;
+      _statusLoading = true;
+      _statusError = null;
     });
-    final result = await widget.notifier.createLinkToken();
+    final status = await widget.notifier.remotePasswordStatus();
     if (!mounted) return;
     setState(() {
-      _generating = false;
-      if (result.error != null || result.token == null) {
-        _generateError =
-            result.error ?? 'Could not read the code from the CLI.';
+      _statusLoading = false;
+      if (status.error != null) {
+        _statusError = status.error;
       } else {
-        _generated = result;
+        _status = status;
+        _editing = !status.hasPassword;
       }
     });
   }
 
-  Future<void> _copyToken() async {
-    final token = _generated?.token;
-    if (token == null) return;
-    await Clipboard.setData(ClipboardData(text: token));
+  Future<void> _submit() async {
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+    if (password.isEmpty) {
+      setState(() => _formError = 'Enter a password');
+      return;
+    }
+    if (password != confirm) {
+      setState(() => _formError = 'Passwords do not match');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _formError = null;
+    });
+    final result = await widget.notifier.setRemotePassword(password);
     if (!mounted) return;
-    setState(() => _copied = true);
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _copied = false);
+    setState(() {
+      _submitting = false;
+      if (result.error != null) {
+        _formError = result.error;
+      } else {
+        _editing = false;
+        _status = RemotePasswordStatus(
+          hasPassword: true,
+          fingerprint: result.fingerprint,
+          setAt: DateTime.now(),
+        );
+        _passwordController.clear();
+        _confirmController.clear();
+      }
+    });
+  }
+
+  Future<void> _confirmClear() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear remote password'),
+        content: const SizedBox(
+          width: 360,
+          child: Text(
+            'Clear the remote password for this machine? Anyone using it to connect will lose '
+            "remote access until you set a new one. This can't be undone.",
+            style: TextStyle(fontFamily: AppFonts.sans, fontSize: 13.5),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+          ),
+          FilledButton(
+            key: const Key('remote-password-clear-confirm-button'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear', style: TextStyle(fontSize: 13.5)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _clearing = true);
+    final error = await widget.notifier.clearRemotePassword();
+    if (!mounted) return;
+    setState(() {
+      _clearing = false;
+      if (error != null) {
+        _statusError = error;
+      } else {
+        _status = const RemotePasswordStatus(hasPassword: false);
+        _editing = true;
+      }
     });
   }
 
@@ -80,10 +161,9 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "Generate a code here so another machine can link to this "
-                "one. To link a specific machine from here instead, select "
-                "it in the sidebar — you'll get a \"Link this machine\" "
-                "guide to paste a code there.",
+                "Set a remote password here so another machine can connect to this one. To link "
+                "a specific machine from here instead, select it in the sidebar — you'll get a "
+                "\"Link this machine\" guide to enter the password there.",
                 style: TextStyle(
                   fontFamily: AppFonts.sans,
                   fontFamilyFallback: AppFonts.sansFallback,
@@ -94,41 +174,15 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
               ),
               const SizedBox(height: 16),
               _ActionCard(
-                icon: Icons.login,
+                icon: Icons.password,
                 title: 'Let another machine control this one',
                 steps: const [
-                  'Click Generate below to create a code for this machine.',
-                  "On the OTHER machine, select this machine in the "
-                      "sidebar (it'll show 'link required') and paste the "
-                      "code there.",
+                  'Set a remote password for this machine below.',
+                  "On the OTHER machine, select this machine in the sidebar (it'll show "
+                      "'link required') and enter the same password there.",
                 ],
-                error: _generateError,
-                child: _generated == null
-                    ? Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton(
-                          key: const Key('link-generate-button'),
-                          onPressed: _generating ? null : _generate,
-                          child: _generating
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text(
-                                  'Generate',
-                                  style: TextStyle(fontSize: 13.5),
-                                ),
-                        ),
-                      )
-                    : _GeneratedToken(
-                        token: _generated!.token!,
-                        fingerprint: _generated!.fingerprint,
-                        copied: _copied,
-                        onCopy: _copyToken,
-                      ),
+                error: _formError ?? _statusError,
+                child: _buildPasswordSection(),
               ),
               const SizedBox(height: 18),
               Text(
@@ -203,6 +257,47 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
           child: const Text('Close', style: TextStyle(fontSize: 13.5)),
         ),
       ],
+    );
+  }
+
+  Widget _buildPasswordSection() {
+    if (_statusLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    final status = _status;
+    if (!_editing && status != null && status.hasPassword) {
+      return _RemotePasswordSummary(
+        status: status,
+        clearing: _clearing,
+        onChange: () => setState(() {
+          _editing = true;
+          _formError = null;
+        }),
+        onClear: _confirmClear,
+      );
+    }
+    return _RemotePasswordForm(
+      passwordController: _passwordController,
+      confirmController: _confirmController,
+      obscure: _obscure,
+      onToggleObscure: () => setState(() => _obscure = !_obscure),
+      submitting: _submitting,
+      onSubmit: _submit,
+      onCancel: (status != null && status.hasPassword)
+          ? () => setState(() {
+              _editing = false;
+              _formError = null;
+              _passwordController.clear();
+              _confirmController.clear();
+            })
+          : null,
     );
   }
 }
@@ -322,17 +417,25 @@ class _ActionStep extends StatelessWidget {
   }
 }
 
-class _GeneratedToken extends StatelessWidget {
-  final String token;
-  final String? fingerprint;
-  final bool copied;
-  final VoidCallback onCopy;
+/// Two obscured fields (new + confirm) plus a "Set" button — used both for setting a password
+/// the first time and, via [onCancel], for changing an existing one.
+class _RemotePasswordForm extends StatelessWidget {
+  final TextEditingController passwordController;
+  final TextEditingController confirmController;
+  final bool obscure;
+  final VoidCallback onToggleObscure;
+  final bool submitting;
+  final VoidCallback onSubmit;
+  final VoidCallback? onCancel;
 
-  const _GeneratedToken({
-    required this.token,
-    required this.fingerprint,
-    required this.copied,
-    required this.onCopy,
+  const _RemotePasswordForm({
+    required this.passwordController,
+    required this.confirmController,
+    required this.obscure,
+    required this.onToggleObscure,
+    required this.submitting,
+    required this.onSubmit,
+    this.onCancel,
   });
 
   @override
@@ -340,44 +443,103 @@ class _GeneratedToken extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: onCopy,
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              border: Border.all(color: AppColors.border),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    token,
-                    maxLines: 2,
-                    style: TextStyle(
-                      fontFamily: AppFonts.mono,
-                      fontSize: 11,
-                      color: AppColors.text,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Icon(
-                  copied ? Icons.check : Icons.copy,
-                  size: 15,
-                  color: copied ? AppColors.success : AppColors.mutedStrong,
-                ),
-              ],
+        TextField(
+          key: const Key('remote-password-field'),
+          controller: passwordController,
+          obscureText: obscure,
+          style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+          decoration: InputDecoration(
+            hintText: 'New remote password',
+            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            prefixIcon: const Icon(Icons.password, size: 17),
+            suffixIcon: IconButton(
+              icon: Icon(obscure ? Icons.visibility : Icons.visibility_off, size: 17),
+              onPressed: onToggleObscure,
             ),
           ),
         ),
-        if (fingerprint != null) ...[
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('remote-password-confirm-field'),
+          controller: confirmController,
+          obscureText: obscure,
+          style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+          decoration: InputDecoration(
+            hintText: 'Confirm password',
+            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            prefixIcon: const Icon(Icons.password, size: 17),
+          ),
+          onSubmitted: (_) => onSubmit(),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            if (onCancel != null) ...[
+              TextButton(
+                onPressed: submitting ? null : onCancel,
+                child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+              ),
+              const SizedBox(width: 8),
+            ],
+            FilledButton(
+              key: const Key('remote-password-set-button'),
+              onPressed: submitting ? null : onSubmit,
+              child: submitting
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Set', style: TextStyle(fontSize: 13.5)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Shown once a remote password is already set: the fingerprint to verify on the connecting
+/// side, when it was set, and the "Change"/"Clear" actions.
+class _RemotePasswordSummary extends StatelessWidget {
+  final RemotePasswordStatus status;
+  final bool clearing;
+  final VoidCallback onChange;
+  final VoidCallback onClear;
+
+  const _RemotePasswordSummary({
+    required this.status,
+    required this.clearing,
+    required this.onChange,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.check_circle, size: 15, color: AppColors.success),
+            const SizedBox(width: 6),
+            Text(
+              'Remote password is set',
+              style: TextStyle(
+                fontFamily: AppFonts.sans,
+                fontFamilyFallback: AppFonts.sansFallback,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text,
+              ),
+            ),
+          ],
+        ),
+        if (status.fingerprint != null) ...[
           const SizedBox(height: 8),
           Text(
-            'This machine\'s fingerprint — verify it matches on the other side:',
+            "This machine's fingerprint — verify it matches on the other side:",
             style: TextStyle(
               fontFamily: AppFonts.sans,
               fontFamilyFallback: AppFonts.sansFallback,
@@ -387,7 +549,7 @@ class _GeneratedToken extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           SelectableText(
-            fingerprint!,
+            status.fingerprint!,
             style: TextStyle(
               fontFamily: AppFonts.mono,
               fontSize: 12,
@@ -396,18 +558,43 @@ class _GeneratedToken extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 4),
-        Text(
-          'Valid 7 days.',
-          style: TextStyle(
-            fontFamily: AppFonts.sans,
-            fontFamilyFallback: AppFonts.sansFallback,
-            fontSize: 10.5,
-            color: AppColors.muted,
+        if (status.setAt != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Set on ${_formatDate(status.setAt!)}.',
+            style: TextStyle(
+              fontFamily: AppFonts.sans,
+              fontFamilyFallback: AppFonts.sansFallback,
+              fontSize: 10.5,
+              color: AppColors.muted,
+            ),
           ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton(
+              key: const Key('remote-password-clear-button'),
+              onPressed: clearing ? null : onClear,
+              child: const Text('Clear', style: TextStyle(fontSize: 13.5)),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              key: const Key('remote-password-change-button'),
+              onPressed: clearing ? null : onChange,
+              child: const Text('Change', style: TextStyle(fontSize: 13.5)),
+            ),
+          ],
         ),
       ],
     );
+  }
+
+  String _formatDate(DateTime date) {
+    final local = date.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)}';
   }
 }
 

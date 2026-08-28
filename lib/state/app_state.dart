@@ -78,8 +78,9 @@ class MachineState {
   bool localOnly = false;
   LocalCliEndpoint? localEndpoint;
   // Set when the local CLI's relay reports NO_PEER_LINK for this (non-local) machine — it needs
-  // `harness link import <token>` before it can connect. The CLI owns E2EE entirely now; this is
-  // just "is trust established yet", not a crypto/pairing state the app has any data for.
+  // `harness link connect <machineId>` (the other machine's remote password) before it can
+  // connect. The CLI owns E2EE entirely now; this is just "is trust established yet", not a
+  // crypto/pairing state the app has any data for.
   bool needsLink = false;
   List<Agent> agents = [];
   AgentLoadStatus agentLoadStatus = AgentLoadStatus.idle;
@@ -134,7 +135,7 @@ class AppNotifier extends ChangeNotifier {
   final DesktopUpdater? desktopUpdater;
   final Map<String, Timer> _turnActivityWatchdogs = {};
   final Map<String, Timer> _offlineRetryTimers = {};
-  // Periodic retry for a machine the relay reported NO_PEER_LINK for — a `harness link import` run
+  // Periodic retry for a machine the relay reported NO_PEER_LINK for — a `harness link connect` run
   // in a terminal (or another app instance) has no way to notify this one, so this is what makes the
   // app pick up a fresh link within a few seconds instead of only on the next manual click/restart.
   final Map<String, Timer> _linkRetryTimers = {};
@@ -727,7 +728,7 @@ class AppNotifier extends ChangeNotifier {
         final machine = machineStates[machineId];
         if (machine == null || code != 4404) return;
         // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
-        // A `harness link import` run in a terminal (or another app instance) has no way to notify
+        // A `harness link connect` run in a terminal (or another app instance) has no way to notify
         // this one directly, so poll every few seconds until it's picked up instead of waiting for
         // the user to click back into this machine.
         machine.needsLink = true;
@@ -892,20 +893,18 @@ class AppNotifier extends ChangeNotifier {
   Future<void> retryOfflineMachine(String machineId) =>
       _pollOfflineMachine(machineId);
 
-  /// Runs `harness link import <token>` (via [CliLink]) for a machine the relay reported
-  /// `NO_PEER_LINK` for, then reconnects it. Returns null on success, or an error message to show
-  /// inline. The app never sees the token's cryptographic contents — this just shells the exact
-  /// command out to the CLI, the same as running it in a terminal would.
-  Future<String?> importLinkToken(String machineId, String token) async {
-    final trimmed = token.trim();
-    if (trimmed.isEmpty) return 'Paste a token first';
-    final result = await cliLink.import(trimmed);
+  /// Runs `harness link connect <machineId> --stdin --json` (via [CliLink]) for a machine the
+  /// relay reported `NO_PEER_LINK` for, then reconnects it. Returns null on success, or an error
+  /// message to show inline. The app never sees the password's cryptographic use — this just
+  /// pipes it to the CLI on stdin, the same as typing it at a terminal prompt would.
+  Future<String?> connectWithPassword(
+    String machineId,
+    String password, {
+    void Function(String stage)? onProgress,
+  }) async {
+    if (password.isEmpty) return 'Enter the remote password first';
+    final result = await cliLink.connect(machineId, password, onProgress: onProgress);
     if (result.error != null) return result.error;
-    // Reconnect whichever machine the token actually linked — a token pasted on this screen isn't
-    // guaranteed to be FOR this screen's machine (wrong paste, or a token copied for a different
-    // one), so blindly clearing this screen's needsLink regardless would silently leave the real
-    // target still stuck. Fall back to the screen's own machineId only if the CLI's output didn't
-    // parse (unexpected format), so a genuinely-successful import is never left showing no effect.
     final targetId = result.linkedMachineId ?? machineId;
     final state = machineStates[targetId];
     if (state != null) {
@@ -917,12 +916,6 @@ class AppNotifier extends ChangeNotifier {
       await _pool?.closeMachine(targetId);
       _connectMachine(state);
     }
-    // machineId is only a hint from a screen scoped to one machine (LinkMachineScreen) — the
-    // general link dialog calls this with '' since it has no specific machine in mind, and any
-    // successful link there is a plain success, not a "wrong machine" surprise.
-    if (machineId.isNotEmpty && targetId != machineId) {
-      return 'Linked machine $targetId (not this one — that token was for a different machine).';
-    }
     return null;
   }
 
@@ -930,9 +923,19 @@ class AppNotifier extends ChangeNotifier {
   bool linkedMachinesLoading = false;
   String? linkedMachinesError;
 
-  /// Mints a fresh `harness link create` token for THIS machine — for another machine's
-  /// `link import` (or the same dialog on their side) to consume.
-  Future<CliLinkCreateResult> createLinkToken() => cliLink.create();
+  /// Sets (or replaces) THIS machine's persistent remote password (`harness remote-password
+  /// set --stdin --json`) — another machine later connects with `connectWithPassword` using the
+  /// same password, no token copy/paste involved.
+  Future<RemotePasswordSetResult> setRemotePassword(String password) =>
+      cliLink.setRemotePassword(password);
+
+  /// Queries THIS machine's remote-password state (`harness remote-password status --json`).
+  Future<RemotePasswordStatus> remotePasswordStatus() =>
+      cliLink.remotePasswordStatus();
+
+  /// Clears THIS machine's remote password (`harness remote-password clear --json`). Returns null
+  /// on success.
+  Future<String?> clearRemotePassword() => cliLink.clearRemotePassword();
 
   /// Refreshes the "machines this one trusts" list (`harness link list`).
   Future<void> refreshLinkedMachines() async {
