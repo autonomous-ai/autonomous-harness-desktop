@@ -52,3 +52,85 @@ app.*.map.json
 # They inline whole font files to stay openable straight off disk, so they are
 # megabytes of base64 that git would keep forever for a page nobody reads twice.
 /mockup/
+
+# ---------------------------------------------------------------------------
+# Local / personal — machine- or developer-specific, never pushed
+# ---------------------------------------------------------------------------
+
+# AI coding assistants (chat history, local rules, per-dev config).
+# .claude/ contents are ignored by default; whitelist below anything the team
+# should actually share (drop the leading "#" to start tracking it).
+.claude/*
+#!.claude/settings.json
+#!.claude/commands/
+#!.claude/agents/
+#!.claude/skills/
+.claude/settings.local.json
+CLAUDE.local.md
+AGENTS.local.md
+
+.cursor/
+.cursorignore
+.windsurf/
+.codeium/
+.continue/
+.cline/
+.roo/
+.kilocode/
+.trae/
+.junie/
+.gemini/
+.opencode/
+.crush/
+.amp/
+.qodo/
+.specstory/
+.serena/
+.aider*
+.mcp.local.json
+
+# Editors / IDEs — personal workspace state
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.code-workspace
+.fleet/
+.zed/
+.nova/
+*.sublime-project
+*.sublime-workspace
+
+# Xcode per-user state (macOS runner)
+**/xcuserdata/
+**/*.xcuserdatad
+**/DerivedData/
+
+# OS junk
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+
+# Secrets & signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.key
+*.jks
+*.keystore
+key.properties
+secrets/
+service-account*.json
+
+# Local scratch — notes, experiments, throwaway scripts
+scratch/
+tmp/
+notes/
+*.local
+*.local.*
+TODO.local.md
