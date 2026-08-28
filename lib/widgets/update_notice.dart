@@ -210,104 +210,117 @@ class ForcedUpdateScreen extends StatelessWidget {
     final failed = error != null && !installing;
     final mark = failed ? grid.AppPalette.warn : grid.AppPalette.accentOnSurface;
 
+    // Material, because this screen is handed to MaterialApp's home slot RAW while every one of its
+    // siblings there brings its own — LoginScreen, HomeScreen and EnvironmentSetupScreen are Scaffolds
+    // and the bootstrapping branch is literally `const Scaffold(...)`. Without one, MaterialApp falls
+    // back to _errorTextStyle, whose debugLabel says the quiet part out loud: "fallback style; consider
+    // putting your text in a Material".
+    //
+    // It did NOT look like a missing-Material error, which is why it survived: every Text here sets its
+    // own colour, size and weight, so the fallback's red 48px monospace was overridden — but nothing
+    // sets `decoration`, so its yellow double underline came through and read as a deliberate, baffling
+    // style choice on every line. Transparent so the ColoredBox stays the ground, as UpdateNotice does.
     return ColoredBox(
       color: grid.AppPalette.windowBg,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: grid.AppGlass.surfaceFill,
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(color: grid.AppGlass.hair),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: mark.withValues(alpha: 0.13),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    alignment: Alignment.center,
-                    child: installing
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
+      child: Material(
+        color: Colors.transparent,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: grid.AppGlass.surfaceFill,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: grid.AppGlass.hair),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: mark.withValues(alpha: 0.13),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: installing
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: mark,
+                              ),
+                            )
+                          : Icon(
+                              failed
+                                  ? LucideIcons.triangleAlert300
+                                  : LucideIcons.arrowDownToLine300,
+                              size: 20,
                               color: mark,
                             ),
-                          )
-                        : Icon(
-                            failed
-                                ? LucideIcons.triangleAlert300
-                                : LucideIcons.arrowDownToLine300,
-                            size: 20,
-                            color: mark,
-                          ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    installing
-                        ? 'Installing Harness ${update.version}…'
-                        : failed
-                        ? 'Update failed'
-                        : 'Harness ${update.version} is required',
-                    style: TextStyle(
-                      color: grid.AppPalette.textPrimary,
-                      fontSize: 17,
-                      fontWeight: grid.AppFont.semibold,
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    installing
-                        ? 'Don’t quit Harness. It will restart on its own.'
-                        : failed
-                        ? error
-                        : 'This version of Harness can no longer be used. '
-                              'Update to continue.',
-                    style: TextStyle(
-                      color: grid.AppPalette.textSecondary,
-                      fontSize: 12.5,
-                      height: 1.5,
-                    ),
-                  ),
-                  if (!installing) ...[
                     const SizedBox(height: 14),
-                    Divider(height: 1, color: grid.AppGlass.hair),
-                    const SizedBox(height: 10),
-                    _Fact(label: 'Installed', value: _InstalledVersion()),
-                    const SizedBox(height: 6),
-                    _Fact(label: 'New version', value: Text(update.version)),
-                    if (update.size > 0) ...[
-                      const SizedBox(height: 6),
-                      _Fact(
-                        label: 'Download',
-                        value: Text(formatDownloadSize(update.size)),
+                    Text(
+                      installing
+                          ? 'Installing Harness ${update.version}…'
+                          : failed
+                          ? 'Update failed'
+                          : 'Harness ${update.version} is required',
+                      style: TextStyle(
+                        color: grid.AppPalette.textPrimary,
+                        fontSize: 17,
+                        fontWeight: grid.AppFont.semibold,
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _NoticeAction(
-                          key: const Key('forced-update-install-button'),
-                          label: failed ? 'Try again' : 'Update now',
-                          kind: _ActionKind.primary,
-                          onPressed: () =>
-                              unawaited(notifier.installAvailableUpdate()),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      installing
+                          ? 'Don’t quit Harness. It will restart on its own.'
+                          : failed
+                          ? error
+                          : 'This version of Harness can no longer be used. '
+                                'Update to continue.',
+                      style: TextStyle(
+                        color: grid.AppPalette.textSecondary,
+                        fontSize: 12.5,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (!installing) ...[
+                      const SizedBox(height: 14),
+                      Divider(height: 1, color: grid.AppGlass.hair),
+                      const SizedBox(height: 10),
+                      _Fact(label: 'Installed', value: _InstalledVersion()),
+                      const SizedBox(height: 6),
+                      _Fact(label: 'New version', value: Text(update.version)),
+                      if (update.size > 0) ...[
+                        const SizedBox(height: 6),
+                        _Fact(
+                          label: 'Download',
+                          value: Text(formatDownloadSize(update.size)),
                         ),
                       ],
-                    ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _NoticeAction(
+                            key: const Key('forced-update-install-button'),
+                            label: failed ? 'Try again' : 'Update now',
+                            kind: _ActionKind.primary,
+                            onPressed: () =>
+                                unawaited(notifier.installAvailableUpdate()),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
