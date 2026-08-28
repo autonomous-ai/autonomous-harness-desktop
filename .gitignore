@@ -131,6 +131,7 @@ service-account*.json
 scratch/
 tmp/
 notes/
+docs/
 *.local
 *.local.*
 TODO.local.md
