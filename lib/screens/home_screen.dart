@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
@@ -13,6 +14,7 @@ import '../shortcuts/app_shortcuts.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
+import '../widgets/window_chrome.dart';
 
 class HomeScreen extends StatefulWidget {
   final AppNotifier notifier;
@@ -436,24 +438,29 @@ class _ErrorStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 34),
-      color: const Color(0xff26131b),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, size: 15, color: AppColors.danger),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: AppColors.textSoft, fontSize: 10),
+    // Pinned to the window's top edge, where the traffic lights float — so
+    // the text starts past them, and the strip drags the window like the rest
+    // of that edge.
+    return DragToMoveArea(
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        color: const Color(0xff26131b),
+        padding: EdgeInsets.fromLTRB(12 + trafficLightClearance, 7, 12, 7),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline, size: 15, color: AppColors.danger),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppColors.textSoft, fontSize: 10),
+              ),
             ),
-          ),
-          TextButton(onPressed: onRetry, child: const Text('RETRY')),
-        ],
+            TextButton(onPressed: onRetry, child: const Text('RETRY')),
+          ],
+        ),
       ),
     );
   }

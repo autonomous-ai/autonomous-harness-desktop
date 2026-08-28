@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 
@@ -502,38 +503,42 @@ class _TerminalHeader extends StatelessWidget {
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       ),
     };
-    return SizedBox(
-      height: 46,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
-          children: [
-            EngineMark(engine: session.engineId, size: 17),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                session.agentName,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontFamily: AppFonts.sans,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+    // A drag handle as well as a title: with the title bar hidden this strip
+    // is the top of the window.
+    return DragToMoveArea(
+      child: SizedBox(
+        height: 46,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              EngineMark(engine: session.engineId, size: 17),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  session.agentName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontFamily: AppFonts.sans,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            if (session.status == TerminalSessionStatus.controlling)
-              Padding(padding: const EdgeInsets.all(4), child: statusMark)
-            else
-              Tooltip(
-                message: statusLabel,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: statusMark,
+              if (session.status == TerminalSessionStatus.controlling)
+                Padding(padding: const EdgeInsets.all(4), child: statusMark)
+              else
+                Tooltip(
+                  message: statusLabel,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: statusMark,
+                  ),
                 ),
-              ),
-            if (onClose != null) PaneCloseButton(onPressed: onClose!),
-          ],
+              if (onClose != null) PaneCloseButton(onPressed: onClose!),
+            ],
+          ),
         ),
       ),
     );

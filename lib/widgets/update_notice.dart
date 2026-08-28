@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -8,6 +9,7 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 import '../update/desktop_updater.dart';
 import '../update/manual_update_check.dart';
+import 'window_chrome.dart';
 
 /// "18.4 MB" — a download the user is about to authorise, in the unit they
 /// think in. Bytes are what the manifest carries; nobody reads 19293798.
@@ -70,120 +72,130 @@ class UpdateNotice extends StatelessWidget {
       message = 'Harness ${update.version} is available';
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: tint,
-          border: Border(bottom: BorderSide(color: rule)),
-        ),
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 7, 10, 7),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: installing
-                        ? CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: grid.AppPalette.accentOnSurface,
-                          )
-                        : Icon(
-                            failed
-                                ? LucideIcons.triangleAlert300
-                                : LucideIcons.arrowDownToLine300,
-                            size: 16,
-                            color: markColor,
-                          ),
-                  ),
-                  const SizedBox(width: 10),
-                  // ONE expanding child, holding the whole message. A
-                  // Flexible text beside a Spacer splits the free space
-                  // between them, which leaves the actions stranded
-                  // mid-band instead of anchored to the right edge.
-                  //
-                  // Inside it the sentence yields before the size does: a
-                  // truncated sentence still leaves both readable, whereas
-                  // wrapping one would push the buttons out of the band.
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            message,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: grid.AppPalette.textPrimary,
-                              fontSize: 12.5,
+    return DragToMoveArea(
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tint,
+            border: Border(bottom: BorderSide(color: rule)),
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                // Starts clear of the traffic lights: this band is the top edge
+                // of the window when it shows, and the lights float over it.
+                padding: EdgeInsets.fromLTRB(
+                  14 + trafficLightClearance,
+                  7,
+                  10,
+                  7,
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: installing
+                          ? CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: grid.AppPalette.accentOnSurface,
+                            )
+                          : Icon(
+                              failed
+                                  ? LucideIcons.triangleAlert300
+                                  : LucideIcons.arrowDownToLine300,
+                              size: 16,
+                              color: markColor,
+                            ),
+                    ),
+                    const SizedBox(width: 10),
+                    // ONE expanding child, holding the whole message. A
+                    // Flexible text beside a Spacer splits the free space
+                    // between them, which leaves the actions stranded
+                    // mid-band instead of anchored to the right edge.
+                    //
+                    // Inside it the sentence yields before the size does: a
+                    // truncated sentence still leaves both readable, whereas
+                    // wrapping one would push the buttons out of the band.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              message,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: grid.AppPalette.textPrimary,
+                                fontSize: 12.5,
+                              ),
                             ),
                           ),
-                        ),
-                        if (!installing && !failed && update.size > 0) ...[
-                          const SizedBox(width: 8),
-                          Text(
-                            '· ${formatDownloadSize(update.size)}',
-                            style: TextStyle(
-                              color: grid.AppPalette.textFaint,
-                              fontSize: 11.5,
+                          if (!installing && !failed && update.size > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '· ${formatDownloadSize(update.size)}',
+                              style: TextStyle(
+                                color: grid.AppPalette.textFaint,
+                                fontSize: 11.5,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  if (failed) ...[
-                    _NoticeAction(
-                      label: 'Dismiss',
-                      onPressed: notifier.dismissUpdateError,
-                    ),
-                    const SizedBox(width: 6),
-                    _NoticeAction(
-                      key: const Key('retry-update-button'),
-                      label: 'Try again',
-                      kind: _ActionKind.ghost,
-                      onPressed: () =>
-                          unawaited(notifier.installAvailableUpdate()),
-                    ),
-                  ] else ...[
-                    _NoticeAction(
-                      key: const Key('skip-update-button'),
-                      label: 'Skip this version',
-                      onPressed: installing
-                          ? null
-                          : notifier.skipAvailableUpdate,
-                    ),
-                    const SizedBox(width: 6),
-                    _NoticeAction(
-                      key: const Key('install-update-button'),
-                      label: 'Update',
-                      kind: _ActionKind.primary,
-                      onPressed: installing
-                          ? null
-                          : () => unawaited(notifier.installAvailableUpdate()),
-                    ),
+                    const SizedBox(width: 12),
+                    if (failed) ...[
+                      _NoticeAction(
+                        label: 'Dismiss',
+                        onPressed: notifier.dismissUpdateError,
+                      ),
+                      const SizedBox(width: 6),
+                      _NoticeAction(
+                        key: const Key('retry-update-button'),
+                        label: 'Try again',
+                        kind: _ActionKind.ghost,
+                        onPressed: () =>
+                            unawaited(notifier.installAvailableUpdate()),
+                      ),
+                    ] else ...[
+                      _NoticeAction(
+                        key: const Key('skip-update-button'),
+                        label: 'Skip this version',
+                        onPressed: installing
+                            ? null
+                            : notifier.skipAvailableUpdate,
+                      ),
+                      const SizedBox(width: 6),
+                      _NoticeAction(
+                        key: const Key('install-update-button'),
+                        label: 'Update',
+                        kind: _ActionKind.primary,
+                        onPressed: installing
+                            ? null
+                            : () =>
+                                  unawaited(notifier.installAvailableUpdate()),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            // Indeterminate on purpose: downloadAndStage() resolves once, with
-            // no byte counter to read, so a percentage here would be invented.
-            if (installing)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LinearProgressIndicator(
-                  minHeight: 2,
-                  backgroundColor: Colors.transparent,
-                  color: grid.AppPalette.accentOnSurface,
                 ),
               ),
-          ],
+              // Indeterminate on purpose: downloadAndStage() resolves once, with
+              // no byte counter to read, so a percentage here would be invented.
+              if (installing)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: LinearProgressIndicator(
+                    minHeight: 2,
+                    backgroundColor: Colors.transparent,
+                    color: grid.AppPalette.accentOnSurface,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

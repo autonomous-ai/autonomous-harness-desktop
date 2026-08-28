@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth/auth_session.dart';
 import 'core/config.dart';
+import 'core/desktop_window.dart';
 import 'main.dart' show DesktopApp;
 import 'state/app_state.dart';
 
@@ -10,7 +11,8 @@ import 'state/app_state.dart';
 ///
 /// This entrypoint fails closed unless every value is supplied explicitly by
 /// `scripts/start-terminal-local-manual.sh`. It is not used by release builds.
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   const enabled = bool.fromEnvironment('LOCAL_TERMINAL_MANUAL');
   const apiBaseUrl = String.fromEnvironment('LOCAL_MANUAL_API_BASE_URL');
   const apiKey = String.fromEnvironment('LOCAL_MANUAL_API_KEY');
@@ -43,6 +45,7 @@ void main() {
     ),
   );
   notifier.bootstrap();
+  await configureDesktopWindow();
   runApp(
     ProviderScope(
       overrides: [appStateProvider.overrideWithValue(notifier)],

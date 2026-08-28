@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
 import '../shortcuts/app_shortcuts.dart';
@@ -359,26 +360,30 @@ class _PaneHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return SizedBox(
-      height: 46,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontFamily: AppFonts.sans,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+    // The pane's head is a drag handle too: with the title bar hidden it is
+    // the top edge of the window.
+    return DragToMoveArea(
+      child: SizedBox(
+        height: 46,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontFamily: AppFonts.sans,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            if (onClose != null) PaneCloseButton(onPressed: onClose!),
-          ],
+              if (onClose != null) PaneCloseButton(onPressed: onClose!),
+            ],
+          ),
         ),
       ),
     );

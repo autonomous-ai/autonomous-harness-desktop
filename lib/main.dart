@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/crash_log.dart';
+import 'core/desktop_window.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'state/app_state.dart';
@@ -18,12 +19,16 @@ import 'widgets/flash_firmware_dialog.dart';
 import 'core/startup.dart';
 import 'widgets/shortcuts_sheet.dart';
 import 'widgets/update_notice.dart';
+import 'widgets/window_chrome.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Before anything else can fail.
   CrashLog.install();
   await loadPersistedSettings();
+  // After the settings: the window shows itself once it is ready, and the
+  // first frame it shows must already wear the saved theme.
+  await configureDesktopWindow();
   runApp(const ProviderScope(child: DesktopApp()));
 }
 
@@ -154,6 +159,14 @@ class _RootShellState extends ConsumerState<RootShell> {
               screen = HomeScreen(notifier: app);
           }
         }
+        // Only the home shell carries its own drag handle and traffic-light
+        // clearance (the rail's head). Every other screen fills the window
+        // with a centred card, so the strip goes over it here, once, instead
+        // of inside each of them.
+        final framed =
+            app.status == AppStatus.authenticated && !app.hasForcedUpdate
+            ? screen
+            : FullWindowScreen(child: screen);
         // The band takes a row of its own rather than floating over one. As an
         // overlay it landed on the rail's head — covering the wordmark and the
         // three buttons beside it, which is the one strip of this window that
@@ -165,7 +178,7 @@ class _RootShellState extends ConsumerState<RootShell> {
                 app.status != AppStatus.bootstrapping &&
                 app.status != AppStatus.preparingEnvironment)
               UpdateNotice(notifier: app),
-            Expanded(child: screen),
+            Expanded(child: framed),
           ],
         );
       },

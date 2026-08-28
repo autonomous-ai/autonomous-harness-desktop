@@ -46,6 +46,7 @@ dependencies:
   xterm:
     path: third_party/xterm
   package_info_plus: ^10.2.1
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
