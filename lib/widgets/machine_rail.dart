@@ -15,6 +15,7 @@ import '../state/app_state.dart';
 import 'agent_drag.dart';
 import 'account_footer.dart';
 import 'engine_identity.dart';
+import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
 
 class MachineRail extends StatefulWidget {
@@ -452,6 +453,17 @@ class _MachineNodeState extends State<_MachineNode> {
                           _showRenameDialog();
                         },
                       ),
+                      if (state.isLocalMachine) ...[
+                        const AppMenuDivider(),
+                        AppMenuItem(
+                          icon: LucideIcons.keyRound300,
+                          label: 'Set remote password',
+                          onPressed: () {
+                            _machineMenu.close();
+                            unawaited(showLinkMachineDialog(context, notifier));
+                          },
+                        ),
+                      ],
                       if (!state.isLocalMachine) ...[
                         const AppMenuDivider(),
                         AppMenuItem(
