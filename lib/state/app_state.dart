@@ -2056,6 +2056,34 @@ class AppNotifier extends ChangeNotifier {
     await _attachSession(pane);
   }
 
+  /// Resolve a dial agent to the machine that owns it.
+  ///
+  /// New CLIs state the machine explicitly. Older CLIs only sent an agent id;
+  /// that is safe to retain only when the current snapshots contain exactly
+  /// one matching machine. The websocket carrying the event is always the
+  /// local daemon and is therefore not evidence that the agent is local.
+  String? _dialFocusMachine(Map<String, dynamic> payload, String agentId) {
+    final explicitMachineId = payload['machineId'];
+    if (explicitMachineId is String && explicitMachineId.isNotEmpty) {
+      final state = machineStates[explicitMachineId];
+      if (state == null ||
+          !state.agents.any((candidate) => candidate.id == agentId)) {
+        return null;
+      }
+      return explicitMachineId;
+    }
+
+    String? match;
+    for (final entry in machineStates.entries) {
+      if (!entry.value.agents.any((candidate) => candidate.id == agentId)) {
+        continue;
+      }
+      if (match != null) return null; // Ambiguous legacy event: do not guess.
+      match = entry.key;
+    }
+    return match;
+  }
+
   Future<void> _handleEvent(
     String machineId,
     Map<String, dynamic> event,
@@ -2111,7 +2139,10 @@ class AppNotifier extends ChangeNotifier {
         // offline machine and a missing id all fail exactly the way they already do.
         final agentId = payload['agentId'];
         if (agentId is String && agentId.isNotEmpty) {
-          unawaited(selectAgent(machineId, agentId));
+          final targetMachineId = _dialFocusMachine(payload, agentId);
+          if (targetMachineId != null) {
+            unawaited(selectAgent(targetMachineId, agentId));
+          }
         }
         break;
       case 'node_status':
