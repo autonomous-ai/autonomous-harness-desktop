@@ -903,7 +903,11 @@ class AppNotifier extends ChangeNotifier {
     void Function(String stage)? onProgress,
   }) async {
     if (password.isEmpty) return 'Enter the remote password first';
-    final result = await cliLink.connect(machineId, password, onProgress: onProgress);
+    final result = await cliLink.connect(
+      machineId,
+      password,
+      onProgress: onProgress,
+    );
     if (result.error != null) return result.error;
     final targetId = result.linkedMachineId ?? machineId;
     final state = machineStates[targetId];
@@ -1997,11 +2001,10 @@ class AppNotifier extends ChangeNotifier {
     for (final entry in entries) {
       panes.add(
         TerminalPane(
-            id: _nextPaneId++,
-            machineId: entry.machineId,
-            agentId: entry.agentId,
-          )
-          ..composerVisible = entry.composerVisible,
+          id: _nextPaneId++,
+          machineId: entry.machineId,
+          agentId: entry.agentId,
+        )..composerVisible = entry.composerVisible,
       );
     }
     focusedPaneId = panes.first.id;
@@ -2161,10 +2164,12 @@ class AppNotifier extends ChangeNotifier {
         final raw = payload['agent'];
         if (raw is Map) {
           try {
-            _upsertAgent(
-              machine,
-              Agent.fromJson(Map<String, dynamic>.from(raw)),
-            );
+            final agent = Agent.fromJson(Map<String, dynamic>.from(raw));
+            if (agent.terminalAvailable) {
+              _upsertAgent(machine, agent);
+            } else {
+              await _removeAgent(machine, agent.id);
+            }
           } catch (_) {
             unawaited(_loadMachineData(machine, force: true));
           }

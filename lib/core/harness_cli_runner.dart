@@ -139,11 +139,24 @@ class HarnessCliRunner {
         ? null
         : '$home${Platform.pathSeparator}.local${Platform.pathSeparator}bin';
     final path = environment['PATH'] ?? '';
-    return {
+    final commandEnvironment = <String, String>{
       ...environment,
       if (launcherDirectory != null)
         'PATH': path.isEmpty ? launcherDirectory : '$launcherDirectory:$path',
     };
+    final configuredLocale =
+        commandEnvironment['LC_ALL'] ??
+        commandEnvironment['LC_CTYPE'] ??
+        commandEnvironment['LANG'];
+    if ((Platform.isMacOS || Platform.isLinux) &&
+        (configuredLocale == null ||
+            !RegExp(
+              r'utf-?8',
+              caseSensitive: false,
+            ).hasMatch(configuredLocale))) {
+      commandEnvironment['LC_ALL'] = 'C.UTF-8';
+    }
+    return commandEnvironment;
   }
 }
 

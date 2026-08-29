@@ -60,6 +60,42 @@ void main() {
     );
   });
 
+  test(
+    'waits while a new CLI is still performing initial terminal discovery',
+    () async {
+      const computerId = '0123456789abcdef0123456789abcdef';
+      final identityFile = File('${scratch.path}/computer-id')
+        ..writeAsStringSync(computerId);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server!.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'computerId': computerId,
+            'discoveryReady': false,
+            'localWs': {
+              'path': '/api/local-ws',
+              'protocolVersion': 1,
+              'terminalProtocolVersion': 3,
+              'e2ee': false,
+            },
+          }),
+        );
+        await request.response.close();
+      });
+
+      final endpoint = await LocalCliDiscovery(
+        config: AppConfig(
+          apiBaseUrl: 'https://harness-api.autonomous.ai',
+          localCliBaseUrl: 'http://127.0.0.1:${server!.port}',
+        ),
+        identity: LocalMachineIdentity(computerIdFile: identityFile),
+      ).discover();
+
+      expect(endpoint, isNull);
+    },
+  );
+
   test('rejects non-loopback and mismatched status endpoints', () async {
     const computerId = 'abcdef0123456789abcdef0123456789';
     final identityFile = File('${scratch.path}/computer-id')
