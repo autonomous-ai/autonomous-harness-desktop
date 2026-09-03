@@ -125,7 +125,8 @@ class _FlashDialogState extends State<_FlashDialog> {
 
   String? _lastTrouble() {
     for (final line in _log.reversed) {
-      if (line.kind == FlashLineKind.error || line.kind == FlashLineKind.warning) {
+      if (line.kind == FlashLineKind.error ||
+          line.kind == FlashLineKind.warning) {
         return line.text.trim().replaceFirst(RegExp(r'^error:\s*'), '');
       }
     }
@@ -147,11 +148,8 @@ class _FlashDialogState extends State<_FlashDialog> {
     return PopScope(
       canPop: _phase != _Phase.flashing,
       child: Dialog(
-        backgroundColor: grid.AppGlass.surfaceFill,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(13),
-          side: BorderSide(color: grid.AppGlass.hair),
-        ),
+        // See the note on the other two dialogs: `dialogTheme` owns the
+        // fill, the radius and the absence of a rim.
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 540),
           child: Column(
@@ -179,7 +177,12 @@ class _FlashDialogState extends State<_FlashDialog> {
   // ---------------------------------------------------------------- header
 
   Widget _header() {
-    final (IconData? icon, Color tone, String title, String sub) = switch (_phase) {
+    final (
+      IconData? icon,
+      Color tone,
+      String title,
+      String sub,
+    ) = switch (_phase) {
       _Phase.probing => (
         null,
         grid.AppPalette.accentOnSurface,
@@ -196,8 +199,9 @@ class _FlashDialogState extends State<_FlashDialog> {
         LucideIcons.usb300,
         grid.AppPalette.warn,
         'No dial found',
-        _problem ?? 'Plug the dial into this Mac with a USB cable, then look '
-            'again.',
+        _problem ??
+            'Plug the dial into this Mac with a USB cable, then look '
+                'again.',
       ),
       _Phase.flashing => (
         null,
@@ -210,7 +214,9 @@ class _FlashDialogState extends State<_FlashDialog> {
       _Phase.done => (
         LucideIcons.circleCheck300,
         grid.AppPalette.online,
-        _version == null ? 'The dial is flashed' : 'circle $_version is on the dial',
+        _version == null
+            ? 'The dial is flashed'
+            : 'circle $_version is on the dial',
         'Harness is running again. Your machines are back.',
       ),
       _Phase.failed => (
@@ -229,7 +235,7 @@ class _FlashDialogState extends State<_FlashDialog> {
           height: 34,
           decoration: BoxDecoration(
             color: tone.withValues(alpha: 0.13),
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
           ),
           alignment: Alignment.center,
           child: icon == null
@@ -354,14 +360,18 @@ class _FlashDialogState extends State<_FlashDialog> {
         children: [
           Text(
             'More than one board is connected — pick one:',
-            style: TextStyle(color: grid.AppPalette.textSecondary, fontSize: 12),
+            style: TextStyle(
+              color: grid.AppPalette.textSecondary,
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 7),
-          for (final port in _ports) _PortChoice(
-            port: port,
-            selected: port == _port,
-            onTap: () => setState(() => _port = port),
-          ),
+          for (final port in _ports)
+            _PortChoice(
+              port: port,
+              selected: port == _port,
+              onTap: () => setState(() => _port = port),
+            ),
         ],
       ),
     );
@@ -374,7 +384,7 @@ class _FlashDialogState extends State<_FlashDialog> {
       decoration: BoxDecoration(
         color: grid.AppPalette.warn.withValues(alpha: 0.09),
         border: Border.all(color: grid.AppPalette.warn.withValues(alpha: 0.24)),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,7 +412,8 @@ class _FlashDialogState extends State<_FlashDialog> {
                     ),
                   ),
                   const TextSpan(
-                    text: 'The flasher has to close the serial port, so your '
+                    text:
+                        'The flasher has to close the serial port, so your '
                         'machines go offline for about a minute and come back '
                         'on their own.',
                   ),
@@ -438,7 +449,7 @@ class _FlashDialogState extends State<_FlashDialog> {
       margin: const EdgeInsets.only(top: 13),
       decoration: BoxDecoration(
         border: Border.all(color: grid.AppGlass.hair),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -532,7 +543,10 @@ class _FlashDialogState extends State<_FlashDialog> {
     switch (_phase) {
       case _Phase.probing:
         children.add(
-          _DialogButton(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+          _DialogButton(
+            label: 'Cancel',
+            onPressed: () => Navigator.pop(context),
+          ),
         );
       case _Phase.ready:
         children
@@ -734,7 +748,6 @@ class _DialogButton extends StatelessWidget {
     );
   }
 }
-
 
 /// One selectable serial port, when more than one board is plugged in.
 class _PortChoice extends StatelessWidget {

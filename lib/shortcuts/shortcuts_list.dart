@@ -51,7 +51,7 @@ class ShortcutsNote extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
       decoration: BoxDecoration(
         color: grid.AppSurface.accentWash,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
       ),
       child: Text(
         'Everything else belongs to the agent. Ctrl keys, Esc, Tab and ⌥⏎ go '

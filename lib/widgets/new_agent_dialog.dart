@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_select_field.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'engine_identity.dart';
@@ -82,6 +84,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Reads colour tokens, and lives in an Overlay — a top-down rebuild never
+    // reaches it, so it has to watch for itself or it strands on the palette it
+    // opened with.
+    grid.AppTheme.watch(context);
     final bypassFlag = kEngineBypassPermissionFlag[_engine];
     return AlertDialog(
       title: const Text('New agent'),
@@ -93,35 +99,30 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           children: [
             const _FieldLabel('ENGINE'),
             const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: _engine,
-              isExpanded: true,
-              items: [
+            // The app's own picker, not `DropdownButtonFormField`.
+            //
+            // Material's dropdown renders its own popup, anchors it OVER the
+            // field instead of under it, forces the panel to the field's width,
+            // and comes out square-cornered and edge-to-edge whatever you pass
+            // it — while ignoring both `menuTheme` and `popupMenuTheme`, so it
+            // could not be made to match any other menu in this app.
+            AppSelectField<String>(
+              key: const Key('new-agent-engine-field'),
+              value: _engine,
+              options: [
                 for (final identity in allEngines)
-                  DropdownMenuItem(
+                  SelectOption(
                     value: identity.id,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        EngineMark(engine: identity.id, size: 14),
-                        const SizedBox(width: 8),
-                        Text(
-                          identity.label,
-                          style: const TextStyle(fontSize: 13.5),
-                        ),
-                      ],
-                    ),
+                    label: identity.label,
+                    leading: () => EngineMark(engine: identity.id, size: 14),
                   ),
               ],
-              onChanged: (value) {
-                if (value == null) return;
-                setState(() {
-                  _engine = value;
-                  if (!kEngineBypassPermissionFlag.containsKey(value)) {
-                    _bypassPermission = false;
-                  }
-                });
-              },
+              onChanged: (value) => setState(() {
+                _engine = value;
+                if (!kEngineBypassPermissionFlag.containsKey(value)) {
+                  _bypassPermission = false;
+                }
+              }),
             ),
             const SizedBox(height: 14),
             const _FieldLabel('WORKING FOLDER'),
@@ -148,10 +149,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 const SizedBox(width: 8),
                 FilledButton.tonal(
                   onPressed: _browse,
-                  child: const Text(
-                    'Browse…',
-                    style: TextStyle(fontSize: 13.5),
-                  ),
+                  child: const Text('Browse…'),
                 ),
               ],
             ),
@@ -197,7 +195,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+          child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: _folder == null || _submitting ? null : _submit,
@@ -207,10 +205,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                   height: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text(
-                  'Create agent',
-                  style: TextStyle(fontSize: 13.5),
-                ),
+              : const Text('Create agent'),
         ),
       ],
     );

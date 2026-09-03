@@ -220,7 +220,9 @@ class ForcedUpdateScreen extends StatelessWidget {
     final installing = notifier.isInstallingUpdate;
     final error = notifier.updateError;
     final failed = error != null && !installing;
-    final mark = failed ? grid.AppPalette.warn : grid.AppPalette.accentOnSurface;
+    final mark = failed
+        ? grid.AppPalette.warn
+        : grid.AppPalette.accentOnSurface;
 
     // Material, because this screen is handed to MaterialApp's home slot RAW while every one of its
     // siblings there brings its own — LoginScreen, HomeScreen and EnvironmentSetupScreen are Scaffolds
@@ -242,7 +244,7 @@ class ForcedUpdateScreen extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: grid.AppGlass.surfaceFill,
-                borderRadius: BorderRadius.circular(13),
+                borderRadius: BorderRadius.circular(grid.AppCard.radius),
                 border: Border.all(color: grid.AppGlass.hair),
               ),
               child: Padding(
@@ -522,11 +524,10 @@ class _UpdateDialog extends StatelessWidget {
         : grid.AppPalette.accentOnSurface;
 
     return Dialog(
-      backgroundColor: grid.AppGlass.surfaceFill,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(13),
-        side: BorderSide(color: grid.AppGlass.hair),
-      ),
+      // No backgroundColor, no shape: `dialogTheme` supplies both, at
+      // AppGlass.surfaceFill and AppCard.radius (12). The rim this used to
+      // carry is gone with them — §1 allows exactly one border in the app and
+      // it belongs to the menu panel, not to a dialog.
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 372),
         child: Padding(
@@ -540,7 +541,7 @@ class _UpdateDialog extends StatelessWidget {
                 height: 34,
                 decoration: BoxDecoration(
                   color: mark.withValues(alpha: 0.13),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
                 ),
                 alignment: Alignment.center,
                 child: busy

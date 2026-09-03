@@ -179,37 +179,27 @@ class MachineRailState extends State<MachineRail> {
             if (_searching)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                child: SizedBox(
-                  height: 32,
-                  child: TextField(
-                    focusNode: _filterFocus,
-                    style: TextStyle(
-                      color: grid.AppPalette.textSecondary,
-                      fontFamily: grid.AppFont.sans,
-                      fontSize: 13.5,
+                // No SizedBox and no decoration overrides: the theme now
+                // sizes this to AppControl.heightField (36), not a push
+                // button's 32. §5.1 makes that split on purpose — a button is
+                // sized to be HIT, a field to be TYPED IN and to anchor the
+                // column under it, which is why Finder and Mail both give
+                // sidebar search more room than a button in the same window.
+                child: TextField(
+                  focusNode: _filterFocus,
+                  style: grid.kFieldTextStyle,
+                  decoration: InputDecoration(
+                    hintText: 'filter machines / agents',
+                    prefixIcon: Icon(
+                      LucideIcons.search300,
+                      // The field's glyph follows the box it sits in, not the
+                      // button token next to it — see [grid.kFieldIconSize].
+                      size: grid.kFieldIconSize,
+                      color: grid.AppPalette.textFaint,
                     ),
-                    decoration: InputDecoration(
-                      hintText: 'filter machines / agents',
-                      hintStyle: TextStyle(color: grid.AppPalette.textFaint),
-                      prefixIcon: Icon(
-                        LucideIcons.search300,
-                        size: 16,
-                        color: grid.AppPalette.textFaint,
-                      ),
-                      filled: true,
-                      fillColor: grid.AppPalette.windowBg,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide(color: grid.AppPalette.divider),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: grid.AppPalette.divider),
-                      ),
-                    ),
-                    onChanged: (value) =>
-                        setState(() => _query = value.trim().toLowerCase()),
                   ),
+                  onChanged: (value) =>
+                      setState(() => _query = value.trim().toLowerCase()),
                 ),
               ),
             const RailSectionHeader(label: 'Machines'),
@@ -289,7 +279,7 @@ class _MachineNodeState extends State<_MachineNode> {
                 TextField(
                   controller: controller,
                   autofocus: true,
-                  style: const TextStyle(fontSize: 13.5),
+                  style: grid.kFieldTextStyle,
                   onSubmitted: (_) async {
                     final result = await notifier.renameMachine(
                       machine.machineId,
@@ -321,7 +311,7 @@ class _MachineNodeState extends State<_MachineNode> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Cancel'),
             ),
             FilledButton(
               onPressed: () async {
@@ -335,7 +325,7 @@ class _MachineNodeState extends State<_MachineNode> {
                   setDialogState(() => error = result);
                 }
               },
-              child: const Text('Save', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Save'),
             ),
           ],
         ),
@@ -360,14 +350,14 @@ class _MachineNodeState extends State<_MachineNode> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: grid.AppPalette.dangerFill,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -450,7 +440,6 @@ class _MachineNodeState extends State<_MachineNode> {
                 children: [
                   MenuAnchor(
                     controller: _machineMenu,
-                    style: appMenuStyle(),
                     onOpen: () => setState(() => _menuOpen = true),
                     onClose: () => setState(() => _menuOpen = false),
                     menuChildren: [
@@ -711,7 +700,7 @@ class _AgentRowState extends State<_AgentRow> {
                 TextField(
                   controller: controller,
                   autofocus: true,
-                  style: const TextStyle(fontSize: 13.5),
+                  style: grid.kFieldTextStyle,
                   onSubmitted: (_) async {
                     final result = await notifier.renameAgent(
                       state.machine.machineId,
@@ -744,7 +733,7 @@ class _AgentRowState extends State<_AgentRow> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Cancel'),
             ),
             FilledButton(
               onPressed: () async {
@@ -759,7 +748,7 @@ class _AgentRowState extends State<_AgentRow> {
                   setDialogState(() => error = result);
                 }
               },
-              child: const Text('Save', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Save'),
             ),
           ],
         ),
@@ -783,14 +772,14 @@ class _AgentRowState extends State<_AgentRow> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: grid.AppPalette.dangerFill,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -922,7 +911,6 @@ class _AgentRowState extends State<_AgentRow> {
           trailingAlwaysVisible: _menuOpen,
           trailing: MenuAnchor(
             controller: _agentMenu,
-            style: appMenuStyle(),
             onOpen: () => setState(() => _menuOpen = true),
             onClose: () => setState(() => _menuOpen = false),
             menuChildren: [

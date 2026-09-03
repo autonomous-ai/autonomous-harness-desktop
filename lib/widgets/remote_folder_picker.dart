@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../shared/theme/app_theme.dart' as grid;
 
 /// Lets the user browse folders ON THE REMOTE MACHINE (via the `fs_list_dir` RPC) and returns the
 /// chosen absolute path, or null if cancelled. Desktop-app and the harness CLI usually run on two
@@ -38,8 +39,7 @@ class _RemoteFolderPickerDialog extends StatefulWidget {
       _RemoteFolderPickerDialogState();
 }
 
-class _RemoteFolderPickerDialogState
-    extends State<_RemoteFolderPickerDialog> {
+class _RemoteFolderPickerDialogState extends State<_RemoteFolderPickerDialog> {
   String? _path;
   List<Map<String, dynamic>> _entries = [];
   bool _loading = true;
@@ -119,7 +119,10 @@ class _RemoteFolderPickerDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Breadcrumbs(segments: _segments, onTap: (i) => _load(_pathUpTo(i))),
+            _Breadcrumbs(
+              segments: _segments,
+              onTap: (i) => _load(_pathUpTo(i)),
+            ),
             const SizedBox(height: 10),
             SizedBox(height: 260, child: _buildBody(context)),
           ],
@@ -128,16 +131,13 @@ class _RemoteFolderPickerDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+          child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: _path == null
               ? null
               : () => Navigator.of(context).pop(_path),
-          child: const Text(
-            'Select this folder',
-            style: TextStyle(fontSize: 13.5),
-          ),
+          child: const Text('Select this folder'),
         ),
       ],
     );
@@ -217,7 +217,7 @@ class _Breadcrumbs extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.background,
         border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
       ),
       child: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
@@ -234,10 +234,7 @@ class _Breadcrumbs extends StatelessWidget {
             InkWell(
               onTap: () => onTap(i),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 3,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
                 child: Text(
                   segments[i],
                   style: TextStyle(

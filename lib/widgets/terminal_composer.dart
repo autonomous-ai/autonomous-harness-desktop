@@ -111,7 +111,15 @@ class _TerminalComposerState extends State<TerminalComposer> {
     // No top border of its own: [ComposerGrip] is the line between this and the terminal.
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
-      child: Focus(
+      // ⚠️ The composer belongs to the TERMINAL, not to the app's chrome, so it
+      // is held out of the app-wide UI text scale twice over — once for its
+      // type here, and once for its BOX below. Both are needed, and for
+      // different reasons.
+      //
+      // This half keeps the typed text at the terminal's own size. What is
+      // typed here lands over there, so it has to look like it.
+      child: MediaQuery.withNoTextScaling(
+        child: Focus(
           onKeyEvent: _onKeyEvent,
           child: TextField(
             controller: _controller,
@@ -130,6 +138,33 @@ class _TerminalComposerState extends State<TerminalComposer> {
             textInputAction: TextInputAction.newline,
             keyboardType: TextInputType.multiline,
             decoration: InputDecoration(
+              // ⚠️ THE BOX, pinned explicitly — and `withNoTextScaling` above
+              // does NOT cover this.
+              //
+              // `inputDecorationTheme` sizes every field from
+              // `AppControl.heightFieldScaled` and a padding multiplied by
+              // `AppFont.uiScale` — a plain static, not a MediaQuery, so no
+              // scaling scope can hold it back. Left inherited, raising the UI
+              // size grows this box (36 → 48.9 at the top of the range), which
+              // shrinks the Expanded holding the terminal, which drops a row,
+              // which sends a `terminal_resize` to the remote agent. The
+              // composer only appears for REMOTE machines, so that is the only
+              // case where it would ever have bitten.
+              //
+              // These two lines are the app's own resting values, stated rather
+              // than derived, so the pane's row count cannot move with a
+              // setting that has nothing to do with the terminal.
+              isDense: true,
+              constraints: const BoxConstraints(minHeight: 36),
+              // 9.225 is not a taste — it is `(36 - 13 * 1.35) / 2`, exactly
+              // what `inputDecorationTheme` derives at `uiScale == 1`
+              // (app_theme.dart:1100-1106). Stated rather than inherited, so
+              // this box renders identically to today and cannot drift with a
+              // setting that has nothing to do with the terminal.
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 9.225,
+              ),
               hintText: enabled
                   // Says what the box is FOR, not just how it works: that it is the fast path,
                   // and that the terminal above is still there for selecting and copying. ⇧⏎ is
@@ -138,6 +173,7 @@ class _TerminalComposerState extends State<TerminalComposer> {
                   ? 'Fast input · ⏎ send · select in the terminal above'
                   : 'Terminal is not accepting input',
             ),
+          ),
         ),
       ),
     );
