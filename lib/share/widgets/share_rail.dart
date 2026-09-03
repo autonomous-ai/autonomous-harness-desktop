@@ -209,56 +209,69 @@ class _RouteCard extends StatelessWidget {
     return Opacity(
       opacity: enabled ? 1 : 0.55,
       child: MouseRegion(
-        cursor: enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         child: GestureDetector(
           onTap: enabled ? onPressed : null,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
-            decoration: BoxDecoration(
-              color: SharePalette.surface,
-              borderRadius: BorderRadius.circular(ShareMetrics.cardRadius),
-              border: Border.all(
-                color: selected ? SharePalette.accent : SharePalette.rim,
-              ),
-              boxShadow: selected
-                  ? [
-                      BoxShadow(
-                        color: SharePalette.accentRing,
-                        blurRadius: 0,
-                        spreadRadius: 3,
+          child: Stack(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                curve: Curves.easeOut,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
+                decoration: BoxDecoration(
+                  color: SharePalette.surface,
+                  borderRadius: BorderRadius.circular(ShareMetrics.cardRadius),
+                  border: Border.all(
+                    color: selected ? SharePalette.fieldRim : SharePalette.rim,
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1, right: 11),
+                      child: Icon(
+                        _icon,
+                        size: 17,
+                        color: selected
+                            ? SharePalette.ink
+                            : SharePalette.eyebrow,
                       ),
-                    ]
-                  : null,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 1, right: 11),
-                  child: Icon(
-                    _icon,
-                    size: 17,
-                    color: selected
-                        ? SharePalette.accent
-                        : SharePalette.eyebrow,
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(offer.title, style: ShareType.cardTitle),
+                          const SizedBox(height: 3),
+                          Text(offer.line, style: ShareType.cardLine),
+                          const SizedBox(height: 5),
+                          Text(offer.cost, style: ShareType.cost),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // The selected route is marked the way the settings rail marks
+              // its own open row: a bar at the edge, not a blue ring round the
+              // card. On this page blue is the colour of the thing to press,
+              // and a card wearing it competed with the button that actually
+              // starts the share.
+              if (selected)
+                Positioned(
+                  left: 0,
+                  top: 11,
+                  bottom: 11,
+                  width: 2,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: SharePalette.accent,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
                   ),
                 ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(offer.title, style: ShareType.cardTitle),
-                      const SizedBox(height: 3),
-                      Text(offer.line, style: ShareType.cardLine),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),

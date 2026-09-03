@@ -72,6 +72,29 @@ abstract final class SharePalette {
   static Color get fieldFill =>
       AppTheme.pick(const Color(0xFFF9FAFB), const Color(0xFF262626));
 
+  /// A control under the pointer. One step, not a colour change — the field is
+  /// telling you it can be used, not that anything has happened yet.
+  static Color get fieldFillHover =>
+      AppTheme.pick(const Color(0xFFF2F4F7), const Color(0xFF2C2C2C));
+  static Color get fieldRimHover =>
+      AppTheme.pick(const Color(0xFFCBCDD2), const Color(0xFF454545));
+
+  /// The focused control's rim, and the soft ring outside it.
+  ///
+  /// macOS rings the focused control in the accent and this page had no focus
+  /// state at all: every field looked identical whether or not the keyboard was
+  /// pointed at it, which on a pane of six boxes is a real question the screen
+  /// refused to answer.
+  static Color get fieldRimFocus => accent;
+  static Color get fieldRingFocus => accent.withValues(alpha: 0.22);
+
+  /// A menu row under the pointer, and the wash on the row that is the current
+  /// choice. The same recipe as the app's own menu, in this page's palette.
+  static Color get hoverFill =>
+      AppTheme.pick(const Color(0xFFEFF1F5), const Color(0xFF2A2A2A));
+  static Color get selectedFill =>
+      AppTheme.pick(const Color(0xFFEBF0FB), const Color(0xFF232A38));
+
   /// Headings and anything the reader is meant to read first.
   static Color get ink =>
       AppTheme.pick(const Color(0xFF1C1F25), const Color(0xFFF5F5F5));
@@ -107,7 +130,13 @@ abstract final class SharePalette {
   static Color get accentHover =>
       AppTheme.pick(const Color(0xFF0E4EC8), const Color(0xFF6C99F4));
 
-  /// The ring round the selected route card.
+  /// The halo under a slider's thumb while it is being dragged.
+  ///
+  /// It used to be the ring round a selected route card, a sort chip and a
+  /// selected repo row as well — which spent the accent on four different
+  /// *states* while the button that acts is the only thing that should be
+  /// wearing it. Selection is [selectedFill] and a rim now; this is left to the
+  /// one place where the accent really is following the pointer.
   static Color get accentRing => accent.withValues(alpha: 0.14);
 
   /// Live: the dot, and the eyebrow over the live pane.
@@ -136,6 +165,42 @@ abstract final class SharePalette {
   /// benefit badge too, until those went.
   static Color get badgeFill =>
       AppTheme.pick(const Color(0xFFEDF0F6), const Color(0xFF2A2A2A));
+
+  /// Ink for something the reader cannot act on yet: a step that has not opened,
+  /// a model chip switched off. Quieter than [note] on purpose — the point is
+  /// that it recedes — but still measured against the page's grounds rather
+  /// than faded with an alpha, which is how a "disabled" colour usually ends up
+  /// unreadable.
+  static Color get dim =>
+      AppTheme.pick(const Color(0xFF8A8D95), const Color(0xFF7A7A76));
+
+  /// A finished step's pip: the ring the tick sits in.
+  static Color get stepDoneFill =>
+      AppTheme.pick(const Color(0xFFE6F4EC), const Color(0xFF1D3A26));
+  static Color get stepDoneRim =>
+      AppTheme.pick(const Color(0xFFB6DCC6), const Color(0xFF2C5B39));
+
+  /// The line joining one step's pip to the next.
+  static Color get stepStem =>
+      AppTheme.pick(const Color(0xFFE1E3E6), const Color(0xFF2A2A2A));
+
+  /// A chosen option in a list of them — the engine this share will point at.
+  ///
+  /// Barely a tint. The first attempt washed the whole card blue, which put a
+  /// coloured ground under fields whose own fill is a neutral grey — two
+  /// temperatures in one box — and gave a *selected* thing more weight than the
+  /// button that acts on it. The rim and the filled radio carry the state; the
+  /// fill only lifts the card off the page.
+  static Color get optionFill =>
+      AppTheme.pick(const Color(0xFFFAFBFD), const Color(0xFF202225));
+  static Color get optionRim =>
+      AppTheme.pick(const Color(0xFFC8D5EC), const Color(0xFF3C444F));
+
+  /// A state tag on an option: Ollama, stopped.
+  static Color get tagFill =>
+      AppTheme.pick(const Color(0xFFFBF0DC), const Color(0xFF33291A));
+  static Color get tagInk =>
+      AppTheme.pick(const Color(0xFF8A5A12), const Color(0xFFD2A24C));
 }
 
 /// The mockup's type scale, by the role each size plays rather than by number.
@@ -169,6 +234,17 @@ abstract final class ShareType {
   static TextStyle get paneBody =>
       TextStyle(fontSize: 13.5, height: 1.55, color: SharePalette.body);
 
+  /// A step's title. Between the pane's headline and a card's — a step is a
+  /// heading inside the page, not a second page title, and its line height is
+  /// pinned to the pip beside it so the two share a baseline.
+  static TextStyle get stepTitle => TextStyle(
+    fontSize: 15,
+    height: ShareMetrics.pipSize / 15,
+    fontWeight: AppFont.semibold,
+    letterSpacing: -0.012 * 15,
+    color: SharePalette.ink,
+  );
+
   /// CHOOSE A ROUTE · ROUTE 01 · LIVE ON THE GRID.
   static TextStyle get eyebrow => TextStyle(
     fontSize: 10.5,
@@ -188,6 +264,15 @@ abstract final class ShareType {
   /// A route card's description.
   static TextStyle get cardLine =>
       TextStyle(fontSize: 12.3, height: 1.45, color: SharePalette.line);
+
+  /// What a route costs, under its description. Tabular so the figures on
+  /// three stacked cards line up rather than wander.
+  static TextStyle get cost => TextStyle(
+    fontSize: 10.5,
+    height: 1.35,
+    color: SharePalette.eyebrow,
+    fontFeatures: const [FontFeature.tabularFigures()],
+  );
 
   /// The sharing status' title.
   static TextStyle get statusTitle => TextStyle(
@@ -215,12 +300,53 @@ abstract final class ShareType {
     color: SharePalette.labelInk,
   );
 
-  /// A badge on a route card.
+  /// What a control holds: typed text, the chosen row of a picker. One style,
+  /// so a name box and the select beside it sit on the same line at the same
+  /// size — which they did not, because each form set its own.
+  static TextStyle get fieldValue =>
+      TextStyle(fontSize: 13.5, height: 1.2, color: SharePalette.ink);
+
+  /// What a control shows when it holds nothing yet. [helper], not [note]:
+  /// a placeholder is not information, and reading as though it were is how a
+  /// hint gets mistaken for a value.
+  static TextStyle get fieldPlaceholder =>
+      fieldValue.copyWith(color: SharePalette.helper);
+
+  /// A row inside a picker's panel.
+  static TextStyle get menuRow =>
+      TextStyle(fontSize: 13, height: 1.25, color: SharePalette.ink);
+
+  /// A badge: a model's size, a context window's value. Tabular, because these
+  /// are figures stacked down a menu and compared against each other.
   static TextStyle get badge => TextStyle(
-    fontSize: 10,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 0.06 * 10,
+    fontSize: 11,
+    fontWeight: AppFont.semibold,
     height: 1.2,
+    color: SharePalette.labelInk,
+    fontFeatures: const [FontFeature.tabularFigures()],
+  );
+
+  /// A state tag on an option — Ollama, STOPPED.
+  static TextStyle get tag => TextStyle(
+    fontSize: 9.5,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.07 * 9.5,
+    height: 1.2,
+    color: SharePalette.tagInk,
+  );
+
+  /// What every button on this page says, at the one size they all are.
+  static TextStyle get button =>
+      TextStyle(fontSize: 13, fontWeight: AppFont.semibold, height: 1.2);
+
+  /// The two ends of a scale. [eyebrow]'s size, but without its tracking —
+  /// letter-spacing belongs to a capitalised label, and these are readings.
+  static TextStyle get scaleEnd => TextStyle(
+    fontSize: 10.5,
+    fontWeight: FontWeight.w600,
+    height: 1.2,
+    color: SharePalette.eyebrow,
+    fontFeatures: const [FontFeature.tabularFigures()],
   );
 }
 
@@ -245,7 +371,39 @@ abstract final class ShareMetrics {
   /// A plate's own sections.
   static const EdgeInsets plateSection = EdgeInsets.fromLTRB(20, 18, 20, 18);
 
+  /// Every control on this page is this tall: a field, a select, a button. One
+  /// number, because a 36px button beside a 38px field is the kind of half-step
+  /// nobody can name and everybody can see.
+  static const double controlHeight = 38;
+
+  /// The second size, for a control that sits inside a row of content rather
+  /// than at the end of a form — the Download beside a recommended model.
+  static const double controlHeightSmall = 30;
+
   /// A button, and the gap to the line beside it.
-  static const double buttonHeight = 38;
+  static const double buttonHeight = controlHeight;
   static const double buttonGap = 14;
+
+  /// A menu's row height and the radius of its hover pill, and the panel's own
+  /// padding. Taken from the app's menu recipe so a picker on this page behaves
+  /// like every other picker in the app, in this page's palette.
+  static const double menuRowExtent = 34;
+  static const double menuRowRadius = 7;
+  static const EdgeInsets menuPadding = EdgeInsets.symmetric(vertical: 5);
+
+  /// A panel is never narrower than the control it drops out of, and never so
+  /// tall it runs off the window.
+  static const double menuMinWidth = 260;
+  static const double menuMaxHeight = 360;
+
+  /// The stepper: the pip's diameter, the gutter its column occupies, and the
+  /// gap under one step before the next one's title.
+  static const double pipSize = 22;
+  static const double stepGutter = 16;
+  static const double stepGap = 24;
+
+  /// A pane's steps never run wider than this, whatever the window does. Past
+  /// it a step's paragraph stops being one thing the eye can take in, and the
+  /// form under it drifts away from the title that names it.
+  static const double stepMaxWidth = 680;
 }

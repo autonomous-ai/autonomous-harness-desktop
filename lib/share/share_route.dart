@@ -42,12 +42,23 @@ class ShareRouteOffer {
     required this.route,
     required this.title,
     required this.line,
+    required this.cost,
     this.detected = 0,
   });
 
   final ShareRoute route;
   final String title;
   final String line;
+
+  /// What taking this route costs, in the two units the reader is actually
+  /// choosing between: a download, and money.
+  ///
+  /// Three descriptions with no figures in them cannot be compared — "run it on
+  /// your own hardware" and "bring your own key" are both appealing sentences,
+  /// and only one of them bills you. Kept to facts that hold on every machine:
+  /// the sizes belong to a particular model and are named where one is picked,
+  /// not here.
+  final String cost;
 
   /// Engines found here for this route — only the server route ever finds any.
   /// The count, not a rendering of it: the rail spends it on which line to
@@ -83,11 +94,15 @@ List<ShareRouteOffer> buildShareRouteOffers({
             ? 'Downloads a model first, then runs it on your own hardware.'
             : 'Your own hardware does the work. Weights and prompts never '
                   'leave the machine.',
+        cost: needsModel
+            ? 'One download first · nothing to pay'
+            : 'Already downloaded · nothing to pay',
       ),
     if (keyProviders.isNotEmpty)
       ShareRouteOffer(
         route: ShareRoute.key,
         title: 'Share frontier models via your API key',
+        cost: 'No download · billed to your key',
         // The provider is named from what the installed CLI whitelists, never a
         // hopeful list: "your OpenAI key" on a build that serves someone else's
         // points at a provider this machine cannot reach.
@@ -103,6 +118,7 @@ List<ShareRouteOffer> buildShareRouteOffers({
       // told to start again.
       title: 'Start an engine you already have',
       detected: external.length,
+      cost: 'No download · serves the model it already has',
       line: switch ((running.firstOrNull, external.firstOrNull)) {
         (final live?, _) =>
           '${live.label} is running here. Point Grid at it and share it '
