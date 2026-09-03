@@ -128,7 +128,9 @@ class LocalCliDiscovery {
   /// grace window to bind its port before concluding the attempt failed. Failed spawn attempts back
   /// off exponentially (capped) so a persistently broken environment doesn't spin — the poll itself
   /// keeps going at [checkInterval] regardless, since backoff only gates the next SPAWN, not the next
-  /// probe. Never surfaces failures to the caller (no exceptions, no [AppNotifier]-visible error) —
+  /// probe. Never surfaces ORDINARY failures to the caller (no exceptions, no
+  /// [AppNotifier]-visible error); [onSignedOut] is the single exception, for the one state no
+  /// amount of respawning can recover from —
   /// this runs unattended in the background for the app's whole lifetime; callers that need a
   /// one-shot "start now and tell me if it worked" should use [ensureRunning] instead. Cancel the
   /// timer to stop supervising — this never touches the daemon process itself (it self-daemonizes and
@@ -139,6 +141,8 @@ class LocalCliDiscovery {
     Duration graceWindow = const Duration(seconds: 5),
     Duration initialBackoff = const Duration(seconds: 2),
     Duration maxBackoff = const Duration(seconds: 30),
+    Future<bool> Function()? stillSignedIn,
+    void Function()? onSignedOut,
   }) {
     var backoff = initialBackoff;
     var nextSpawnAllowedAt = DateTime.now();
@@ -152,7 +156,8 @@ class LocalCliDiscovery {
       backoff = (backoff * 2) > maxBackoff ? maxBackoff : backoff * 2;
     }
 
-    return Timer.periodic(checkInterval, (_) {
+    late final Timer timer;
+    timer = Timer.periodic(checkInterval, (_) {
       if (cycleInFlight) return;
       cycleInFlight = true;
       unawaited(() async {
@@ -168,6 +173,19 @@ class LocalCliDiscovery {
             return;
           }
           if (DateTime.now().isBefore(nextSpawnAllowedAt)) return;
+          // A daemon that signed itself OUT — its machine was deleted from another machine, or its
+          // session expired — deletes its session file and exits. Respawning it is the one failure
+          // this loop cannot fix: every replacement starts without a session and exits again,
+          // forever, silently. Stop instead, and let the caller send the user somewhere that helps.
+          //
+          // Asked here and not on every tick because it costs a `harness auth status` process, and
+          // the respawn point is already rate-limited by the backoff above — so this runs once per
+          // spawn attempt rather than once every [checkInterval].
+          if (stillSignedIn != null && !await stillSignedIn()) {
+            timer.cancel();
+            onSignedOut?.call();
+            return;
+          }
           try {
             await _spawnCommand();
           } catch (error) {
@@ -191,6 +209,7 @@ class LocalCliDiscovery {
         }
       }());
     });
+    return timer;
   }
 
   Future<LocalCliEndpoint?> discover({String? expectedComputerId}) async {
