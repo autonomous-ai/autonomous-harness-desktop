@@ -3,141 +3,370 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_network.dart';
-import '../../grid/grid_selection_store.dart';
 import '../../grid/grid_networks_controller.dart';
+import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
-import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/section_scaffold.dart';
-import 'grid_network_card.dart';
+import 'grid_network_table.dart';
+import 'grid_target_strip.dart';
 
-/// Settings ▸ Grid: every grid this account can talk to.
+/// Settings ▸ Grid: where new agents send their inference, and every grid this
+/// account could send it to instead.
 ///
 /// Read straight from the Grid control plane over HTTPS — this screen does not
 /// go through the `harness` CLI, which knows nothing about Grid accounts. See
 /// [GridApiClient].
-class GridSection extends StatelessWidget {
-  const GridSection({super.key, required this.controller});
+///
+/// The pane is a **picker wearing a table**: the strip at the top says what is
+/// in force, the table under it is the radio group that changes it, and the
+/// filter between them exists because an account on twenty grids should not
+/// have to scroll to find the one it means. Picking here retargets nothing that
+/// is already running — the strip's own wording is what says so.
+class GridSection extends StatefulWidget {
+  const GridSection({
+    super.key,
+    required this.controller,
+    this.selection,
+    this.models,
+  });
 
   final GridNetworksController controller;
+
+  /// Injected by tests. The app uses the shared singletons, which is what lets
+  /// this pane and the sidebar's [GridSelector] change the same choice.
+  final GridSelectionStore? selection;
+  final GridModelsController? models;
+
+  @override
+  State<GridSection> createState() => _GridSectionState();
+}
+
+class _GridSectionState extends State<GridSection> {
+  String _query = '';
+  _GridFilter _filter = _GridFilter.all;
+
+  GridSelectionStore get _selection => widget.selection ?? gridSelectionStore;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     // Cheap on every rebuild: only the first call fetches.
-    controller.ensureLoaded();
-    return SectionScaffold(
-      title: 'Grid',
-      subtitle:
-          'The grids your Grid account is on — who owns each one, what you may '
-          'do on it, and where it signals.',
-      child: ListenableBuilder(
-        listenable: controller,
-        builder: (context, _) => _Body(controller: controller),
+    widget.controller.ensureLoaded();
+    // The whole pane, heading included, hangs off the controller: the count
+    // beside the title is part of the load, so a scaffold built outside this
+    // builder would keep saying nothing after the grids arrived.
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final state = widget.controller.state;
+        final total = state is GridNetworksReady
+            ? state.me.networks.length
+            : null;
+        return SectionScaffold(
+          title: 'Grid',
+          titleTrailing: total == null
+              ? null
+              : Text(
+                  '$total grid${total == 1 ? '' : 's'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: grid.AppPalette.textFaint,
+                    fontSize: 12.5,
+                  ),
+                ),
+          subtitle:
+              'Every grid this account can reach, and which one new agents '
+              'launch against. Agents already running stay where they are.',
+          child: switch (state) {
+            GridNetworksIdle() || GridNetworksLoading() => const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            GridNetworksFailed(:final message) => _Failed(
+              message: message,
+              onRetry: () => unawaited(widget.controller.refresh()),
+            ),
+            GridNetworksReady(:final me) => _body(me.user.email, me.networks),
+          },
+        );
+      },
+    );
+  }
+
+  Widget _body(String email, List<GridNetwork> networks) {
+    final visible = _visible(email, networks);
+    return ValueListenableBuilder<GridSelection>(
+      valueListenable: _selection,
+      builder: (context, chosen, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GridTargetStrip(
+            selection: _selection,
+            chosen: chosen,
+            models: widget.models,
+          ),
+          const SizedBox(height: 16),
+          _FilterBar(
+            query: _query,
+            filter: _filter,
+            shown: visible.length,
+            total: networks.length,
+            email: email,
+            onQuery: (value) => setState(() => _query = value),
+            onFilter: (value) => setState(() => _filter = value),
+            onReload: () => unawaited(widget.controller.refresh()),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: GridNetworkTable(
+              networks: visible,
+              signedInEmail: email,
+              selectedId: chosen.networkId,
+              filtered: visible.length != networks.length,
+              onUse: (network) => unawaited(
+                network == null
+                    ? _selection.clear()
+                    : _selection.selectNetwork(
+                        networkId: network.networkId,
+                        networkName: network.displayName,
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Switching grids clears the model — a model id only means '
+            'something on the grid that serves it.',
+            style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
+          ),
+        ],
       ),
     );
   }
-}
 
-class _Body extends StatelessWidget {
-  const _Body({required this.controller});
-
-  final GridNetworksController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return switch (controller.state) {
-      GridNetworksIdle() || GridNetworksLoading() => const Center(
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      ),
-      GridNetworksFailed(:final message) => _Failed(
-        message: message,
-        onRetry: () => unawaited(controller.refresh()),
-      ),
-      GridNetworksReady(:final me) => _Networks(
-        controller: controller,
-        email: me.user.email,
-        networks: me.networks,
-      ),
-    };
+  /// The grids the filter and the query leave standing.
+  ///
+  /// Matching is a plain case-insensitive substring across the fields a person
+  /// would type — the name, the id, the owner, the type, the roles — for the
+  /// reason the settings rail's own filter gives: anything cleverer is
+  /// machinery nobody can feel.
+  List<GridNetwork> _visible(String email, List<GridNetwork> networks) {
+    final query = _query.trim().toLowerCase();
+    return [
+      for (final network in networks)
+        if (_filter.admits(network, email) &&
+            (query.isEmpty || _haystack(network).contains(query)))
+          network,
+    ];
   }
+
+  String _haystack(GridNetwork network) => [
+    network.displayName,
+    network.networkId,
+    network.ownerEmail,
+    network.networkType,
+    ...?network.member?.roles,
+  ].join(' ').toLowerCase();
 }
 
-class _Networks extends StatelessWidget {
-  const _Networks({
-    required this.controller,
+/// The three questions worth asking of a list of grids.
+///
+/// Not a general facet builder: these are the axes that decide whether a grid
+/// is one you can act on — is it mine, and does it route.
+enum _GridFilter {
+  all('All'),
+  owned('You own'),
+  router('Router on');
+
+  const _GridFilter(this.label);
+
+  final String label;
+
+  bool admits(GridNetwork network, String email) => switch (this) {
+    _GridFilter.all => true,
+    _GridFilter.owned => network.isOwnedBy(email),
+    _GridFilter.router => network.routerEnabled,
+  };
+}
+
+/// Narrow the table, and say whose grids these are.
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.query,
+    required this.filter,
+    required this.shown,
+    required this.total,
     required this.email,
-    required this.networks,
+    required this.onQuery,
+    required this.onFilter,
+    required this.onReload,
   });
 
-  final GridNetworksController controller;
+  final String query;
+  final _GridFilter filter;
+  final int shown;
+  final int total;
   final String email;
-  final List<GridNetwork> networks;
+  final ValueChanged<String> onQuery;
+  final ValueChanged<_GridFilter> onFilter;
+  final VoidCallback onReload;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                email,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: grid.AppPalette.textSecondary,
-                  fontSize: 12.5,
+        Expanded(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 210,
+                child: TextField(
+                  key: const Key('grid-filter-field'),
+                  onChanged: onQuery,
+                  style: grid.kFieldTextStyle,
+                  decoration: InputDecoration(
+                    hintText: 'Filter grids',
+                    prefixIcon: Icon(
+                      LucideIcons.search300,
+                      size: grid.kFieldIconSize,
+                      color: grid.AppPalette.textFaint,
+                    ),
+                  ),
                 ),
               ),
-            ),
-            AppIconButton(
-              key: const Key('grid-refresh-button'),
-              icon: LucideIcons.refreshCw300,
-              size: 16,
-              tooltip: 'Reload grids',
-              onPressed: () => unawaited(controller.refresh()),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: networks.isEmpty
-              ? const EmptyState(
-                  icon: LucideIcons.zap300,
-                  title: 'No grids yet',
-                  message:
-                      'This account is not on a grid. Join one from the Grid '
-                      'app, then reload here.',
-                )
-              : ListView(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  children: [
-                    for (final network in networks)
-                      ValueListenableBuilder<GridSelection>(
-                        valueListenable: gridSelectionStore,
-                        builder: (context, chosen, _) => GridNetworkCard(
-                          network: network,
-                          signedInEmail: email,
-                          selected: chosen.networkId == network.networkId,
-                          onUse: () => unawaited(
-                            gridSelectionStore.selectNetwork(
-                              networkId: network.networkId,
-                              networkName: network.displayName,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+              for (final option in _GridFilter.values)
+                _Chip(
+                  label: option.label,
+                  selected: option == filter,
+                  onTap: () => onFilter(option),
                 ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Capped rather than flexible: a `Flexible` here has the same flex as
+        // the search-and-chips side and so reserves half the bar for an email
+        // and a 16px button, which is what pushed the last chip onto a line of
+        // its own. Bounded, it takes what it needs and the filters keep the
+        // rest.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Flexible(
+                child: Text(
+                  // The plain total lives on the heading now. This line says
+                  // whose grids these are, and speaks up only when the filter
+                  // is hiding some of them.
+                  shown == total ? email : '$shown of $total grids · $email',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: grid.AppPalette.textFaint,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              AppIconButton(
+                key: const Key('grid-refresh-button'),
+                icon: LucideIcons.refreshCw300,
+                size: 16,
+                tooltip: 'Reload grids',
+                onPressed: onReload,
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+}
+
+/// A filter's on/off state, in the app's accent wash — the same treatment the
+/// rail gives the section you are in, because it means the same thing: this is
+/// what you are looking at.
+class _Chip extends StatefulWidget {
+  const _Chip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_Chip> createState() => _ChipState();
+}
+
+class _ChipState extends State<_Chip> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: grid.AppMotion.hover,
+          curve: grid.AppMotion.curve,
+          height: grid.AppControl.height,
+          // Padding, and NOT `alignment` — a Container with an alignment wraps
+          // its child in an unbounded Align, which fills whatever it is offered.
+          // Inside the filter bar's Wrap that is the bar's whole width, so each
+          // chip took a run of its own and the row came out as a stack of
+          // full-width bars.
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? grid.AppPalette.accent
+                : (_hovered ? grid.AppSurface.hoverFill : Colors.transparent),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: widget.selected
+                  ? grid.AppPalette.accent
+                  : grid.AppGlass.hair,
+            ),
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: widget.selected
+                    ? Colors.white
+                    : grid.AppPalette.textSecondary,
+                fontSize: 12,
+                fontWeight: widget.selected
+                    ? grid.AppFont.semibold
+                    : grid.AppFont.regular,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
