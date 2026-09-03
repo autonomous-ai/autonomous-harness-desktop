@@ -5,6 +5,17 @@ import 'package:xterm/src/ui/palette_builder.dart';
 import 'package:xterm/src/ui/paragraph_cache.dart';
 import 'package:xterm/xterm.dart';
 
+/// Returns the glyph text used to paint one terminal code point.
+///
+/// U+23FA defaults to Apple's coloured "record button" emoji when the active
+/// monospace face has no glyph for it. Flutter's Skia fallback still chooses
+/// that emoji even with a text-presentation selector, while SF Mono contains
+/// U+25CF as the equivalent filled status dot. Substitute only while painting
+/// so ANSI supplies the colour and the terminal buffer/copy text stays U+23FA.
+String terminalGlyphText(int charCode) => charCode == 0x23FA
+    ? String.fromCharCode(0x25CF)
+    : String.fromCharCode(charCode);
+
 /// Encapsulates the logic for painting various terminal elements.
 class TerminalPainter {
   TerminalPainter({
@@ -201,7 +212,7 @@ class TerminalPainter {
       // workaround the regular space CodePoint 0x20 is replaced with
       // the CodePoint 0xA0. This is a non breaking space and a underline can be
       // drawn below it.
-      var char = String.fromCharCode(charCode);
+      var char = terminalGlyphText(charCode);
       if (cellFlags & CellFlags.underline != 0 && charCode == 0x20) {
         char = String.fromCharCode(0xA0);
       }
