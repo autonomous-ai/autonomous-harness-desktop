@@ -93,6 +93,7 @@ void main() {
       'grok',
       'hermes',
       'opencode',
+      'pi',
     });
   });
 }
