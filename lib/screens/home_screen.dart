@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
+import '../widgets/attention_inbox.dart';
 import '../widgets/link_machine_screen.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/machine_rail_mini.dart';
@@ -170,6 +171,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
+              ShortcutAction.showAttention: () =>
+                  unawaited(showAttentionInbox(context, notifier)),
               ShortcutAction.showShortcuts: () =>
                   unawaited(showShortcutsSheet(context)),
             },

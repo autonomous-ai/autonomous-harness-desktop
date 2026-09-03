@@ -147,6 +147,9 @@ class _PaneCell extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final focused = notifier.isPaneFocused(pane.id);
+    final agentId = pane.agentId;
+    final blocked = agentId != null &&
+        notifier.questionFor(pane.machineId, agentId) != null;
     return Listener(
       // Translucent so the press still reaches the renderer underneath: on
       // macOS the terminal is a WebView and AppKit gives it first responder on
@@ -168,6 +171,18 @@ class _PaneCell extends StatelessWidget {
             width: 1,
           ),
         ),
+        // Attention, drawn OVER the terminal and inside the border above, so a
+        // pane can carry both at once — this one is blocked AND focused is a
+        // normal state, not a conflict to resolve. It is amber and 2px against
+        // the border's 1px accent precisely so the two never read as each
+        // other. Unlike focus, it shows on a single pane too: with one tile
+        // there is nowhere else focus could be, but there is very much a
+        // question waiting.
+        foregroundDecoration: blocked
+            ? BoxDecoration(
+                border: Border.all(color: grid.AppPalette.warn, width: 2),
+              )
+            : null,
         // Keeps a terminal's constant repainting inside its own layer instead
         // of dirtying the whole grid. No key: nothing reads this boundary, it
         // only has to exist.

@@ -55,6 +55,7 @@ enum ShortcutAction {
   closePane,
   newAgent,
   reload,
+  showAttention,
   showShortcuts,
 }
 
@@ -210,6 +211,14 @@ const List<AppShortcut> kAppShortcuts = [
     action: ShortcutAction.reload,
     activator: SingleActivator(LogicalKeyboardKey.keyR, meta: true),
     label: 'Reload machines and agents',
+    group: ShortcutGroup.actions,
+  ),
+  AppShortcut(
+    action: ShortcutAction.showAttention,
+    // "Inbox" — free on this OS and on this app's list. ⌘[1-9] are spoken for
+    // by the rail, so the digits inside the panel are bare, not ⌘-modified.
+    activator: SingleActivator(LogicalKeyboardKey.keyI, meta: true),
+    label: 'Show agents waiting on you',
     group: ShortcutGroup.actions,
   ),
   AppShortcut(

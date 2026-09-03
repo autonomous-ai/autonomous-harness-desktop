@@ -22,6 +22,7 @@ import '../update/manual_update_check.dart';
 import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
+import 'pending_question.dart';
 
 enum AppStatus {
   bootstrapping,
@@ -111,6 +112,10 @@ class MachineState {
   // opening a terminal stream against an unavailable node.
   String? pendingOfflineAgentId;
   final Set<String> processingAgentIds = {};
+  /// Agents on this machine that have stopped to ask something, by agentId.
+  /// At most one per agent: a pane shows one dialog at a time, and the daemon
+  /// re-announces the same open question rather than queueing a second.
+  final Map<String, PendingQuestion> blockedAgents = {};
   final Map<String, String> sessionAgentIds = {};
   // Turn events can arrive while the initial agents_list RPC is still in
   // flight. Retain session correlation until that snapshot binds the row.
@@ -1579,11 +1584,86 @@ class AppNotifier extends ChangeNotifier {
     });
   }
 
+  // ── blocked agents ────────────────────────────────────────────────────────
+
+  /// Answers already sent and not yet confirmed gone, by requestId.
+  ///
+  /// The row is NOT removed on send. Confirmation is the daemon's close frame,
+  /// which only fires once the dialog has actually left the pane — so an answer
+  /// that was dropped (no terminal control, another client driving the same
+  /// dialog) leaves the question standing, which is the truth. This set only
+  /// stops the same answer being keyed in twice while that round trip is out.
+  final Set<String> _answeringRequestIds = {};
+  final Map<String, Timer> _answerTimeouts = {};
+
+  /// Every agent waiting on the person, across every machine, longest wait
+  /// first. Order is the point: it is the sequence to work through, not a
+  /// listing.
+  List<PendingQuestion> get pendingQuestions {
+    final all = <PendingQuestion>[
+      for (final machine in machineStates.values) ...machine.blockedAgents.values,
+    ]..sort((a, b) => a.since.compareTo(b.since));
+    return all;
+  }
+
+  PendingQuestion? questionFor(String machineId, String agentId) =>
+      machineStates[machineId]?.blockedAgents[agentId];
+
+  bool isAnswering(PendingQuestion question) =>
+      _answeringRequestIds.contains(question.requestId);
+
+  /// Key one option into the agent's dialog without opening its pane.
+  ///
+  /// `question_response` is the same frame the dial sends, and it lands in the
+  /// same place: the daemon types the answer into the pane, because there is no
+  /// control channel into an interactive CLI. Loopback clients are exempt from
+  /// the E2EE requirement on this frame, so it goes in the clear on a wire that
+  /// never leaves the computer.
+  Future<void> answerQuestion(PendingQuestion question, String option) async {
+    if (!question.answerable || _answeringRequestIds.contains(question.requestId)) {
+      return;
+    }
+    // The socket the question ARRIVED on, not a fresh one: `_conn` would dial a
+    // machine just to send an answer into a dialog that only exists because
+    // that machine was already talking to us. No connection means nothing can
+    // be keyed in anywhere, so the question is left standing rather than being
+    // marked as answered.
+    final connection = _pool?[question.machineId];
+    if (connection == null) return;
+    _answeringRequestIds.add(question.requestId);
+    // Nothing replies to `question_response`, so the only thing that can end
+    // this state is the close frame — or this timer, when the answer was
+    // dropped on the far side and no close is ever coming.
+    _answerTimeouts[question.requestId]?.cancel();
+    _answerTimeouts[question.requestId] = Timer(const Duration(seconds: 12), () {
+      _answerTimeouts.remove(question.requestId);
+      if (_answeringRequestIds.remove(question.requestId)) notifyListeners();
+    });
+    notifyListeners();
+    connection.sendRaw('question_response', {
+      'agentId': question.agentId,
+      'requestId': question.requestId,
+      'answers': {question.answerKey: option},
+    });
+  }
+
+  void _forgetAnswerAttempt(String requestId) {
+    _answerTimeouts.remove(requestId)?.cancel();
+    _answeringRequestIds.remove(requestId);
+  }
+
   void _cancelTurnActivity(String machineId, String agentId) {
     _turnActivityWatchdogs
         .remove(_turnActivityKey(machineId, agentId))
         ?.cancel();
-    machineStates[machineId]?.processingAgentIds.remove(agentId);
+    final machine = machineStates[machineId];
+    machine?.processingAgentIds.remove(agentId);
+    // A question cannot outlive its own turn — the daemon's watcher says the
+    // same thing from the other end, tearing down and announcing a close when
+    // the turn ends. Clearing here as well means the row cannot survive a close
+    // frame that was dropped, and this is also the path a deleted agent takes.
+    final dropped = machine?.blockedAgents.remove(agentId);
+    if (dropped != null) _forgetAnswerAttempt(dropped.requestId);
   }
 
   void _clearMachineActivity(MachineState machine) {
@@ -1592,6 +1672,10 @@ class AppNotifier extends ChangeNotifier {
     }
     machine.processingAgentIds.clear();
     machine.pendingProcessingSessions.clear();
+    for (final question in machine.blockedAgents.values) {
+      _forgetAnswerAttempt(question.requestId);
+    }
+    machine.blockedAgents.clear();
   }
 
   void _clearAllTurnActivity() {
@@ -1602,6 +1686,10 @@ class AppNotifier extends ChangeNotifier {
     for (final machine in machineStates.values) {
       machine.processingAgentIds.clear();
       machine.pendingProcessingSessions.clear();
+      for (final question in machine.blockedAgents.values) {
+        _forgetAnswerAttempt(question.requestId);
+      }
+      machine.blockedAgents.clear();
     }
   }
 
@@ -2414,6 +2502,50 @@ class AppNotifier extends ChangeNotifier {
           unawaited(_loadMachineData(machine, force: true));
         }
         break;
+      // An agent stopped and is waiting on the person. Ignored by this window
+      // until now, even though the daemon had already shaped the question for
+      // the dial — `sendCommander` is device-only, so it never came down this
+      // wire at all.
+      case 'commander_question':
+        final agentId = _eventAgentId(machine, event, payload);
+        if (agentId != null) {
+          final asked = PendingQuestion.fromPayload(
+            machineId: machineId,
+            agentId: agentId,
+            payload: payload,
+            now: DateTime.now(),
+          );
+          if (asked != null) {
+            // The daemon re-announces an open question after a reconnect, and
+            // on attaching to a turn that was already mid-dialog. Keep the
+            // original clock in that case: this is the same wait continuing,
+            // and restarting it would make a long block look new.
+            final known = machine.blockedAgents[agentId];
+            machine.blockedAgents[agentId] = known != null && known.sameAs(asked)
+                ? asked.withSince(known.since)
+                : asked;
+          }
+        }
+        break;
+      // It stopped being on screen — answered here, in the pane by hand, on
+      // another window, or on the dial. Whoever got there first, everyone else
+      // is told to stop drawing it.
+      case 'commander_question_close':
+        final agentId = _eventAgentId(machine, event, payload);
+        final requestId = payload['requestId'];
+        if (agentId != null) {
+          final open = machine.blockedAgents[agentId];
+          // Only if it is the one being closed: a stale close must not wipe the
+          // question that replaced it when a dialog advanced to its next page.
+          if (open != null &&
+              (requestId is! String ||
+                  requestId.isEmpty ||
+                  open.requestId == requestId)) {
+            machine.blockedAgents.remove(agentId);
+            _forgetAnswerAttempt(open.requestId);
+          }
+        }
+        break;
       case 'turn_started':
       case 'turn_heartbeat':
         final agentId = _eventAgentId(machine, event, payload);
@@ -2440,6 +2572,17 @@ class AppNotifier extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// Feed one machine event straight into the dispatcher.
+  ///
+  /// The frames worth testing here have no terminal to route through and no
+  /// socket to arrive on — what they exercise is the bookkeeping either side of
+  /// that, which is exactly what a live socket makes hard to reach.
+  @visibleForTesting
+  Future<void> handleMachineEventForTest(
+    String machineId,
+    Map<String, dynamic> event,
+  ) => _handleEvent(machineId, event);
 
   /// Put an already-built session on the grid.
   ///
