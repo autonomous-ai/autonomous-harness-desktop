@@ -49,6 +49,9 @@ enum ShortcutAction {
   previousAgent,
   focusPreviousPane,
   focusNextPane,
+  movePaneBackward,
+  movePaneForward,
+
   closePane,
   newAgent,
   reload,
@@ -138,7 +141,32 @@ const List<AppShortcut> kAppShortcuts = [
     group: ShortcutGroup.panes,
   ),
   AppShortcut(
+    action: ShortcutAction.movePaneBackward,
+    // The keyboard twin of dragging a pane's header. ⌘[ / ⌘] already focus a
+    // pane and ⇧⌘[ / ⇧⌘] already change agent, so this is the third member of
+    // the same family — and ⌘⌥ is the one modifier pair still free (see the
+    // note at the top of this file about why ⌥ alone is not).
+    activator: SingleActivator(
+      LogicalKeyboardKey.bracketLeft,
+      meta: true,
+      alt: true,
+    ),
+    label: 'Move pane earlier',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneForward,
+    activator: SingleActivator(
+      LogicalKeyboardKey.bracketRight,
+      meta: true,
+      alt: true,
+    ),
+    label: 'Move pane later',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
     action: ShortcutAction.closePane,
+
     // Close the pane, and — when the last one is gone — the window, which is
     // what ⌘W means everywhere else on this OS.
     activator: SingleActivator(LogicalKeyboardKey.keyW, meta: true),

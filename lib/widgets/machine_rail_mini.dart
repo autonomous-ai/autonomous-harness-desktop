@@ -6,7 +6,6 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_icon_button.dart';
 import '../state/app_state.dart';
 import 'account_footer.dart';
-import 'window_chrome.dart';
 
 /// The rail, folded.
 ///
@@ -44,17 +43,14 @@ class MachineRailMini extends StatelessWidget {
           // Same inset and drag handle as the wide rail's head, for the same
           // reason: the traffic lights float over this corner.
           DragToMoveArea(
-            child: Padding(
-              padding: EdgeInsets.only(top: railTopInset),
-              child: SizedBox(
-                height: _headerHeight,
-                child: Center(
-                  child: AppIconButton(
-                    icon: LucideIcons.panelLeft300,
-                    size: 18,
-                    tooltip: 'Expand sidebar  ⌘\\',
-                    onPressed: onExpand,
-                  ),
+            child: SizedBox(
+              height: _headerHeight,
+              child: Center(
+                child: AppIconButton(
+                  icon: LucideIcons.panelLeft300,
+                  size: 18,
+                  tooltip: 'Expand sidebar  ⌘\\',
+                  onPressed: onExpand,
                 ),
               ),
             ),

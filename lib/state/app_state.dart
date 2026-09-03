@@ -1942,6 +1942,43 @@ class AppNotifier extends ChangeNotifier {
   /// agent's tmux window back to the size it had before this app borrowed it —
   /// a tile that vanished without saying so would leave that agent living in a
   /// quarter-width terminal.
+  /// Put the pane at [paneId] where [targetPaneId] is, and that one where this
+  /// one was.
+  ///
+  /// A SWAP, not an insert. Position here is nothing but the index in [panes] —
+  /// PaneGrid lays the list out row-major — and on a 2x2 grid "between two
+  /// cells" names no place, so shifting the others would move tiles the user
+  /// did not touch. Swapping leaves every other tile exactly where it was.
+  ///
+  /// Focus follows the PANE, not the slot: `focusedPaneId` is an id, so a tile
+  /// that was focused stays focused after it moves, which is what the hand that
+  /// dragged it expects.
+  void reorderPane(int paneId, int targetPaneId) {
+    if (paneId == targetPaneId) return;
+    final from = panes.indexWhere((pane) => pane.id == paneId);
+    final to = panes.indexWhere((pane) => pane.id == targetPaneId);
+    if (from == -1 || to == -1) return;
+    final moved = panes[from];
+    panes[from] = panes[to];
+    panes[to] = moved;
+    _persistLayout();
+    notifyListeners();
+  }
+
+  /// Move the focused pane one slot, for the keyboard twin of the drag.
+  ///
+  /// Stops at the ends rather than wrapping: the grid is a shape, not a ring,
+  /// and a tile jumping from the last slot to the first reads as a bug.
+  void movePaneBy(int delta) {
+    final id = focusedPaneId;
+    if (id == null) return;
+    final from = panes.indexWhere((pane) => pane.id == id);
+    if (from == -1) return;
+    final to = from + delta;
+    if (to < 0 || to >= panes.length) return;
+    reorderPane(id, panes[to].id);
+  }
+
   Future<void> closePane(int paneId, {bool persist = true}) async {
     final index = panes.indexWhere((pane) => pane.id == paneId);
     if (index == -1) return;

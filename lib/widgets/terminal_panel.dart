@@ -3,9 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 
@@ -39,6 +39,10 @@ class TerminalPanel extends StatefulWidget {
   /// Flips [composerVisible]. Null where there is no composer to toggle.
   final VoidCallback? onToggleComposer;
 
+  /// Lets the header be dragged to trade places with another tile. Null when
+  /// this is the only tile — see [_TerminalHeader.paneDrag].
+  final PaneDragHandle? paneDrag;
+
   const TerminalPanel({
     super.key,
     required this.notifier,
@@ -48,6 +52,7 @@ class TerminalPanel extends StatefulWidget {
     this.onToggleComposer,
     this.onClose,
     this.onRendererFocus,
+    this.paneDrag,
   });
 
   @override
@@ -415,17 +420,22 @@ class _TerminalPanelState extends State<TerminalPanel>
   /// this is where the binding has to be replaced rather than added.
   KeyEventResult _onTerminalKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey != LogicalKeyboardKey.keyV) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.keyV) {
+      return KeyEventResult.ignored;
+    }
     final keyboard = HardwareKeyboard.instance;
-    if (keyboard.isShiftPressed) return KeyEventResult.ignored; // ⇧⌘V is a different verb
-    final apple = defaultTargetPlatform == TargetPlatform.macOS ||
+    if (keyboard.isShiftPressed) {
+      return KeyEventResult.ignored; // ⇧⌘V is a different verb
+    }
+
+    final apple =
+        defaultTargetPlatform == TargetPlatform.macOS ||
         defaultTargetPlatform == TargetPlatform.iOS;
     final pasting = apple ? keyboard.isMetaPressed : keyboard.isControlPressed;
     if (!pasting) return KeyEventResult.ignored;
     unawaited(_paste());
     return KeyEventResult.handled;
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -439,7 +449,12 @@ class _TerminalPanelState extends State<TerminalPanel>
       color: grid.AppPalette.windowBg,
       child: Column(
         children: [
-          _TerminalHeader(session: session, onClose: widget.onClose),
+          _TerminalHeader(
+            session: session,
+            onClose: widget.onClose,
+            paneDrag: widget.paneDrag,
+          ),
+
           Divider(height: 1, color: AppColors.border),
           Expanded(
             child: Stack(
@@ -508,7 +523,17 @@ class _TerminalHeader extends StatelessWidget {
   final TerminalSession session;
   final VoidCallback? onClose;
 
-  const _TerminalHeader({required this.session, this.onClose});
+  /// This strip's drag gesture, or null when there is nothing to drag.
+  ///
+  /// Null with a SINGLE pane, and then the strip is inert on purpose: there is
+  /// no other tile to trade places with, so a drag would have no meaning to
+  /// give it. It used to move the WINDOW here (window_manager's
+  /// DragToMoveArea, left over from hiding the title bar) — but once AppKit's
+  /// `startDragging` takes a gesture it keeps it, so the two meanings cannot
+  /// share one drag. The window is moved from HarnessTopBar now.
+  final PaneDragHandle? paneDrag;
+
+  const _TerminalHeader({required this.session, this.onClose, this.paneDrag});
 
   @override
   Widget build(BuildContext context) {
@@ -544,44 +569,58 @@ class _TerminalHeader extends StatelessWidget {
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       ),
     };
-    // A drag handle as well as a title: with the title bar hidden this strip
-    // is the top of the window.
-    return DragToMoveArea(
-      child: SizedBox(
-        height: 46,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            children: [
-              EngineMark(engine: session.engineId, size: 17),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  session.agentName,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppColors.text,
-                    fontFamily: AppFonts.sans,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
+    final strip = SizedBox(
+      height: 46,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            EngineMark(engine: session.engineId, size: 17),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                session.agentName,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontFamily: AppFonts.sans,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              if (session.status == TerminalSessionStatus.controlling)
-                Padding(padding: const EdgeInsets.all(4), child: statusMark)
-              else
-                Tooltip(
-                  message: statusLabel,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: statusMark,
-                  ),
+            ),
+            if (session.status == TerminalSessionStatus.controlling)
+              Padding(padding: const EdgeInsets.all(4), child: statusMark)
+            else
+              Tooltip(
+                message: statusLabel,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: statusMark,
                 ),
-              if (onClose != null) PaneCloseButton(onPressed: onClose!),
-            ],
-          ),
+              ),
+            if (onClose != null) PaneCloseButton(onPressed: onClose!),
+          ],
         ),
       ),
+    );
+    final handle = paneDrag;
+    if (handle == null) return strip;
+
+    return Draggable<PaneDragRef>(
+      data: handle.ref,
+      // The grip is kept where the hand took it, so the ghost stays under the
+      // cursor at the same spot on the header it was picked up by.
+      dragAnchorStrategy: childDragAnchorStrategy,
+      onDragStarted: () => paneDragging.value = handle.ref,
+      onDragEnd: (_) => paneDragging.value = null,
+      onDraggableCanceled: (_, _) => paneDragging.value = null,
+      feedback: _PaneGhost(session: session, size: handle.size, header: strip),
+
+      // The header itself does NOT change — the whole tile fades instead, in
+      // _PaneCell, so what dims is the thing that is moving rather than one
+      // strip of it.
+      child: strip,
     );
   }
 }
@@ -679,6 +718,85 @@ class _FrozenOverlay extends StatelessWidget {
                 onPressed: onRetry,
                 icon: Icon(takenOver ? Icons.link : Icons.refresh, size: 16),
                 label: Text(takenOver ? 'CONNECT' : 'ATTACH NEW STREAM'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The whole tile, carried under the cursor.
+///
+/// ⚠️ THIS IS DRAWN, NOT PHOTOGRAPHED, AND THE PHOTOGRAPH IS WHY. The obvious
+/// way to carry "the whole pane" is RepaintBoundary.toImage() on press — and it
+/// FROZE THE APP. That call is a GPU readback on the raster thread, and the
+/// raster thread in this app is never idle: every pane holds a terminal that
+/// repaints on its own, so asking it to stop and hand a surface back on every
+/// pointer-down deadlocked the window. It is not a tuning problem; there is
+/// nothing to tune down to.
+///
+/// So the ghost is built from what is already known — the pane's measured size
+/// and its own header — and the body is a plain surface rather than a copy of
+/// the scrollback. It reads as the tile because it is tile-SHAPED and carries
+/// the tile's name, which is what the eye is following.
+///
+/// See-through on purpose: a full-size opaque copy sits exactly over the tile
+/// being aimed at and hides the "Swap with this pane" highlight that says the
+/// drop will land.
+class _PaneGhost extends StatelessWidget {
+  const _PaneGhost({
+    required this.session,
+    required this.size,
+    required this.header,
+  });
+
+  final TerminalSession session;
+
+  /// The tile's size, handed down from the grid's LayoutBuilder.
+  final Size size;
+
+  final Widget header;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final tile = size;
+    return Material(
+      color: Colors.transparent,
+      child: Opacity(
+        opacity: 0.75,
+        child: Container(
+          width: tile.width,
+          height: tile.height,
+          decoration: BoxDecoration(
+            color: grid.AppPalette.windowBg,
+            border: Border.all(color: AppColors.accent, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              header,
+              Divider(height: 1, color: AppColors.border),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    session.agentName,
+                    style: TextStyle(
+                      color: AppColors.mutedStrong,
+                      fontFamily: AppFonts.sans,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
