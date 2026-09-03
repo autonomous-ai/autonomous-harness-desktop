@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 /// rail, the search filter and the pane all read this list, so a section cannot
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
+  grid(LucideIcons.zap300, 'Grid'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
@@ -35,6 +36,9 @@ class SettingsGroup {
 
 /// What Settings lists, in order.
 const kSettingsGroups = [
+  // Which grids this account can talk to. First, and its own group, because it
+  // is the only screen here that is about something outside this Mac.
+  SettingsGroup('Grid', [SettingsSection.grid]),
   SettingsGroup('Preferences', [
     SettingsSection.appearance,
     SettingsSection.terminal,
@@ -44,4 +48,4 @@ const kSettingsGroups = [
 
 /// The section Settings opens on — the first row of the first group, so the
 /// screen never opens on a pane its rail doesn't show as selected.
-const kDefaultSettingsSection = SettingsSection.appearance;
+const kDefaultSettingsSection = SettingsSection.grid;

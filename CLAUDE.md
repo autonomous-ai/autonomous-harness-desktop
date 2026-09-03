@@ -146,6 +146,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - `macos/Runner/MainFlutterWindow.swift` installs native menu items and calls into Dart over the
   `harness/app_menu` MethodChannel (`checkForUpdates`, `flashFirmware`, `showShortcuts`, terminal font
   size). Keep the menu in Swift; only the handler lives in `RootShell`.
+- **Grid is the one exception to "the app talks only to the local CLI"**: `lib/grid/` calls
+  `https://api-grid.autonomous.ai/v1/grid/me` directly with its own bearer token, because the Harness
+  CLI owns a Harness session and knows nothing about Grid accounts. `kGridSessionToken` in
+  `grid_api_client.dart` is a **hardcoded developer token** — TODO(BE), it must not ship; override it
+  with `--dart-define=GRID_API_TOKEN=…`. Response fields were read off the live API, not the OpenAPI
+  spec, whose `/v1/grid/me` response schema is empty.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

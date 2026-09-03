@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../grid/grid_networks_controller.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 import '../widgets/window_chrome.dart';
 import 'sections/about_section.dart';
 import 'sections/appearance_section.dart';
+import 'sections/grid_section.dart';
 import 'sections/shortcuts_section.dart';
 import 'sections/terminal_section.dart';
 import 'settings_nav.dart';
@@ -22,13 +24,17 @@ import 'settings_section.dart';
 /// no notion of "which screen", and a route needs none — the way back is
 /// [Navigator.pop], and the shell underneath keeps its panes attached and its
 /// terminals streaming while this is up.
-Future<void> showSettingsScreen(BuildContext context, AppNotifier notifier) {
+Future<void> showSettingsScreen(
+  BuildContext context,
+  AppNotifier notifier, {
+  GridNetworksController? gridNetworks,
+}) {
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       // Opaque: it covers the window, and letting the shell show through would
       // mean compositing four live terminals under it for nothing.
       pageBuilder: (context, animation, _) =>
-          SettingsScreen(notifier: notifier),
+          SettingsScreen(notifier: notifier, gridNetworks: gridNetworks),
       transitionsBuilder: (context, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
       // A cross-fade, not a slide. A screen that slides in from the right reads
@@ -42,9 +48,14 @@ Future<void> showSettingsScreen(BuildContext context, AppNotifier notifier) {
 
 /// Settings: pick on the left, work on the right.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.notifier});
+  const SettingsScreen({super.key, required this.notifier, this.gridNetworks});
 
   final AppNotifier notifier;
+
+  /// Injected by tests so the Grid pane reads a fake client instead of the
+  /// live control plane. Null in the app, where the screen makes — and
+  /// disposes — its own.
+  final GridNetworksController? gridNetworks;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -52,6 +63,20 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   SettingsSection _section = kDefaultSettingsSection;
+
+  /// Owned here, not by the Grid pane: the rail unmounts a pane the moment you
+  /// leave it, so a controller living in the pane would refetch every time the
+  /// user came back to it.
+  late final GridNetworksController _gridNetworks =
+      widget.gridNetworks ?? GridNetworksController();
+
+  @override
+  void dispose() {
+    // Only the one this screen made — an injected controller belongs to whoever
+    // passed it in.
+    if (widget.gridNetworks == null) _gridNetworks.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: _SettingsBody(
                     section: _section,
                     notifier: widget.notifier,
+                    gridNetworks: _gridNetworks,
                   ),
                 ),
               ],
@@ -98,14 +124,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 /// Cross-fades rather than cuts: the rail's own row highlight animates, and a
 /// pane that appears the instant you click reads as a jolt beside it.
 class _SettingsBody extends StatelessWidget {
-  const _SettingsBody({required this.section, required this.notifier});
+  const _SettingsBody({
+    required this.section,
+    required this.notifier,
+    required this.gridNetworks,
+  });
 
   final SettingsSection section;
   final AppNotifier notifier;
+  final GridNetworksController gridNetworks;
 
   @override
   Widget build(BuildContext context) {
     final screen = switch (section) {
+      SettingsSection.grid => GridSection(controller: gridNetworks),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),
       SettingsSection.shortcuts => const ShortcutsSection(),
