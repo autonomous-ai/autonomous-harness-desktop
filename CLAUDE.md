@@ -202,9 +202,15 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   Controls come from `shared/widgets/` too (`AppSelectField`, `AppIconButton`) — raw Material
   `DropdownButton`/`IconButton` do not match anything else in the app.
 - `lib/shortcuts/app_shortcuts.dart` is the one list that feeds both the live bindings and the ⌘/
-  sheet; `shortcuts/shortcuts_list.dart` is the rendered body both the sheet and Settings ▸ Keyboard
-  shortcuts draw, so the two cannot disagree. Every shortcut is ⌘-based: Ctrl belongs to the
-  shell/tmux, ⌥ is a Meta prefix for the pty, and ⌘C/⌘V/⌘A are owned by xterm.
+  sheet. `shortcutRows()` there is that list as the UI prints it — one row per action, so the two
+  activators on "focus the next pane" (`⌘]`, `⌃⇥`) fold into one line, and `⌘1`–`⌘9` join as one.
+  `shortcuts/shortcuts_list.dart` renders those rows in the two shapes the app needs and nothing
+  else: `ShortcutsList` (the ⌘/ sheet's column, inside a 420px dialog) and `ShortcutsDeck` (Settings
+  ▸ Keyboard shortcuts, group cards reflowed across the pane, plus the recessed "the terminal keeps"
+  card built from `kTerminalOwnedKeys`). Same rows behind both, so they cannot disagree; keycaps come
+  from `shortcuts/key_cap.dart`. Every shortcut is ⌘-based — Ctrl belongs to the shell/tmux, ⌥ is a
+  Meta prefix for the pty, and ⌘C/⌘V/⌘A are owned by xterm — with one pinned exception, `⌃⇥`/`⌃⇧⇥`
+  for the panes, which the terminal is made to let past.
 - `lib/flash/` flashes the ESP32-S3 dial through the CLI runner; `SerialPortLease` pauses daemon
   supervision while the port is held so `harness start` cannot steal it mid-write.
 - `lib/update/desktop_updater.dart` self-updates from the GCS manifest (sha256-verified, strictly

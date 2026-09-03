@@ -12,10 +12,15 @@ class SectionScaffold extends StatelessWidget {
     required this.title,
     required this.child,
     this.subtitle,
+    this.titleTrailing,
   });
 
   final String title;
   final String? subtitle;
+
+  /// Sits on the heading's baseline, for a pane whose title has a count worth
+  /// carrying ("Grid · 4 grids"). Optional, so every other pane is unchanged.
+  final Widget? titleTrailing;
 
   /// Fills the space under the rule, so a body that can outgrow the window
   /// brings its own scroll view.
@@ -29,7 +34,17 @@ class SectionScaffold extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.headlineSmall),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(title, style: theme.textTheme.headlineSmall),
+              if (titleTrailing != null) ...[
+                const SizedBox(width: 10),
+                Flexible(child: titleTrailing!),
+              ],
+            ],
+          ),
           if (subtitle != null) ...[
             const SizedBox(height: 4),
             Text(

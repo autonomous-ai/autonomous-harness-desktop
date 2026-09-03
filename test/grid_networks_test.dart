@@ -4,12 +4,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
+import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
+
+/// The pane writes the pick straight through to disk; tests keep it in memory.
+class _MemoryStore implements LocalKeyValueStore {
+  final Map<String, String> values = {};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+
+  @override
+  Future<void> delete(String key) async => values.remove(key);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -98,7 +114,17 @@ void main() {
   });
 
   group('GridSection', () {
+    late GridSelectionStore selection;
+
+    setUp(() => selection = GridSelectionStore(storage: _MemoryStore()));
+
     Future<void> pump(WidgetTester tester, GridNetworksController c) async {
+      // A window the size the app actually opens at. At the 800x600 default the
+      // table's viewport is one row tall, so a lazy list never builds the
+      // second grid and the test is asserting about a pane no user ever sees.
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildAppTheme(brightness: Brightness.light),
@@ -106,7 +132,9 @@ void main() {
             builder: (context) {
               AppTheme.brightness.value = Brightness.light;
               return BrightnessScope(
-                child: Scaffold(body: GridSection(controller: c)),
+                child: Scaffold(
+                  body: GridSection(controller: c, selection: selection),
+                ),
               );
             },
           ),
@@ -115,23 +143,125 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('lists every grid, marking the one you own', (tester) async {
+    Future<GridNetworksController> ready(WidgetTester tester) async {
       final controller = GridNetworksController(client: FakeGridApi());
       addTearDown(controller.dispose);
       await pump(tester, controller);
+      return controller;
+    }
+
+    testWidgets('lists every grid, marking the one you own', (tester) async {
+      await ready(tester);
 
       expect(find.text('Grid'), findsOneWidget);
-      expect(find.text('huy@example.com'), findsOneWidget);
+      expect(find.textContaining('huy@example.com'), findsWidgets);
       expect(find.text('hp-1-1'), findsOneWidget);
       expect(find.text('Water Grid'), findsOneWidget);
       // Ownership is stated, not left to the reader to work out from an email.
-      expect(find.text('You own this'), findsOneWidget);
+      expect(find.text('YOURS'), findsOneWidget);
       expect(find.text('admin'), findsOneWidget);
       expect(find.text('consumer'), findsOneWidget);
-      expect(find.text('router · openai/gpt-5-mini'), findsOneWidget);
+      // The advisor names live in the drawer; the row only says how many.
+      expect(find.text('on · 1 model'), findsOneWidget);
+      expect(find.text('off'), findsOneWidget);
       // The owner's email shows only on a grid that is not yours.
       expect(find.text('someone@else.com'), findsOneWidget);
       expect(find.byKey(const Key('grid-refresh-button')), findsOneWidget);
+    });
+
+    testWidgets('opens on "each engine\'s own login" and can come back to it', (
+      tester,
+    ) async {
+      await ready(tester);
+      expect(find.text("Each engine's own login"), findsWidgets);
+
+      await tester.tap(find.text('hp-1-1'));
+      await tester.pumpAndSettle();
+      expect(selection.value.networkId, 'grid-aaf6a46ced4f42f9');
+      expect(selection.value.networkName, 'hp-1-1');
+
+      // The way out of a grid is on this screen now, not only in the sidebar.
+      await tester.tap(find.text("Each engine's own login").first);
+      await tester.pumpAndSettle();
+      expect(selection.value.hasGrid, isFalse);
+    });
+
+    testWidgets('the strip says what new agents use, and offers the model', (
+      tester,
+    ) async {
+      await ready(tester);
+      // No grid, no model control — there is nothing for a model id to be
+      // relative to.
+      expect(find.byKey(const Key('grid-model-trigger')), findsNothing);
+
+      await tester.tap(find.text('Water Grid'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('NEW AGENTS USE'), findsOneWidget);
+      expect(find.byKey(const Key('grid-model-trigger')), findsOneWidget);
+      // "Auto" until the grid is asked what it serves.
+      expect(find.text('Auto'), findsWidgets);
+    });
+
+    testWidgets('details open without changing which grid is used', (
+      tester,
+    ) async {
+      await ready(tester);
+      await tester.tap(find.text('Water Grid'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      await tester.pumpAndSettle();
+
+      // The drawer is the only place the advisor names are spelled out.
+      expect(find.text('openai/gpt-5-mini'), findsOneWidget);
+      // A label the column headers do not also carry.
+      expect(find.text('GRID ID'), findsOneWidget);
+      // Reading a grid's id is not asking to launch agents on it.
+      expect(selection.value.networkId, 'grid-e3b210eacc5b4cdf');
+    });
+
+    testWidgets('a filter narrows the table and says so', (tester) async {
+      await ready(tester);
+      // The plain total sits on the heading; the filter bar names the account.
+      expect(find.text('2 grids'), findsOneWidget);
+      expect(find.text('huy@example.com'), findsOneWidget);
+
+      await tester.tap(find.text('You own'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('hp-1-1'), findsOneWidget);
+      expect(find.text('Water Grid'), findsNothing);
+      expect(find.textContaining('1 of 2 grids'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('grid-filter-field')),
+        'nothing matches this',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No grid matches that filter.'), findsOneWidget);
+      // Never filtered away: the way back out has to stay reachable.
+      expect(find.text("Each engine's own login"), findsWidgets);
+    });
+
+    testWidgets('a narrow pane drops columns instead of squeezing them', (
+      tester,
+    ) async {
+      await ready(tester);
+      // pump() sizes the window for the common case; this test is about what
+      // happens under it, so it narrows the window and rebuilds against it.
+      tester.view.physicalSize = const Size(760, 800);
+      await tester.pumpAndSettle();
+
+      // Signaling goes first — it is the one column whose value is never read
+      // at a glance, and it is still a chevron away in the drawer.
+      expect(find.text('SIGNALING'), findsNothing);
+      expect(find.text('ROUTER'), findsOneWidget);
+      expect(find.text('GRID'), findsOneWidget);
+      // Nothing was cut off to make room: a squeezed table overflows, and an
+      // overflow is a test failure in debug.
+      expect(find.text('hp-1-1'), findsOneWidget);
+      expect(find.text('Water Grid'), findsOneWidget);
     });
 
     testWidgets('a failure says so and offers a retry', (tester) async {
