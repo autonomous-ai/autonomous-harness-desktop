@@ -11,6 +11,7 @@ import '../shared/layouts/widgets/sidebar_timeline.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_icon_button.dart';
 import '../shared/widgets/app_menu.dart';
+import '../shared/widgets/skeleton.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
 import 'agent_drag.dart';
@@ -207,16 +208,22 @@ class MachineRailState extends State<MachineRail> {
             const RailSectionHeader(label: 'Machines'),
             Expanded(
               child: machines.isEmpty
-                  ? Center(
-                      child: Text(
-                        'no remote machines',
-                        style: TextStyle(
-                          color: grid.AppPalette.textFaint,
-                          fontFamily: grid.AppFont.sans,
-                          fontSize: 13.5,
-                        ),
-                      ),
-                    )
+                  // Two kinds of empty, and they must not look the same: the
+                  // list has not answered yet, or it answered with nothing.
+                  ? widget.notifier.machinesLoading
+                        ? const _MachineListSkeleton(
+                            key: ValueKey('machines-loading'),
+                          )
+                        : Center(
+                            child: Text(
+                              'no remote machines',
+                              style: TextStyle(
+                                color: grid.AppPalette.textFaint,
+                                fontFamily: grid.AppFont.sans,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          )
                   : ListView.builder(
                       itemCount: machines.length,
                       itemBuilder: (context, index) => _MachineNode(
@@ -552,11 +559,9 @@ class _AgentTree extends StatelessWidget {
                 notifier.selectMachineForSetup(state.machine.machineId),
           );
         case AgentLoadStatus.loading:
-          return const _AgentStatusRow(
-            icon: Icons.sync,
-            label: 'loading agents…',
-            loading: true,
-          );
+          // Rows, not a sentence: "loading agents…" is one line tall, so
+          // everything under the machine dropped when the real rows arrived.
+          return const _AgentRowsSkeleton(key: ValueKey('agents-loading'));
         case AgentLoadStatus.error:
           return _AgentLoadError(notifier: notifier, state: state);
         case AgentLoadStatus.loaded:
@@ -734,7 +739,10 @@ class _AgentRowState extends State<_AgentRow> {
   // agent survives, resumed where possible — so unlike delete it fires straight away, no
   // confirmation dialog, and just surfaces a failure the same lightweight way.
   Future<void> _restartAgent() async {
-    final result = await notifier.restartAgent(state.machine.machineId, agent.id);
+    final result = await notifier.restartAgent(
+      state.machine.machineId,
+      agent.id,
+    );
     if (!mounted) return;
     final error = result.error;
     if (error != null) {
@@ -1000,18 +1008,112 @@ class _DragChip extends StatelessWidget {
   }
 }
 
+/// The machine list before the backend has answered: three rows on the guide
+/// line, at a [SidebarItem]'s exact geometry.
+///
+/// Three because the rail is a list pane and most accounts have a few
+/// machines; a skeleton taller than the answer jumps up when it lands.
+class _MachineListSkeleton extends StatelessWidget {
+  const _MachineListSkeleton({super.key});
+
+  static const _labels = [0.56, 0.42, 0.64];
+
+  @override
+  Widget build(BuildContext context) => SkeletonList(
+    rows: 3,
+    semanticsLabel: 'Loading machines',
+    itemBuilder: (context, i) => SidebarTimeline(
+      role: SidebarTimelineRole.node,
+      above: i > 0,
+      below: false,
+      child: _SidebarRowSkeleton(
+        leading: 18,
+        leadingRadius: 5,
+        labelFactor: _labels[i],
+      ),
+    ),
+  );
+}
+
+/// A machine's agents before `agents_list` has answered: two rows where the
+/// agents will go, threaded onto the same guide line they will hang from.
+class _AgentRowsSkeleton extends StatelessWidget {
+  const _AgentRowsSkeleton({super.key});
+
+  static const _rows = 2;
+  static const _labels = [0.48, 0.36];
+
+  @override
+  Widget build(BuildContext context) => SkeletonList(
+    rows: _rows,
+    fadeDepth: skeletonFadeLight,
+    semanticsLabel: 'Loading agents',
+    itemBuilder: (context, i) => SidebarTimeline(
+      role: SidebarTimelineRole.branch,
+      below: i < _rows - 1,
+      child: Padding(
+        // Where a nested row's box starts — see [_AgentRow].
+        padding: const EdgeInsets.only(left: 28),
+        child: _SidebarRowSkeleton(
+          leading: 16,
+          leadingRadius: 4,
+          labelFactor: _labels[i],
+        ),
+      ),
+    ),
+  );
+}
+
+/// A [SidebarItem] with nothing in it yet: the same 1px margin, 36px box,
+/// icon gutter and label strut, so a placeholder row and a real one measure
+/// the same to the pixel — the row's label pins its metrics with a strut, and
+/// a bar measured without it comes out a pixel short.
+class _SidebarRowSkeleton extends StatelessWidget {
+  const _SidebarRowSkeleton({
+    required this.leading,
+    required this.leadingRadius,
+    required this.labelFactor,
+  });
+
+  final double leading;
+  final double leadingRadius;
+  final double labelFactor;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 1),
+    child: SizedBox(
+      height: 36,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(SidebarItem.iconGutter, 0, 5, 0),
+        child: Row(
+          children: [
+            Skeleton(width: leading, height: leading, radius: leadingRadius),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SkeletonText(
+                style: const TextStyle(fontSize: 13.7, height: 1.25),
+                strutStyle: const StrutStyle(
+                  fontSize: 13.5,
+                  height: 1.25,
+                  forceStrutHeight: true,
+                ),
+                widthFactor: labelFactor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _AgentStatusRow extends StatelessWidget {
   final VoidCallback? onTap;
   final IconData icon;
   final String label;
-  final bool loading;
 
-  const _AgentStatusRow({
-    required this.icon,
-    required this.label,
-    this.loading = false,
-    this.onTap,
-  });
+  const _AgentStatusRow({required this.icon, required this.label, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1023,20 +1125,13 @@ class _AgentStatusRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(38, 3, 12, 9),
         child: Row(
           children: [
-            if (loading)
-              const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 1.5),
-              )
-            else
-              Icon(
-                icon,
-                size: 12,
-                color: onTap == null
-                    ? grid.AppPalette.textFaint
-                    : grid.AppPalette.accentOnSurface,
-              ),
+            Icon(
+              icon,
+              size: 12,
+              color: onTap == null
+                  ? grid.AppPalette.textFaint
+                  : grid.AppPalette.accentOnSurface,
+            ),
             const SizedBox(width: 7),
             Expanded(
               child: Text(

@@ -10,6 +10,7 @@ import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/section_scaffold.dart';
+import '../../shared/widgets/skeleton.dart';
 import 'grid_network_table.dart';
 import 'grid_target_strip.dart';
 
@@ -65,30 +66,39 @@ class _GridSectionState extends State<GridSection> {
         final total = state is GridNetworksReady
             ? state.me.networks.length
             : null;
+        final loading =
+            state is GridNetworksIdle || state is GridNetworksLoading;
+        final countStyle = TextStyle(
+          color: grid.AppPalette.textFaint,
+          fontSize: 12.5,
+        );
         return SectionScaffold(
           title: 'Grid',
+          // The count is part of the load, so while it is unknown the heading
+          // wears a bar of the same height rather than nothing: a heading that
+          // grows a figure a beat after the table is a heading that moved.
           titleTrailing: total == null
-              ? null
+              ? (loading
+                    ? SkeletonText(
+                        key: const Key('grid-count-skeleton'),
+                        style: countStyle,
+                        width: 44,
+                      )
+                    : null)
               : Text(
                   '$total grid${total == 1 ? '' : 's'}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: grid.AppPalette.textFaint,
-                    fontSize: 12.5,
-                  ),
+                  style: countStyle,
                 ),
           subtitle:
               'Every grid this account can reach, and which one new agents '
               'launch against. Agents already running stay where they are.',
           child: switch (state) {
-            GridNetworksIdle() || GridNetworksLoading() => const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
+            // The strip does not wait on the network — it reads the choice
+            // already on disk — so it is real from the first frame. Only the
+            // table and the count are placeholders.
+            GridNetworksIdle() || GridNetworksLoading() => _body(null, null),
             GridNetworksFailed(:final message) => _Failed(
               message: message,
               onRetry: () => unawaited(widget.controller.refresh()),
@@ -100,8 +110,13 @@ class _GridSectionState extends State<GridSection> {
     );
   }
 
-  Widget _body(String email, List<GridNetwork> networks) {
-    final visible = _visible(email, networks);
+  /// The pane's one layout, with or without its answer. [email] and
+  /// [networks] are null while the grids load, and every part that depends
+  /// on them is then drawn at its final size and left blank.
+  Widget _body(String? email, List<GridNetwork>? networks) {
+    final visible = email == null || networks == null
+        ? null
+        : _visible(email, networks);
     return ValueListenableBuilder<GridSelection>(
       valueListenable: _selection,
       builder: (context, chosen, _) => Column(
@@ -116,8 +131,8 @@ class _GridSectionState extends State<GridSection> {
           _FilterBar(
             query: _query,
             filter: _filter,
-            shown: visible.length,
-            total: networks.length,
+            shown: visible?.length,
+            total: networks?.length,
             email: email,
             onQuery: (value) => setState(() => _query = value),
             onFilter: (value) => setState(() => _filter = value),
@@ -125,20 +140,25 @@ class _GridSectionState extends State<GridSection> {
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: GridNetworkTable(
-              networks: visible,
-              signedInEmail: email,
-              selectedId: chosen.networkId,
-              filtered: visible.length != networks.length,
-              onUse: (network) => unawaited(
-                network == null
-                    ? _selection.clear()
-                    : _selection.selectNetwork(
-                        networkId: network.networkId,
-                        networkName: network.displayName,
-                      ),
-              ),
-            ),
+            child: visible == null
+                ? GridNetworkTableSkeleton(
+                    key: const Key('grid-table-skeleton'),
+                    noGridSelected: chosen.networkId == null,
+                  )
+                : GridNetworkTable(
+                    networks: visible,
+                    signedInEmail: email!,
+                    selectedId: chosen.networkId,
+                    filtered: visible.length != networks!.length,
+                    onUse: (network) => unawaited(
+                      network == null
+                          ? _selection.clear()
+                          : _selection.selectNetwork(
+                              networkId: network.networkId,
+                              networkName: network.displayName,
+                            ),
+                    ),
+                  ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -211,9 +231,12 @@ class _FilterBar extends StatelessWidget {
 
   final String query;
   final _GridFilter filter;
-  final int shown;
-  final int total;
-  final String email;
+
+  /// All three null while the grids load: the controls are real (a query
+  /// typed early is kept), the line that names whose grids these are is not.
+  final int? shown;
+  final int? total;
+  final String? email;
   final ValueChanged<String> onQuery;
   final ValueChanged<_GridFilter> onFilter;
   final VoidCallback onReload;
@@ -268,19 +291,27 @@ class _FilterBar extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               Flexible(
-                child: Text(
-                  // The plain total lives on the heading now. This line says
-                  // whose grids these are, and speaks up only when the filter
-                  // is hiding some of them.
-                  shown == total ? email : '$shown of $total grids · $email',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: grid.AppPalette.textFaint,
-                    fontSize: 12,
-                  ),
-                ),
+                child: email == null
+                    ? const SkeletonText(
+                        style: TextStyle(fontSize: 12),
+                        width: 150,
+                        alignment: Alignment.centerRight,
+                      )
+                    : Text(
+                        // The plain total lives on the heading now. This line
+                        // says whose grids these are, and speaks up only when
+                        // the filter is hiding some of them.
+                        shown == total
+                            ? email!
+                            : '$shown of $total grids · $email',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: grid.AppPalette.textFaint,
+                          fontSize: 12,
+                        ),
+                      ),
               ),
               const SizedBox(width: 6),
               AppIconButton(

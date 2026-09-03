@@ -17,6 +17,7 @@ import 'package:harness/grid/member_usage.dart';
 import 'package:harness/shared/theme/app_theme.dart' as grid;
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
 import 'package:harness/widgets/status_rail/pill_panel_shell.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class _Store implements LocalKeyValueStore {
   final Map<String, String> v = {};
@@ -115,6 +116,19 @@ const _expects = {
 };
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // The rail's far end prints the running version, and prints a breathing
+  // placeholder until it has one. Unmocked, that plugin call never answers
+  // under flutter_tester and the placeholder breathes forever — which is a
+  // `pumpAndSettle` that never settles.
+  PackageInfo.setMockInitialValues(
+    appName: 'Harness',
+    packageName: 'ai.autonomous.harness',
+    version: '1.0.0',
+    buildNumber: '1',
+    buildSignature: '',
+  );
+
   setUpAll(_loadFont);
 
   for (final target in ['autonomous.ai', '33', '8', '10', '106M']) {

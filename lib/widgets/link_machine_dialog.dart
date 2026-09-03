@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../auth/cli_link.dart';
 import '../state/app_state.dart';
+import '../shared/widgets/skeleton.dart';
 import '../theme/app_theme.dart';
 
 /// Sets (or manages) THIS machine's remote password, so another machine can later connect to it
@@ -202,15 +203,8 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
                 builder: (context, _) {
                   if (widget.notifier.linkedMachinesLoading &&
                       widget.notifier.linkedMachines.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Center(
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
+                    return const _LinkedMachinesSkeleton(
+                      key: Key('linked-machines-skeleton'),
                     );
                   }
                   final machines = widget.notifier.linkedMachines;
@@ -605,6 +599,54 @@ class _RemotePasswordSummary extends StatelessWidget {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${local.year}-${two(local.month)}-${two(local.day)}';
   }
+}
+
+/// Two [_LinkedMachineRow]s before `harness link list` has answered: a name,
+/// a mono line for the fingerprint, and the room the Unlink button takes.
+///
+/// Two, because this sits in a dialog and most accounts link one or two
+/// machines; a skeleton taller than the answer jumps up when it lands.
+class _LinkedMachinesSkeleton extends StatelessWidget {
+  const _LinkedMachinesSkeleton({super.key});
+
+  static const _names = [128.0, 96.0];
+
+  @override
+  Widget build(BuildContext context) => SkeletonList(
+    rows: 2,
+    fadeDepth: skeletonFadeLight,
+    semanticsLabel: 'Loading linked machines',
+    itemBuilder: (context, i) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SkeletonText(
+                  style: TextStyle(
+                    fontFamily: AppFonts.sans,
+                    fontFamilyFallback: AppFonts.sansFallback,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  width: _names[i],
+                ),
+                SkeletonText(
+                  style: TextStyle(fontFamily: AppFonts.mono, fontSize: 10.5),
+                  widthFactor: 0.72,
+                ),
+              ],
+            ),
+          ),
+          // A TextButton's box: Material's 40px minimum, the label's width.
+          const Skeleton(width: 58, height: 40, radius: 8),
+        ],
+      ),
+    ),
+  );
 }
 
 class _LinkedMachineRow extends StatelessWidget {
