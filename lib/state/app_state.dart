@@ -139,6 +139,10 @@ class AppNotifier extends ChangeNotifier {
   // in a terminal (or another app instance) has no way to notify this one, so this is what makes the
   // app pick up a fresh link within a few seconds instead of only on the next manual click/restart.
   final Map<String, Timer> _linkRetryTimers = {};
+  // Safety-net reconciliation for a connected machine's agent list, on top of the push events
+  // (agent_synced/agent_created/agent_renamed/agent_deleted) that normally keep it live — catches the
+  // rare case a push event was dropped. Runs silently: see _syncAgentsIfChanged.
+  final Map<String, Timer> _agentSyncTimers = {};
   // Keeps the local `harness` daemon alive for the whole app run — started once after the first
   // successful bootstrap (see `_ensureCliDaemon`), cancelled on dispose. Cancelling only stops this
   // Dart-side loop; the daemon itself self-daemonizes and must keep running after the app quits.
@@ -220,6 +224,7 @@ class AppNotifier extends ChangeNotifier {
   bool get hasForcedUpdate => availableUpdate?.forced ?? false;
 
   static const offlineRetryInterval = Duration(seconds: 5);
+  static const agentSyncInterval = Duration(seconds: 60);
 
   MachineState? stateOf(String machineId) => machineStates[machineId];
 
@@ -688,6 +693,7 @@ class AppNotifier extends ChangeNotifier {
     unawaited(cliLogin.logout());
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
+    _stopAllAgentSyncTimers();
     // Tiles go, the saved layout stays: signing out and back in is the same
     // person at the same desk, and the file is only read once machines exist.
     await _closeAllPanes(persist: false);
@@ -758,8 +764,10 @@ class AppNotifier extends ChangeNotifier {
           // instead of leaving the user stuck on the empty "select a machine" placeholder.
           unawaited(_applyNodeStatus(machine, true));
           unawaited(_loadMachineData(machine, force: true));
+          _startAgentSyncTimer(machineId);
         } else if (nextStatus == ConnectionStatus.reconnecting ||
             nextStatus == ConnectionStatus.disconnected) {
+          _stopAgentSyncTimer(machineId);
           _clearMachineActivity(machine);
           if (machine.isLocalMachine) {
             machine.transportMode = MachineTransportMode.localOffline;
@@ -796,6 +804,7 @@ class AppNotifier extends ChangeNotifier {
         _clearMachineActivity(entry.value);
         _stopOfflineRetry(entry.key);
         _stopLinkRetry(entry.key);
+        _stopAgentSyncTimer(entry.key);
       }
     }
     machineStates.removeWhere((id, _) => !visible.contains(id));
@@ -887,6 +896,80 @@ class AppNotifier extends ChangeNotifier {
     }
     _offlineRetryTimers.clear();
     _offlinePollsInFlight.clear();
+  }
+
+  void _startAgentSyncTimer(String machineId) {
+    if (_agentSyncTimers.containsKey(machineId)) return;
+    _agentSyncTimers[machineId] = Timer.periodic(agentSyncInterval, (_) {
+      final machine = machineStates[machineId];
+      if (machine == null) {
+        _stopAgentSyncTimer(machineId);
+        return;
+      }
+      unawaited(_syncAgentsIfChanged(machine));
+    });
+  }
+
+  void _stopAgentSyncTimer(String machineId) {
+    _agentSyncTimers.remove(machineId)?.cancel();
+  }
+
+  void _stopAllAgentSyncTimers() {
+    for (final timer in _agentSyncTimers.values) {
+      timer.cancel();
+    }
+    _agentSyncTimers.clear();
+  }
+
+  /// Silent safety-net reconciliation, ticked every [agentSyncInterval] while a machine is connected.
+  /// Only writes/notifies if the fetched list actually differs from what's already shown — a steady
+  /// state where push events (agent_synced et al.) have kept everything in sync produces zero visible
+  /// effect. Deliberately does not touch agentLoadStatus/agentsLoadError/notifyListeners on failure:
+  /// a real connectivity problem is already surfaced by the push path and the existing offline
+  /// detection in _performMachineDataLoad, and a quiet background tick should not fight either.
+  Future<void> _syncAgentsIfChanged(MachineState machine) async {
+    if (machine.connectionStatus != ConnectionStatus.connected) return;
+    if (machine.agentsLoadInFlight != null) {
+      return; // a real (foreground) load already owns this tick
+    }
+    final connection = _conn(machine.machine.machineId);
+    try {
+      final response = await connection.request(
+        'agents_list',
+        timeout: const Duration(seconds: 10),
+      );
+      final agents = (response['agents'] as List<dynamic>? ?? [])
+          .map((item) => Agent.fromJson(item as Map<String, dynamic>))
+          .toList();
+      if (_agentsEqual(machine.agents, agents)) return;
+      _replaceAgents(machine, agents);
+      notifyListeners();
+    } catch (_) {
+      // Silent by design — see doc comment above.
+    }
+  }
+
+  /// Order-insensitive value equality for [Agent] lists — [Agent] has no operator== override, and a
+  /// backend that returns the same agents in a different order must not register as "changed".
+  bool _agentsEqual(List<Agent> a, List<Agent> b) {
+    if (a.length != b.length) return false;
+    final byId = {for (final agent in a) agent.id: agent};
+    for (final agent in b) {
+      final prev = byId[agent.id];
+      if (prev == null ||
+          prev.name != agent.name ||
+          prev.sessionId != agent.sessionId ||
+          prev.engine != agent.engine ||
+          prev.engineDisplayName != agent.engineDisplayName ||
+          prev.engineIconHint != agent.engineIconHint ||
+          prev.parentAgentId != agent.parentAgentId ||
+          prev.status != agent.status ||
+          prev.terminalAvailable != agent.terminalAvailable ||
+          prev.terminalUnavailableReason != agent.terminalUnavailableReason) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Public retry hook used by the offline join guide's "Retry now" action.
@@ -1585,6 +1668,7 @@ class AppNotifier extends ChangeNotifier {
     for (final pane in panesFor(machineId).toList()) {
       await closePane(pane.id, persist: false);
     }
+    _stopAgentSyncTimer(machineId);
     machineStates.remove(machineId);
     machines.removeWhere((m) => m.machineId == machineId);
     if (selectedMachineId == machineId) selectedMachineId = null;
@@ -2305,6 +2389,7 @@ class AppNotifier extends ChangeNotifier {
     _updateCheckTimer?.cancel();
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
+    _stopAllAgentSyncTimers();
     _clearAllTurnActivity();
     for (final pane in panes) {
       pane.session?.removeListener(notifyListeners);
