@@ -27,6 +27,21 @@ import 'package:flutter/widgets.dart';
 ///
 /// Three more keys are spoken for by `package:xterm` itself on macOS — `⌘C`,
 /// `⌘V`, `⌘A` (copy, paste, select all) — and must stay with it.
+///
+/// ⚠️ THAT ONLY BECAME TRUE ONCE THE MENU LET GO OF THEM. Flutter's macOS
+/// template ships `MainMenu.xib` with a full Edit menu, and `Cut`/`Copy`/
+/// `Paste`/`Select All` carried `keyEquivalent` — so AppKit matched ⌘X/⌘C/⌘V/⌘A
+/// in `performKeyEquivalent:`, which runs BEFORE keyDown reaches the responder
+/// chain, and dispatched `cut:`/`copy:`/`paste:`/`selectAll:` up it instead.
+/// xterm's paste is a Shortcuts→Actions binding driven by a KEY EVENT, so it
+/// never saw the keystroke: ⌘V did nothing in a terminal pane and the only way
+/// to paste was whatever the engine's own TUI happened to bind.
+///
+/// Those four `keyEquivalent`s are now stripped from the xib. The menu items
+/// stay — clicked, they still work through the responder chain — and text
+/// fields keep their shortcuts from Flutter's own `DefaultTextEditingShortcuts`,
+/// which binds the same four on macOS. Do not put them back.
+
 enum ShortcutAction {
   toggleRail,
   filterAgents,

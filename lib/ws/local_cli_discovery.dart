@@ -207,6 +207,10 @@ class LocalCliDiscovery {
         base.resolve('/api/status'),
       );
       final body = response.data;
+      // New CLIs expose the initial terminal scan explicitly. A missing field means an older CLI and
+      // remains accepted for backward compatibility; false means the daemon is alive but not ready to
+      // publish an authoritative empty/non-empty agent list yet.
+      if (body?['discoveryReady'] == false) return null;
       final advertisedComputerId = _normalizeComputerId(body?['computerId']);
       final advertised = body?['localWs'];
       if (advertisedComputerId != localComputerId || advertised is! Map) {

@@ -261,6 +261,80 @@ void main() {
     app.dispose();
   });
 
+  test('dial focus selects a remote agent on the machine named by the CLI', () async {
+    final app = _notifier();
+    _machine(app, 'local', ['local-agent']);
+    _machine(app, 'remote', ['remote-agent']);
+    final localSession = _session('local', 'local-agent')
+      ..status = TerminalSessionStatus.controlling;
+    final remoteSession = _session('remote', 'remote-agent')
+      ..status = TerminalSessionStatus.controlling;
+    final localPane = app.adoptSessionForTest(localSession);
+    final remotePane = app.adoptSessionForTest(remoteSession);
+    app.focusPane(localPane.id);
+
+    // dial_focus is delivered by the LOCAL websocket even when its agent lives
+    // elsewhere. The payload's machineId, not the socket source, owns it.
+    await app.handleEventForTest('local', {
+      'type': 'dial_focus',
+      'payload': {'machineId': 'remote', 'agentId': 'remote-agent'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(app.focusedPaneId, remotePane.id);
+    expect(app.selectedMachineId, 'remote');
+    app.dispose();
+  });
+
+  test('legacy dial focus resolves only a uniquely-owned agent', () async {
+    final app = _notifier();
+    _machine(app, 'local', ['local-agent']);
+    _machine(app, 'remote', ['remote-agent']);
+    final localPane = app.adoptSessionForTest(
+      _session('local', 'local-agent')
+        ..status = TerminalSessionStatus.controlling,
+    );
+    final remotePane = app.adoptSessionForTest(
+      _session('remote', 'remote-agent')
+        ..status = TerminalSessionStatus.controlling,
+    );
+    app.focusPane(localPane.id);
+
+    await app.handleEventForTest('local', {
+      'type': 'dial_focus',
+      'payload': {'agentId': 'remote-agent'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(app.focusedPaneId, remotePane.id);
+    expect(app.selectedMachineId, 'remote');
+    app.dispose();
+  });
+
+  test(
+    'legacy dial focus never guesses when an agent id exists on two machines',
+    () async {
+      final app = _notifier();
+      _machine(app, 'local', ['shared-agent']);
+      _machine(app, 'remote', ['shared-agent']);
+      final localPane = app.adoptSessionForTest(
+        _session('local', 'shared-agent')
+          ..status = TerminalSessionStatus.controlling,
+      );
+      app.focusPane(localPane.id);
+
+      await app.handleEventForTest('local', {
+        'type': 'dial_focus',
+        'payload': {'agentId': 'shared-agent'},
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(app.focusedPaneId, localPane.id);
+      expect(app.selectedMachineId, isNot('remote'));
+      app.dispose();
+    },
+  );
+
   test('selecting an agent whose stream died rebuilds it, not just the ring', () async {
     final app = _notifier();
     _machine(app, 'm1', ['a']);

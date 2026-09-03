@@ -63,6 +63,7 @@ class CurrentUserProfile {
 /// Control-plane machine (GET /api/machines).
 class Machine {
   final String machineId;
+
   /// Legacy fixture-only field. Production `/api/machines` no longer exposes machine API keys.
   final String apiKey;
   final String? computerId;
@@ -150,6 +151,10 @@ class Agent {
     final hasTmux = runtimes.any(
       (runtime) => runtime is Map && runtime['backend'] == 'tmux',
     );
+    final advertisedAvailable = terminalMap['available'];
+    final terminalAvailable = advertisedAvailable is bool
+        ? advertisedAvailable
+        : hasTmux;
     return Agent(
       id: j['id'] as String,
       sessionId: _safeLabel(j['sessionId']),
@@ -159,10 +164,11 @@ class Agent {
       engineIconHint: _safeLabel(j['engineIconHint']),
       parentAgentId: _safeLabel(j['parentAgentId'] ?? j['parentId']),
       status: (j['status'] as String?) ?? 'active',
-      terminalAvailable: hasTmux,
-      terminalUnavailableReason: hasTmux
+      terminalAvailable: terminalAvailable,
+      terminalUnavailableReason: terminalAvailable
           ? null
-          : 'terminal unavailable (agent is not running in tmux)',
+          : _safeLabel(terminalMap['reason']) ??
+                'terminal unavailable (no verified terminal pane)',
     );
   }
 

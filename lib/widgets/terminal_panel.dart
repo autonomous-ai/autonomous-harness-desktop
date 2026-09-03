@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
@@ -383,10 +384,48 @@ class _TerminalPanelState extends State<TerminalPanel>
       await Clipboard.setData(ClipboardData(text: text));
       return;
     }
-    if (!widget.session.acceptsInput) return;
-    final text = (await Clipboard.getData('text/plain'))?.text;
-    if (text != null && text.isNotEmpty) terminal.paste(text);
+    await _paste();
   }
+
+  /// Paste — including the kinds of clipboard this app cannot read.
+  ///
+  /// ⚠️ FLUTTER CAN ONLY SEE `text/plain`. A screenshot has no text at all, so
+  /// the old body found `null` and returned, silently: the single most common
+  /// thing anyone pastes into a coding agent did nothing, with no error and
+  /// nothing in a log.
+  ///
+  /// The engines running in these panes read the system clipboard THEMSELVES —
+  /// Claude Code attaches an image on Ctrl+V — so when there is no text for us
+  /// to paste, the keystroke is handed DOWN as Ctrl+V rather than dropped. That
+  /// is also exactly what the user had been doing by hand to work around this.
+  Future<void> _paste() async {
+    if (!widget.session.acceptsInput) return;
+    final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    if (text != null && text.isNotEmpty) {
+      widget.session.terminal.paste(text);
+      return;
+    }
+    widget.session.terminal.keyInput(TerminalKey.keyV, ctrl: true);
+  }
+
+  /// ⌘V (Ctrl+V off Apple) — taken from xterm so the fallthrough above applies.
+  ///
+  /// xterm binds paste itself, but only ever to its text-only action. `onKeyEvent`
+  /// is the one hook that runs BEFORE its shortcut map (terminal_view.dart), so
+  /// this is where the binding has to be replaced rather than added.
+  KeyEventResult _onTerminalKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.keyV) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed) return KeyEventResult.ignored; // ⇧⌘V is a different verb
+    final apple = defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    final pasting = apple ? keyboard.isMetaPressed : keyboard.isControlPressed;
+    if (!pasting) return KeyEventResult.ignored;
+    unawaited(_paste());
+    return KeyEventResult.handled;
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -417,7 +456,9 @@ class _TerminalPanelState extends State<TerminalPanel>
                     theme: terminalThemeFor(grid.AppTheme.brightness.value),
                     padding: const EdgeInsets.all(10),
                     textStyle: terminalFontStore.value,
+                    onKeyEvent: _onTerminalKey,
                     onSecondaryTapDown: (_, _) => _copyOrPaste(),
+
                     onAltBufferScroll: session.scrollViaTmuxCopyMode
                         ? (up) => session.sendScrollCommand(up, 1)
                         : null,
