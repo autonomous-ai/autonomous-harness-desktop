@@ -157,9 +157,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   `GridSelector` and Settings ▸ Grid both write it. At create time the New agent dialog calls
   `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it as
   `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it always
-  did. ⚠️ TODO(BE): the harness CLI (`autonomous-harness`, not this repo) still has to read that
-  field and export the engine's env (`ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`/…); until it does, the
-  choice changes what the app shows and not how an engine runs.
+  did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field and
+  gives the new tmux session `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` via
+  `new-session -e`, so the key never lands in the engine's argv. **Claude Code is the only
+  grid-capable engine**; the CLI refuses the rest with `GRID_ENGINE_UNSUPPORTED` rather than running
+  them on their own login, and `kGridCapableEngines` in `widgets/new_agent_dialog.dart` mirrors that
+  list to warn before the click. Keep the two in sync.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

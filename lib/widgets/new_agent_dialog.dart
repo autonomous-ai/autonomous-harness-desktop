@@ -7,6 +7,14 @@ import '../theme/app_theme.dart';
 import 'engine_identity.dart';
 import 'remote_folder_picker.dart';
 
+/// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_ENV` in
+/// `autonomous-harness/cli/src/lib/gridLaunch.ts`.
+///
+/// Display only. The CLI is the enforcement point — it refuses every other engine rather than
+/// quietly launching it on its own login — so a stale list here costs a warning that did not
+/// appear, never a launch that should have worked. Keep both in sync anyway.
+const Set<String> kGridCapableEngines = {'claude'};
+
 /// Mirrors the harness CLI's `BYPASS_PERMISSION_FLAGS`
 /// (autonomous-harness/cli/src/lib/engineLaunch.ts) 1:1 — this is UI-only display + gating, the CLI
 /// is the actual enforcement point. An engine absent here shows no checkbox at all rather than
@@ -106,117 +114,122 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     final bypassFlag = kEngineBypassPermissionFlag[_engine];
     return AlertDialog(
       title: const Text('New agent'),
+      // Scrollable because the content grows: the grid warning below, the
+      // permissions block and an error line can all be present at once, and a
+      // short window would otherwise clip the actions instead of the fields.
       content: SizedBox(
         width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _FieldLabel('ENGINE'),
-            const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: _engine,
-              isExpanded: true,
-              items: [
-                for (final identity in allEngines)
-                  DropdownMenuItem(
-                    value: identity.id,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        EngineMark(engine: identity.id, size: 14),
-                        const SizedBox(width: 8),
-                        Text(
-                          identity.label,
-                          style: const TextStyle(fontSize: 13.5),
-                        ),
-                      ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _FieldLabel('ENGINE'),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                initialValue: _engine,
+                isExpanded: true,
+                items: [
+                  for (final identity in allEngines)
+                    DropdownMenuItem(
+                      value: identity.id,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          EngineMark(engine: identity.id, size: 14),
+                          const SizedBox(width: 8),
+                          Text(
+                            identity.label,
+                            style: const TextStyle(fontSize: 13.5),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) return;
-                setState(() {
-                  _engine = value;
-                  if (!kEngineBypassPermissionFlag.containsKey(value)) {
-                    _bypassPermission = false;
-                  }
-                });
-              },
-            ),
-            const SizedBox(height: 14),
-            const _FieldLabel('WORKING FOLDER'),
-            const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(isDense: true),
-                    child: Text(
-                      _folder ?? 'Choose a folder on this machine…',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: AppFonts.mono,
-                        fontSize: 13.5,
-                        color: _folder == null
-                            ? AppColors.muted
-                            : AppColors.textSoft,
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _engine = value;
+                    if (!kEngineBypassPermissionFlag.containsKey(value)) {
+                      _bypassPermission = false;
+                    }
+                  });
+                },
+              ),
+              const SizedBox(height: 14),
+              const _FieldLabel('WORKING FOLDER'),
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: InputDecorator(
+                      decoration: const InputDecoration(isDense: true),
+                      child: Text(
+                        _folder ?? 'Choose a folder on this machine…',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: AppFonts.mono,
+                          fontSize: 13.5,
+                          color: _folder == null
+                              ? AppColors.muted
+                              : AppColors.textSoft,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.tonal(
-                  onPressed: _browse,
-                  child: const Text(
-                    'Browse…',
-                    style: TextStyle(fontSize: 13.5),
+                  const SizedBox(width: 8),
+                  FilledButton.tonal(
+                    onPressed: _browse,
+                    child: const Text(
+                      'Browse…',
+                      style: TextStyle(fontSize: 13.5),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const _FieldLabel('RUNS ON'),
+              const SizedBox(height: 6),
+              _RunsOnRow(engine: _engine),
+              if (bypassFlag != null) ...[
+                const SizedBox(height: 14),
+                const _FieldLabel('PERMISSIONS'),
+                const SizedBox(height: 6),
+                CheckboxListTile(
+                  value: _bypassPermission,
+                  onChanged: (value) =>
+                      setState(() => _bypassPermission = value ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text(
+                    'Bypass permission prompts',
+                    style: TextStyle(fontFamily: AppFonts.sans, fontSize: 13.5),
+                  ),
+                  subtitle: Text(
+                    'Uses $bypassFlag',
+                    style: TextStyle(
+                      fontFamily: AppFonts.mono,
+                      fontSize: 11.2,
+                      color: AppColors.muted,
+                    ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 14),
-            const _FieldLabel('RUNS ON'),
-            const SizedBox(height: 6),
-            const _RunsOnRow(),
-            if (bypassFlag != null) ...[
-              const SizedBox(height: 14),
-              const _FieldLabel('PERMISSIONS'),
-              const SizedBox(height: 6),
-              CheckboxListTile(
-                value: _bypassPermission,
-                onChanged: (value) =>
-                    setState(() => _bypassPermission = value ?? false),
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text(
-                  'Bypass permission prompts',
-                  style: TextStyle(fontFamily: AppFonts.sans, fontSize: 13.5),
-                ),
-                subtitle: Text(
-                  'Uses $bypassFlag',
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
                   style: TextStyle(
-                    fontFamily: AppFonts.mono,
+                    color: AppColors.danger,
+                    fontFamily: AppFonts.sans,
                     fontSize: 11.2,
-                    color: AppColors.muted,
                   ),
                 ),
-              ),
+              ],
             ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                style: TextStyle(
-                  color: AppColors.danger,
-                  fontFamily: AppFonts.sans,
-                  fontSize: 11.2,
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -245,26 +258,50 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 /// and this is the moment the choice actually takes effect — which is exactly
 /// when a user wants to see it stated.
 class _RunsOnRow extends StatelessWidget {
-  const _RunsOnRow();
+  const _RunsOnRow({required this.engine});
+
+  final String engine;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<GridSelection>(
       valueListenable: gridSelectionStore,
-      builder: (context, chosen, _) => InputDecorator(
-        decoration: const InputDecoration(isDense: true),
-        child: Text(
-          chosen.hasGrid
-              ? '${chosen.label} · ${chosen.model ?? 'Auto'}'
-              : "This engine's own login — pick a grid in the sidebar",
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontFamily: AppFonts.sans,
-            fontSize: 13.5,
-            color: chosen.hasGrid ? AppColors.textSoft : AppColors.muted,
-          ),
-        ),
-      ),
+      builder: (context, chosen, _) {
+        final refused = chosen.hasGrid && !kGridCapableEngines.contains(engine);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InputDecorator(
+              decoration: const InputDecoration(isDense: true),
+              child: Text(
+                chosen.hasGrid
+                    ? '${chosen.label} · ${chosen.model ?? 'Auto'}'
+                    : "This engine's own login — pick a grid in the sidebar",
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: AppFonts.sans,
+                  fontSize: 13.5,
+                  color: chosen.hasGrid ? AppColors.textSoft : AppColors.muted,
+                ),
+              ),
+            ),
+            if (refused) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${engineIdentity(engine).label} cannot be pointed at a grid — it is configured by '
+                'a file rather than its environment. Creating this agent will be refused; choose '
+                'Claude Code, or clear the grid in the sidebar.',
+                style: TextStyle(
+                  fontFamily: AppFonts.sans,
+                  fontSize: 11.2,
+                  height: 1.4,
+                  color: AppColors.warning,
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

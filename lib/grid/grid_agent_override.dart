@@ -4,20 +4,21 @@ import 'grid_selection_store.dart';
 /// Where a newly created agent should send its inference, when the user has
 /// picked a grid.
 ///
-/// ⚠️ TODO(BE): THE CLI HAS TO HONOUR THIS, AND TODAY IT DOES NOT.
-///
 /// This travels as `payload.grid` on the `agent_create` frame. The harness CLI
 /// (the `autonomous-harness` repo, not this one) is what actually launches the
-/// engine, so it is the CLI that must read this and export the engine's own
-/// environment before spawning it — `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`
-/// /`ANTHROPIC_MODEL` for Claude Code, `OPENAI_BASE_URL`/`OPENAI_API_KEY` for
-/// Codex, and so on. The relay is OpenAI-compatible, which is what makes that
-/// possible at all.
+/// engine, so it is the CLI that reads this and hands the new tmux session the
+/// engine's own environment — see `cli/src/lib/gridLaunch.ts` there.
 ///
-/// Until that lands, picking a grid changes what the app SHOWS and nothing
-/// about how an engine actually runs. The field is only ever added to the
-/// payload when a grid is selected, so a build with no selection sends exactly
-/// the frame it sent before this existed.
+/// **Claude Code is the only engine that can be pointed at a grid**
+/// (`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL`). The CLI
+/// **refuses** every other one with `GRID_ENGINE_UNSUPPORTED` rather than
+/// starting it on its own login: the Codex CLI and its peers are configured by
+/// a config file, not the environment, and writing another tool's config on a
+/// user's behalf outlives the agent. [kGridCapableEngines] mirrors that list so
+/// the New agent dialog can say so before the click.
+///
+/// The field is only ever added to the payload when a grid is selected, so a
+/// build with no selection sends exactly the frame it sent before this existed.
 class GridAgentOverride {
   const GridAgentOverride({
     required this.networkId,
