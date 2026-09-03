@@ -1,13 +1,26 @@
 import 'grid_api_client.dart';
 import 'grid_selection_store.dart';
 
-/// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_ENV` in
+/// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_CONTRACTS` in
 /// `autonomous-harness/cli/src/lib/gridLaunch.ts`.
 ///
-/// Display only. The CLI is the enforcement point — it refuses every other engine rather than
-/// quietly launching it on its own login — so a stale list here costs a warning that did not
-/// appear, never a launch that should have worked. Keep both in sync anyway.
-const Set<String> kGridCapableEngines = {'claude'};
+/// Every one of these has a documented vendor knob for its endpoint — an environment variable, or
+/// for Codex a `-c model_providers.*` argument. The engines missing from this list are missing for
+/// a reason the CLI states per engine when it refuses: some talk only to their own service (Cursor,
+/// Amp, Devin), some need a provider block written into a dotfile this app will not edit (Pi, Kilo),
+/// and Antigravity speaks a dialect the relay does not serve.
+///
+/// Display only. The CLI is the enforcement point — it refuses everything else rather than quietly
+/// launching it on its own login — so a stale list here costs a warning that did not appear, never
+/// a launch that should have worked. Keep both in sync anyway.
+const Set<String> kGridCapableEngines = {
+  'claude',
+  'codex',
+  'copilot',
+  'grok',
+  'hermes',
+  'opencode',
+};
 
 /// Where a newly created agent should send its inference, when the user has
 /// picked a grid.
@@ -17,13 +30,10 @@ const Set<String> kGridCapableEngines = {'claude'};
 /// engine, so it is the CLI that reads this and hands the new tmux session the
 /// engine's own environment — see `cli/src/lib/gridLaunch.ts` there.
 ///
-/// **Claude Code is the only engine that can be pointed at a grid**
-/// (`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL`). The CLI
-/// **refuses** every other one with `GRID_ENGINE_UNSUPPORTED` rather than
-/// starting it on its own login: the Codex CLI and its peers are configured by
-/// a config file, not the environment, and writing another tool's config on a
-/// user's behalf outlives the agent. [kGridCapableEngines] mirrors that list so
-/// the New agent dialog can say so before the click.
+/// Each engine is pointed at the grid through its own documented knob — see
+/// [kGridCapableEngines]. The CLI **refuses** the rest with
+/// `GRID_ENGINE_UNSUPPORTED` rather than starting them on their own login, and
+/// names the reason for that particular engine.
 ///
 /// The field is only ever added to the payload when a grid is selected, so a
 /// build with no selection sends exactly the frame it sent before this existed.

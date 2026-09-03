@@ -143,12 +143,12 @@ void main() {
     });
 
     test('never offers a move the CLI would refuse', () {
-      // Codex is configured by a file, not the environment, so the CLI answers
+      // Cursor Agent talks only to Cursor's own service, so the CLI answers
       // GRID_ENGINE_UNSUPPORTED. The other two have no process to replace: an agent with no live
       // pane, and one that is not running — a row for an agent deleted while the app was
       // reconnecting looks exactly like the latter, and counting it was a real bug.
       seed([
-        agent('codex', engine: 'codex'),
+        agent('cursor', engine: 'cursor'),
         agent('dormant', terminalAvailable: false),
         agent('stopped', status: 'offline'),
         agent('movable'),

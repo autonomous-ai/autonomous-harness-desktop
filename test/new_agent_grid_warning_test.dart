@@ -43,7 +43,7 @@ void main() {
     if (engine == 'claude') return;
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Codex').last);
+    await tester.tap(find.text('Cursor').last);
     await tester.pumpAndSettle();
   }
 
@@ -51,7 +51,7 @@ void main() {
 
   testWidgets('says nothing about grids when none is picked', (tester) async {
     gridSelectionStore.value = GridSelection.none;
-    await openDialog(tester, engine: 'codex');
+    await openDialog(tester, engine: 'cursor');
     expect(find.textContaining("This engine's own login"), findsOneWidget);
     expect(warning, findsNothing);
   });
@@ -74,14 +74,25 @@ void main() {
       networkId: 'grid-3378218621364f16',
       networkName: 'autonomous.ai',
     );
-    await openDialog(tester, engine: 'codex');
+    await openDialog(tester, engine: 'cursor');
     expect(warning, findsOneWidget);
-    // The warning is only useful if it says what to do instead.
-    expect(find.textContaining('Claude Code'), findsWidgets);
+    // The warning is only useful if it says what to do instead. It no longer names one engine:
+    // six can reach a grid now, and the dropdown right above it is the list.
+    expect(find.textContaining('choose another engine'), findsOneWidget);
+    expect(find.textContaining('clear the grid'), findsOneWidget);
   });
 
   test('the grid-capable list matches what the CLI will accept', () {
-    // Mirrors GRID_ENGINE_ENV in autonomous-harness/cli/src/lib/gridLaunch.ts.
-    expect(kGridCapableEngines, {'claude'});
+    // Mirrors GRID_ENGINE_CONTRACTS in autonomous-harness/cli/src/lib/gridLaunch.ts, which has the
+    // same assertion on its own side. Drifting apart costs a warning that never appears, or one
+    // that appears for an engine that would have worked.
+    expect(kGridCapableEngines, {
+      'claude',
+      'codex',
+      'copilot',
+      'grok',
+      'hermes',
+      'opencode',
+    });
   });
 }

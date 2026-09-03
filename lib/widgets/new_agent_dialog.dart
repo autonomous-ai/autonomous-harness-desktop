@@ -280,9 +280,9 @@ class _RunsOnRow extends StatelessWidget {
             if (refused) ...[
               const SizedBox(height: 6),
               Text(
-                '${engineIdentity(engine).label} cannot be pointed at a grid — it is configured by '
-                'a file rather than its environment. Creating this agent will be refused; choose '
-                'Claude Code, or clear the grid in the sidebar.',
+                '${engineIdentity(engine).label} cannot be pointed at a grid — it offers no way '
+                'to change where it sends inference. Creating this agent will be refused; choose '
+                'another engine, or clear the grid in the sidebar.',
                 style: TextStyle(
                   fontFamily: AppFonts.sans,
                   fontSize: 11.2,
