@@ -115,33 +115,20 @@ class _SearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return SizedBox(
-      height: 32,
-      child: TextField(
-        onChanged: onChanged,
-        style: TextStyle(
-          color: grid.AppPalette.textSecondary,
-          fontFamily: grid.AppFont.sans,
-          fontSize: 13.5,
-        ),
-        decoration: InputDecoration(
-          hintText: 'search settings',
-          hintStyle: TextStyle(color: grid.AppPalette.textFaint),
-          prefixIcon: Icon(
-            LucideIcons.search300,
-            size: 16,
-            color: grid.AppPalette.textFaint,
-          ),
-          filled: true,
-          fillColor: grid.AppPalette.windowBg,
-          isDense: true,
-          contentPadding: EdgeInsets.zero,
-          border: OutlineInputBorder(
-            borderSide: BorderSide(color: grid.AppPalette.divider),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: grid.AppPalette.divider),
-          ),
+    // Same as the rail's filter field: sized and filled by the theme at
+    // AppControl.heightField (36) rather than clamped to a button's 32.
+    return TextField(
+      // Keyed because the Appearance pane now carries fields of its own, so a
+      // test reaching for "the" TextField would find three.
+      key: const Key('settings-search-field'),
+      onChanged: onChanged,
+      style: grid.kFieldTextStyle,
+      decoration: InputDecoration(
+        hintText: 'search settings',
+        prefixIcon: Icon(
+          LucideIcons.search300,
+          size: grid.kFieldIconSize,
+          color: grid.AppPalette.textFaint,
         ),
       ),
     );

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../shared/theme/app_theme.dart' as grid;
 
 /// Shown when an agent is selected but its Harness adapter is not running.
 ///
@@ -135,14 +136,14 @@ class _CommandRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onCopy,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.background,
           border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
         ),
         child: Row(
           children: [

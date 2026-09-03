@@ -208,7 +208,6 @@ class _LinkMachineScreenState extends State<LinkMachineScreen> {
                           )
                         : const Text(
                             'Link machine',
-                            style: TextStyle(fontSize: 13.5),
                           ),
                   ),
                 ],
@@ -268,7 +267,7 @@ class _LinkMachineScreenState extends State<LinkMachineScreen> {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: () => widget.notifier.dismissLinkPrompt(machineId),
-                  child: const Text('Close', style: TextStyle(fontSize: 13.5)),
+                  child: const Text('Close'),
                 ),
               ),
             ],

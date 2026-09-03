@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../shared/theme/app_theme.dart' as grid;
 
 /// First-run bootstrap surface. Provisioning starts without a confirmation
 /// dialog; this screen makes every system-affecting step visible and gives the
@@ -48,7 +49,9 @@ class EnvironmentSetupScreen extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: AppColors.background,
                         border: Border.all(color: AppColors.border),
-                        borderRadius: BorderRadius.circular(5),
+                        borderRadius: BorderRadius.circular(
+                          grid.AppCard.insetRadius,
+                        ),
                       ),
                       child: SingleChildScrollView(
                         child: SelectableText(

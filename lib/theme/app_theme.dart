@@ -74,136 +74,25 @@ abstract final class AppFonts {
   static const String mono = 'Menlo';
 }
 
-abstract final class AppTheme {
-  /// The dark shell, kept as a name because call sites and tests use it.
-  static ThemeData get terminalDark => terminal(Brightness.dark);
-
-  /// The light shell — the same chrome, resolved against the light palette.
-  static ThemeData get terminalLight => terminal(Brightness.light);
-
-  /// Build the shell for [b].
-  ///
-  /// ⚠️ WRAPPED IN `grid.AppTheme.as`, AND IT HAS TO BE. Every colour below now
-  /// reads through [AppColors], which resolves against ONE global brightness —
-  /// the same global that makes `AppPalette.windowBg` follow the theme with no
-  /// plumbing at any call site. MaterialApp asks for both themes up front, long
-  /// before that global has been told which one is being worn, so building them
-  /// straight would hand back two copies of whatever the app happened to be
-  /// wearing at startup. `as` swaps the global, reads, and puts it back.
-  static ThemeData terminal(Brightness b) =>
-      grid.AppTheme.as(b, () => _terminal(b));
-
-  static ThemeData _terminal(Brightness b) {
-    final scheme = ColorScheme(
-      brightness: b,
-      primary: AppColors.accent,
-      onPrimary: AppColors.background,
-      secondary: AppColors.success,
-      onSecondary: AppColors.background,
-      surface: AppColors.surface,
-      onSurface: AppColors.text,
-      error: AppColors.danger,
-      onError: AppColors.background,
-      outline: AppColors.border,
-    );
-    final sansBase = TextStyle(
-      fontFamily: AppFonts.sans,
-      fontFamilyFallback: AppFonts.sansFallback,
-      color: AppColors.text,
-    );
-    return ThemeData(
-      brightness: b,
-      useMaterial3: true,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: AppColors.background,
-      canvasColor: AppColors.background,
-      fontFamily: AppFonts.sans,
-      fontFamilyFallback: AppFonts.sansFallback,
-      splashFactory: NoSplash.splashFactory,
-      textTheme: TextTheme(
-        headlineSmall: sansBase,
-        titleLarge: sansBase,
-        titleMedium: sansBase,
-        titleSmall: sansBase,
-        bodyLarge: sansBase,
-        bodyMedium: sansBase,
-        bodySmall: sansBase.copyWith(color: AppColors.mutedStrong),
-        labelLarge: sansBase,
-        labelMedium: sansBase,
-        labelSmall: sansBase.copyWith(color: AppColors.muted),
-      ),
-      dividerTheme: DividerThemeData(
-        color: AppColors.border,
-        thickness: 1,
-        space: 1,
-      ),
-      iconTheme: IconThemeData(color: AppColors.mutedStrong, size: 18),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: AppColors.background,
-        isDense: true,
-        hintStyle: TextStyle(
-          color: AppColors.muted,
-          fontFamily: AppFonts.sans,
-          fontFamilyFallback: AppFonts.sansFallback,
-          fontSize: 12,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(5),
-          borderSide: BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(5),
-          borderSide: BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(5),
-          borderSide: BorderSide(color: AppColors.accent),
-        ),
-      ),
-      dialogTheme: DialogThemeData(
-        backgroundColor: AppColors.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 16,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(color: AppColors.borderStrong),
-        ),
-      ),
-      tooltipTheme: TooltipThemeData(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border.all(color: AppColors.borderStrong),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        textStyle: TextStyle(
-          color: AppColors.textSoft,
-          fontFamily: AppFonts.sans,
-          fontFamilyFallback: AppFonts.sansFallback,
-          fontSize: 11,
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: AppColors.textSoft,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: AppColors.background,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
-      ),
-      progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: AppColors.accent,
-        linearTrackColor: AppColors.border,
-      ),
-    );
-  }
-}
+/// The app's ThemeData now comes from `grid.buildAppTheme` — see `main.dart`.
+///
+/// ⚠️ DO NOT REBUILD ONE HERE. What used to live at this spot was a second,
+/// hand-written `ThemeData` (`AppTheme.terminalLight/terminalDark`), and it was
+/// the one the app actually wore: `grid.buildAppTheme` had ZERO call sites in
+/// `lib/` and was reached only from two tests. Everything the design system
+/// defines was therefore dead at runtime —
+///
+///   * all ten `TextTheme` steps were assigned the SAME style (family and colour
+///     only), so size, weight and `AppFont.trackingFor` fell through to
+///     Material's Roboto metrics. That is why ~150 call sites hand-type
+///     `fontSize:` across 14 different values: the theme gave them nothing, so
+///     each screen re-measured the ramp by eye.
+///   * `AppControl` had 0 references outside the token file — no call site could
+///     see the 32/28/36 control heights or the radius ladder.
+///   * `menuTheme` was null, so a `MenuAnchor` that passed no style of its own
+///     opened Material's raw default.
+///
+/// [AppColors] and [AppFonts] above stay: they are thin aliases onto
+/// `grid.AppPalette`, which is what let the swap be two lines in `main.dart`
+/// instead of renaming 500 call sites. Adding chrome back here would recreate
+/// exactly the split this deletion closed.

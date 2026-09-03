@@ -4,17 +4,21 @@ import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/theme_mode_store.dart';
+import '../../shared/widgets/section_heading.dart';
 import '../../shared/widgets/section_scaffold.dart';
+import '../appearance/theme_preview_tile.dart';
+import '../appearance/typography_section.dart';
 
-/// Settings ▸ Appearance: the palette the app wears.
+/// Settings ▸ Appearance: how the app looks on this Mac.
+///
+/// ⚠️ The APP, not the terminal. Everything on this screen stops at the edge of
+/// a terminal pane: the pane renders a grid a remote program is drawing into, so
+/// it carries its own face and size in Settings ▸ Terminal, and the UI scale is
+/// held out of it at five separate seams — see `terminal_panel.dart`,
+/// `terminal_composer.dart`, `engine_identity.dart` and `terminal_section.dart`,
+/// with `test/terminal_ui_scale_isolation_test.dart` standing guard.
 class AppearanceSection extends StatelessWidget {
   const AppearanceSection({super.key});
-
-  static const _labels = <ThemeMode, String>{
-    ThemeMode.system: 'System',
-    ThemeMode.light: 'Light',
-    ThemeMode.dark: 'Dark',
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -24,91 +28,20 @@ class AppearanceSection extends StatelessWidget {
       subtitle:
           'How Harness looks on this Mac. System follows your macOS setting, '
           'and the native menus and title bar follow it too.',
+      // ⚠️ A SingleChildScrollView, never a ListView. A lazy list keeps the
+      // children it has already built across a rebuild, which is the exact
+      // mechanism that strands a widget on the palette it first mounted with —
+      // and this is the one screen where the user flips the palette on purpose.
       child: SingleChildScrollView(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SettingLabel('Theme'),
-              const SizedBox(height: 8),
-              ValueListenableBuilder<ThemeMode>(
-                valueListenable: themeModeStore,
-                builder: (context, mode, _) => SegmentedChoice<ThemeMode>(
-                  segments: _labels,
-                  value: mode,
-                  onChanged: (next) => unawaited(themeModeStore.select(next)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// "THEME" — the caption over one control in a settings pane.
-///
-/// The same uppercase, letter-spaced micro-type `shortcuts_list.dart` uses for
-/// its group headers, so a labelled run of controls reads the same wherever it
-/// appears.
-class SettingLabel extends StatelessWidget {
-  const SettingLabel(this.label, {super.key});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return Text(
-      label.toUpperCase(),
-      style: TextStyle(
-        color: grid.AppPalette.textFaint,
-        fontSize: 10.5,
-        letterSpacing: 0.08 * 10.5,
-        fontWeight: grid.AppFont.medium,
-      ),
-    );
-  }
-}
-
-/// A small, app-themed stand-in for a native macOS segmented control — used for
-/// Appearance, and shaped to be reused by any setting that picks one of a
-/// handful of named options.
-class SegmentedChoice<T> extends StatelessWidget {
-  const SegmentedChoice({
-    super.key,
-    required this.segments,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final Map<T, String> segments;
-  final T value;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: grid.AppPalette.windowBg,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: grid.AppGlass.hair),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: Row(
-          children: [
-            for (final entry in segments.entries)
-              Expanded(
-                child: _Segment(
-                  label: entry.value,
-                  selected: entry.key == value,
-                  onTap: () => onChanged(entry.key),
-                ),
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            _ThemeChoice(),
+            SizedBox(height: 26),
+            TypographySection(),
+            // Room under the last card so a scrolled-to-bottom pane does not end
+            // flush against the window edge.
+            SizedBox(height: 8),
           ],
         ),
       ),
@@ -116,43 +49,55 @@ class SegmentedChoice<T> extends StatelessWidget {
   }
 }
 
-class _Segment extends StatelessWidget {
-  const _Segment({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+/// Light / Dark / System, offered as three miniatures of the app.
+class _ThemeChoice extends StatelessWidget {
+  const _ThemeChoice();
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return Material(
-      color: selected ? grid.AppPalette.accentOnSurface : Colors.transparent,
-      borderRadius: BorderRadius.circular(5),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(5),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: selected
-                  ? grid.AppFont.semibold
-                  : grid.AppFont.regular,
-              color: selected
-                  ? grid.AppPalette.windowBg
-                  : grid.AppPalette.textSecondary,
-            ),
+    // Resolved once here rather than inside each tile: `AppTheme.as` restores
+    // the global brightness before the tiles build, so a tile that read tokens
+    // in its own `build` would paint the palette the app is already wearing.
+    final light = ThemeSwatches.of(Brightness.light);
+    final dark = ThemeSwatches.of(Brightness.dark);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeading('Theme'),
+        const SizedBox(height: 12),
+        ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeModeStore,
+          builder: (context, mode, _) => Wrap(
+            spacing: 18,
+            runSpacing: 18,
+            children: [
+              ThemePreviewTile(
+                label: 'System',
+                selected: mode == ThemeMode.system,
+                onTap: () => unawaited(themeModeStore.select(ThemeMode.system)),
+                swatches: light,
+                // Both halves, cut down the middle — because that is precisely
+                // what choosing System means.
+                trailingSwatches: dark,
+              ),
+              ThemePreviewTile(
+                label: 'Light',
+                selected: mode == ThemeMode.light,
+                onTap: () => unawaited(themeModeStore.select(ThemeMode.light)),
+                swatches: light,
+              ),
+              ThemePreviewTile(
+                label: 'Dark',
+                selected: mode == ThemeMode.dark,
+                onTap: () => unawaited(themeModeStore.select(ThemeMode.dark)),
+                swatches: dark,
+              ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

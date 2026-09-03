@@ -665,6 +665,125 @@ abstract final class AppGlass {
   );
 }
 
+/// The floating-panel recipe — **one** source for every menu, popover and
+/// tooltip in the app, so the three cannot drift apart.
+///
+/// They already had. Before this the app carried *four* recipes for the same
+/// surface, and no two agreed:
+///
+/// ```
+///                              fill (dark)   elevation   radius   rim
+///   menuTheme / popupMenuTheme   #1E1E1E         8          6      no
+///   appMenuStyle()               #2A2A2A        12         10      yes
+///   tooltipTheme                 #1E1E1E         —         10      yes
+///   AccountFooter, inline        cardBg         18          8      yes
+/// ```
+///
+/// The cost was exactly what a second recipe always costs: the account footer's
+/// `MenuAnchor` passed no style at all, so it opened the rimless themed default
+/// — the surface `appMenuStyle` had been written to replace.
+///
+/// ⚠️ The fill is deliberately **not** the themed default. `#1E1E1E` sits within
+/// 1.02:1 of a raised block ([AppGlass.surfaceFill], `#202020`), and in light
+/// both are pure white — a menu opened over a dialog then has no edge at all and
+/// its rows appear to float loose on the page. These lift clear of *both*
+/// grounds a menu can open over: the page (`#181818` / `#FFFFFF`) and that
+/// block. Measured with `tool/contrast.py`, 2026-09-03:
+///
+/// ```
+///   dark   panel #2A2A2A vs page  #181818  =  1.237 : 1
+///   dark   panel #2A2A2A vs block #202020  =  1.135 : 1
+///   light  panel #FFFFFF vs page  #FFFFFF  =  1.000 : 1   ← the rim does it
+///   light  panel #FFFFFF vs block #FFFFFF  =  1.000 : 1   ← and here
+/// ```
+///
+/// Light is why the rim exists. On a white page the panel and the ground under
+/// it are *the same colour*, so the rim is the only thing drawing the edge —
+/// which is what earns it the one exception §1 allows. Fill alone cannot
+/// separate two surfaces (§9.1); the rim and the shadow do it together, which is
+/// also why the rim is not held to §16's 3.0 — see the note in `contrast.py`.
+///
+/// ⚠️ These are measurements with a date. Move `windowBg` or `surfaceFill` and
+/// all four are stale — re-run the script, don't trust the comment.
+///
+/// ⚠️ The `*Light`/`*Dark` const twins exist for the same reason `_scrollThumb*`
+/// do: [buildAppTheme] builds a theme for a brightness it has been *handed*,
+/// while a getter answers for the brightness the app is *wearing*, and the two
+/// differ in exactly the call that produces `darkTheme`. Inside that function
+/// use [styleFor] and the consts; everywhere else use [style] and the getters.
+abstract final class AppMenu {
+  static const Color fillLight = Color(0xFFFFFFFF);
+  static const Color fillDark = Color(0xFF2A2A2A);
+  static Color get fill => AppTheme.pick(fillLight, fillDark);
+
+  /// The panel's rim — the same hairline [AppGlass.hair] resolves to, stated as
+  /// consts so [buildAppTheme] can read it.
+  static const Color rimLight = Color(0x14000000);
+  static const Color rimDark = Color(0x1FFFFFFF);
+  static Color get rim => AppTheme.pick(rimLight, rimDark);
+
+  /// A menu panel's rounding. On the §3 ladder this is the *panel* step (10),
+  /// one below a content card (12) and above the rows inside it (8) — a child is
+  /// never rounder than its parent.
+  static const double panelRadius = 10;
+
+  /// Deeper than Material's menu default (8): this panel opens over chrome that
+  /// already carries a lift of its own, and at 8 it reads as lying *on* that
+  /// chrome rather than over it.
+  static const double elevation = 12;
+
+  /// ⚠️ Vertical only. Rows carry their own horizontal gutter so their hover
+  /// highlight reads as an inset pill; side padding here would double it.
+  static const EdgeInsets panelPadding = EdgeInsets.symmetric(vertical: 5);
+
+  /// The style every menu panel in the app takes.
+  ///
+  /// [minWidth]/[maxWidth] are for a panel whose width is part of its meaning —
+  /// the account menu holds an email address and must not resize as the address
+  /// changes. [maxHeight] defaults to [AppControl.menuMaxHeight]; override it
+  /// only for a panel that is taller by design, and read that token's note
+  /// first: a menu that opens *upward* places itself by summing the height it is
+  /// about to take.
+  static MenuStyle style({
+    double? minWidth,
+    double? maxWidth,
+    double? maxHeight,
+  }) => _style(
+    isDark: AppTheme.isDark,
+    minWidth: minWidth,
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+  );
+
+  /// [style] resolved against a brightness handed in rather than the one the app
+  /// is wearing. Only [buildAppTheme] needs this — see the ⚠️ above.
+  static MenuStyle styleFor({required bool isDark}) => _style(isDark: isDark);
+
+  static MenuStyle _style({
+    required bool isDark,
+    double? minWidth,
+    double? maxWidth,
+    double? maxHeight,
+  }) => MenuStyle(
+    backgroundColor: WidgetStatePropertyAll(isDark ? fillDark : fillLight),
+    surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+    elevation: const WidgetStatePropertyAll(elevation),
+    padding: const WidgetStatePropertyAll(panelPadding),
+    minimumSize: minWidth == null
+        ? null
+        : WidgetStatePropertyAll(Size(minWidth, 0)),
+    maximumSize: WidgetStatePropertyAll(
+      Size(maxWidth ?? double.infinity, maxHeight ?? AppControl.menuMaxHeight),
+    ),
+    shape: WidgetStatePropertyAll(
+      RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(panelRadius),
+        side: BorderSide(color: isDark ? rimDark : rimLight),
+      ),
+    ),
+  );
+}
+
 /// Content-card recipe — a surface with a hairline rim and a soft lift. Distinct
 /// from [AppSurface] (the chrome): cards carry dense content, so they stay quiet
 /// and let the text do the work. Applied via [GlassCard].
@@ -797,9 +916,18 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
           error: Color(0xFFB3261E),
         );
 
-  // The chrome fills used by menus/dialogs/snackbars. A getter-backed token can't
-  // be a compile-time const, so these are resolved here per-brightness.
-  final menuFill = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+  // The chrome fills used by menus, dialogs and toasts. A getter-backed token
+  // can't be a compile-time const, so these are resolved here per-brightness —
+  // and, more importantly, from `isDark` rather than off a token, for the reason
+  // spelled out at `scrollbarTheme` below.
+  //
+  // Two fills, not one. A *floating panel* (menu, popover, tooltip) opens over
+  // chrome that may itself be raised, so it takes [AppMenu]'s lifted fill; a
+  // *dialog* is the raised block, so it takes the block's own fill. Before this
+  // both were `#1E1E1E`, which is [AppCard.base] — a content card's colour, one
+  // step *below* the block it was supposed to be.
+  final panelFill = isDark ? AppMenu.fillDark : AppMenu.fillLight;
+  final dialogFill = isDark ? const Color(0xFF202020) : const Color(0xFFFFFFFF);
   final textTheme = _appTextTheme(scheme.onSurface, scheme.onSurfaceVariant);
 
   return ThemeData(
@@ -811,6 +939,12 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
+    // Also stated at ThemeData level, not only inside the ramp: Material builds
+    // text of its own (a dialog's semantics label, a field's error line) that
+    // never passes through `textTheme`, and without this those fall through to
+    // Roboto — one stray face in an app drawn entirely in San Francisco.
+    fontFamily: AppFont.sans,
+    fontFamilyFallback: AppFont.sansFallback,
     scaffoldBackgroundColor: scheme.surface,
     canvasColor: scheme.surface,
     dividerColor: scheme.outline,
@@ -870,14 +1004,12 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
     tooltipTheme: TooltipThemeData(
       waitDuration: const Duration(milliseconds: 500),
       decoration: BoxDecoration(
-        color: menuFill,
-        borderRadius: BorderRadius.circular(10),
-        // Resolved from `isDark` rather than read off `AppGlass`/`AppSurface`:
-        // those getters answer for the brightness the app is *showing*, and this
-        // function builds the theme for a brightness it has been handed.
-        border: Border.all(
-          color: isDark ? const Color(0x1FFFFFFF) : const Color(0x14000000),
-        ),
+        color: panelFill,
+        borderRadius: BorderRadius.circular(AppMenu.panelRadius),
+        // Resolved from `isDark` rather than read off the `AppMenu` getters:
+        // those answer for the brightness the app is *showing*, and this function
+        // builds the theme for a brightness it has been handed.
+        border: Border.all(color: isDark ? AppMenu.rimDark : AppMenu.rimLight),
         boxShadow: isDark
             ? const [
                 BoxShadow(
@@ -920,7 +1052,11 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
       // full width — a panel wider than the conversation it is explaining.
       constraints: const BoxConstraints(maxWidth: 420),
     ),
-    splashFactory: InkRipple.splashFactory,
+    // macOS controls do not ripple. §10.1 lists the ink ripple among the four
+    // things a raw `MenuItemButton` gets wrong, and §11 names it again for
+    // `IconButton` and `SegmentedButton` — so turning it off once here is the
+    // same rule applied at the root instead of at every call site.
+    splashFactory: NoSplash.splashFactory,
     textTheme: textTheme,
     primaryTextTheme: textTheme,
     iconTheme: IconThemeData(color: scheme.onSurfaceVariant, size: 18),
@@ -983,27 +1119,25 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
       errorBorder: _fieldBorder(scheme.error),
       focusedErrorBorder: _fieldBorder(scheme.error, width: 1.5),
     ),
+    // Fill, rim and elevation come from [AppMenu] so a Material popup cannot
+    // disagree with a MenuAnchor about what a menu looks like.
+    //
+    // The radius does not: [AppControl.menuRadius] (6) is the §3 step for
+    // *Material's own* popup, which draws tighter than the app's panel (10).
     popupMenuTheme: PopupMenuThemeData(
-      color: menuFill,
+      color: panelFill,
       surfaceTintColor: Colors.transparent,
-      elevation: 8,
-      // macOS menus are barely rounded — 14 reads as an iOS action sheet.
+      elevation: AppMenu.elevation,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppControl.menuRadius),
+        side: BorderSide(color: isDark ? AppMenu.rimDark : AppMenu.rimLight),
       ),
     ),
-    menuTheme: MenuThemeData(
-      style: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(menuFill),
-        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-        elevation: const WidgetStatePropertyAll(8),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppControl.menuRadius),
-          ),
-        ),
-      ),
-    ),
+    // The default every `MenuAnchor` gets, identical to what [AppMenu.style]
+    // hands a call site that asks for one explicitly. That identity is the whole
+    // point: a MenuAnchor that forgets to pass a style used to fall back to a
+    // rimless panel, which is the bug the hand-written style existed to fix.
+    menuTheme: MenuThemeData(style: AppMenu.styleFor(isDark: isDark)),
     // An ExpansionTile defaults `backgroundColor` (expanded) and
     // `collapsedBackgroundColor` to *different* values and cross-fades between
     // them, so opening one flashes a tint over whatever surface it sits on. Our
@@ -1018,7 +1152,11 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
       collapsedShape: Border(),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: menuFill,
+      // The raised block's own fill, not a menu's and not a card's. §9.3: a
+      // dialog that takes `windowBg` merges with the page, and one that takes
+      // [AppCard.base] sits a step under the block it is supposed to *be* —
+      // both invisible in light, both plain in dark.
+      backgroundColor: dialogFill,
       surfaceTintColor: Colors.transparent,
       // The card radius, not a number of its own. This was 18 — the iOS
       // action-sheet curve, and the app's cards had already come down to 12 for
@@ -1027,10 +1165,25 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
         borderRadius: BorderRadius.circular(AppCard.radius),
       ),
     ),
+    // ⚠️ [AppPalette.accentOnSurface], NOT `colorScheme.primary`.
+    //
+    // A spinner is the textbook case that token exists for: a MARK ON A SURFACE,
+    // not a fill carrying white text. Left to `primary` the arc draws #2F5BEA on
+    // the dark page, which measures 3.218:1 — over §16's 3.0 floor for a UI
+    // element, but only just, and it is the one thing on screen saying the app
+    // is still working. The lifted tint reaches 5.750:1.
+    //
+    // Resolved from `isDark` rather than read off the getter — see the note at
+    // `scrollbarTheme`.
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: isDark ? const Color(0xFF6E8BFF) : const Color(0xFF2F5BEA),
+      linearTrackColor: scheme.outline,
+    ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       width: 520,
-      backgroundColor: menuFill,
+      // A snackbar floats over everything, so it takes the panel fill.
+      backgroundColor: panelFill,
       contentTextStyle: TextStyle(
         color: scheme.onSurface,
         fontSize: 13.5,
@@ -1368,6 +1521,15 @@ abstract final class AppFont {
   static double _codeSize = _codeSizeDefault;
 
   static const double _codeSizeDefault = 12.5;
+
+  /// The UI size the app was DRAWN at, and therefore the denominator of
+  /// [uiScale]: a setting of 14 gives a scale of exactly 1, which is the only
+  /// value at which every control keeps the geometry this file specifies.
+  ///
+  /// Public because the settings screen has to divide by it to turn a size the
+  /// user picked into the scale [apply] takes, and a second copy of the number
+  /// on that side is a second thing to forget.
+  static const double uiSizeDefault = 14;
 
   /// What every UI dimension is multiplied by: 1.0 is the size the app was
   /// drawn at.

@@ -473,6 +473,23 @@ class _TerminalPanelState extends State<TerminalPanel>
                     theme: terminalThemeFor(grid.AppTheme.brightness.value),
                     padding: const EdgeInsets.all(10),
                     textStyle: terminalFontStore.value,
+                    // ⚠️ The terminal is NOT app chrome, and the user said so:
+                    // it carries its own font settings (Settings ▸ Terminal,
+                    // [terminalFontStore]) precisely because its type is a grid
+                    // a remote program is drawing into, not a label.
+                    //
+                    // Without this, `TerminalView` falls back to
+                    // `MediaQuery.textScalerOf(context)` (xterm's
+                    // terminal_view.dart:257), so the app-wide UI size would
+                    // change the cell size — and a changed cell size is not
+                    // cosmetic here: it re-derives `rows`, which fires
+                    // `Terminal.resize` → `session.resize` → a `terminal_resize`
+                    // frame on the wire and a real SIGWINCH at the far end.
+                    //
+                    // Read in `createRenderObject`, not only on update, so this
+                    // holds from the very first frame — no scaled first paint
+                    // and no startup resize.
+                    textScaler: TextScaler.noScaling,
                     onKeyEvent: _onTerminalKey,
                     onSecondaryTapDown: (_, _) => _copyOrPaste(),
 
@@ -669,6 +686,9 @@ class _OverlayBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: grid.AppPalette.panelBg.withValues(alpha: 0.93),
         border: Border.all(color: AppColors.borderStrong),
+        // Left at 4 on purpose. This badge is drawn INSIDE a terminal pane, and
+        // the pane is off-limits to the app-wide design pass — it is reviewed
+        // with the terminal, not with the app's chrome.
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(

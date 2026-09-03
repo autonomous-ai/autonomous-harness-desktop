@@ -123,13 +123,13 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             key: const Key('remote-password-clear-confirm-button'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Clear', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Clear'),
           ),
         ],
       ),
@@ -254,7 +254,7 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close', style: TextStyle(fontSize: 13.5)),
+          child: const Text('Close'),
         ),
       ],
     );
@@ -450,10 +450,16 @@ class _RemotePasswordForm extends StatelessWidget {
           style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
           decoration: InputDecoration(
             hintText: 'New remote password',
-            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            hintStyle: const TextStyle(
+              fontFamily: AppFonts.mono,
+              fontSize: 12.5,
+            ),
             prefixIcon: const Icon(Icons.password, size: 17),
             suffixIcon: IconButton(
-              icon: Icon(obscure ? Icons.visibility : Icons.visibility_off, size: 17),
+              icon: Icon(
+                obscure ? Icons.visibility : Icons.visibility_off,
+                size: 17,
+              ),
               onPressed: onToggleObscure,
             ),
           ),
@@ -466,7 +472,10 @@ class _RemotePasswordForm extends StatelessWidget {
           style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
           decoration: InputDecoration(
             hintText: 'Confirm password',
-            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            hintStyle: const TextStyle(
+              fontFamily: AppFonts.mono,
+              fontSize: 12.5,
+            ),
             prefixIcon: const Icon(Icons.password, size: 17),
           ),
           onSubmitted: (_) => onSubmit(),
@@ -478,7 +487,7 @@ class _RemotePasswordForm extends StatelessWidget {
             if (onCancel != null) ...[
               TextButton(
                 onPressed: submitting ? null : onCancel,
-                child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+                child: const Text('Cancel'),
               ),
               const SizedBox(width: 8),
             ],
@@ -491,7 +500,7 @@ class _RemotePasswordForm extends StatelessWidget {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Set', style: TextStyle(fontSize: 13.5)),
+                  : const Text('Set'),
             ),
           ],
         ),
@@ -577,13 +586,13 @@ class _RemotePasswordSummary extends StatelessWidget {
             TextButton(
               key: const Key('remote-password-clear-button'),
               onPressed: clearing ? null : onClear,
-              child: const Text('Clear', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Clear'),
             ),
             const SizedBox(width: 8),
             FilledButton(
               key: const Key('remote-password-change-button'),
               onPressed: clearing ? null : onChange,
-              child: const Text('Change', style: TextStyle(fontSize: 13.5)),
+              child: const Text('Change'),
             ),
           ],
         ),
@@ -643,7 +652,7 @@ class _LinkedMachineRow extends StatelessWidget {
           TextButton(
             key: Key('unlink-${machine.machineId}'),
             onPressed: () => unawaited(onUnlink()),
-            child: const Text('Unlink', style: TextStyle(fontSize: 12.5)),
+            child: const Text('Unlink'),
           ),
         ],
       ),

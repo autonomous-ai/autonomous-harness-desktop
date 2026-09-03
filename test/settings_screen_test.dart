@@ -11,6 +11,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:harness/settings/appearance/theme_preview_tile.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:harness/auth/auth_session.dart';
@@ -102,9 +103,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Appearance'), findsNWidgets(2));
-    expect(find.text('System'), findsOneWidget);
-    expect(find.text('Light'), findsOneWidget);
-    expect(find.text('Dark'), findsOneWidget);
+
+    // The theme choice, three tiles, defaulting to System.
+    //
+    // Scoped to the tiles: 'System' now appears twice on this pane, once as a
+    // theme and once as the UI font — two different senses of the same word,
+    // which is why the font control carries its face name beside it.
+    final tiles = find.byType(ThemePreviewTile);
+    expect(tiles, findsNWidgets(3));
+    expect(
+      find.descendant(of: tiles, matching: find.text('System')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: tiles, matching: find.text('Light')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: tiles, matching: find.text('Dark')),
+      findsOneWidget,
+    );
+
+    // Typography arrived with it.
+    expect(find.text('Typography'), findsOneWidget);
+    expect(find.text('UI font'), findsOneWidget);
+    expect(find.text('UI font size'), findsOneWidget);
+    expect(find.byKey(const Key('appearance-ui-size-field')), findsOneWidget);
+
+    // The Grid pane is gone with its section.
     expect(find.text('hp-1-1'), findsNothing);
   });
 
@@ -137,13 +163,19 @@ void main() {
     );
     // The Grid pane is gone with its section.
     expect(find.text('hp-1-1'), findsNothing);
+    // The Appearance controls are gone with their pane.
+    expect(find.byType(ThemePreviewTile), findsNothing);
+    expect(find.byKey(const Key('appearance-ui-size-field')), findsNothing);
   });
 
   testWidgets('the rail filter narrows to matching rows, and says so when '
       'nothing matches', (tester) async {
     await openSettings(tester);
 
-    await tester.enterText(find.byType(TextField), 'key');
+    await tester.enterText(
+      find.byKey(const Key('settings-search-field')),
+      'key',
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Keyboard shortcuts'), findsOneWidget);
@@ -153,7 +185,10 @@ void main() {
     expect(find.text('Terminal'), findsNothing);
     expect(find.text('Preferences'), findsNothing);
 
-    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.enterText(
+      find.byKey(const Key('settings-search-field')),
+      'zzz',
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('No settings match'), findsOneWidget);

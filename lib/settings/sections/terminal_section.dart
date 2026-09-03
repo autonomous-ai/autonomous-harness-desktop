@@ -6,7 +6,7 @@ import 'package:xterm/xterm.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/section_scaffold.dart';
 import '../../terminal/terminal_font_store.dart';
-import 'appearance_section.dart' show SettingLabel;
+import '../../shared/widgets/labeled_field.dart';
 
 /// Settings ▸ Terminal: the face the agent's output is drawn in.
 class TerminalSection extends StatelessWidget {
@@ -28,15 +28,15 @@ class TerminalSection extends StatelessWidget {
             builder: (context, style, _) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SettingLabel('Font'),
+                const FieldLabel('Font'),
                 const SizedBox(height: 8),
                 _FamilyDropdown(family: terminalFontStore.family),
                 const SizedBox(height: 18),
-                const SettingLabel('Size'),
+                const FieldLabel('Size'),
                 const SizedBox(height: 8),
                 _SizeStepper(size: style.fontSize),
                 const SizedBox(height: 18),
-                const SettingLabel('Preview'),
+                const FieldLabel('Preview'),
                 const SizedBox(height: 8),
                 _Preview(style: style),
                 const SizedBox(height: 10),
@@ -45,10 +45,7 @@ class TerminalSection extends StatelessWidget {
                   child: TextButton(
                     key: const Key('terminal-settings-reset-button'),
                     onPressed: () => unawaited(terminalFontStore.reset()),
-                    child: const Text(
-                      'Reset to default',
-                      style: TextStyle(fontSize: 12.5),
-                    ),
+                    child: const Text('Reset to default'),
                   ),
                 ),
               ],
@@ -73,10 +70,7 @@ class _FamilyDropdown extends StatelessWidget {
       value: family,
       items: [
         for (final choice in TerminalFontChoice.values)
-          DropdownMenuItem(
-            value: choice,
-            child: Text(choice.label, style: const TextStyle(fontSize: 13.5)),
-          ),
+          DropdownMenuItem(value: choice, child: Text(choice.label)),
       ],
       onChanged: (choice) {
         if (choice != null) unawaited(terminalFontStore.setFamily(choice));
@@ -101,11 +95,7 @@ class _SizeStepper extends StatelessWidget {
         ),
         SizedBox(
           width: 44,
-          child: Text(
-            '${size.round()}pt',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 13.5),
-          ),
+          child: Text('${size.round()}pt', textAlign: TextAlign.center),
         ),
         IconButton(
           key: const Key('terminal-font-size-increase'),
@@ -136,8 +126,12 @@ class _Preview extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: grid.AppGlass.hair),
       ),
+      // ⚠️ This previews the TERMINAL's font at the TERMINAL's size. Left to
+      // the ambient scaler it would grow with the app's UI size setting and
+      // show the user a size the terminal will never render at.
       child: Text(
         '┌─ mmmmmmmmmm ─┐\nagent@harness ❯ _',
+        textScaler: TextScaler.noScaling,
         style: style.toTextStyle(color: grid.AppPalette.textPrimary),
       ),
     );

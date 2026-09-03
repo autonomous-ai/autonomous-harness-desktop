@@ -35,7 +35,7 @@ Future<void> showAgentRenameDialog(
               TextField(
                 controller: controller,
                 autofocus: true,
-                style: const TextStyle(fontSize: 13.5),
+                style: grid.kFieldTextStyle,
                 onSubmitted: (_) async {
                   final result = await notifier.renameAgent(
                     machineId,
@@ -68,7 +68,7 @@ Future<void> showAgentRenameDialog(
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () async {
@@ -83,7 +83,7 @@ Future<void> showAgentRenameDialog(
                 setDialogState(() => error = result);
               }
             },
-            child: const Text('Save', style: TextStyle(fontSize: 13.5)),
+            child: const Text('Save'),
           ),
         ],
       ),

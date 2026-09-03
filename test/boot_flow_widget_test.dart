@@ -12,6 +12,7 @@ import 'package:harness/update/desktop_updater.dart';
 import 'package:harness/update/manual_update_check.dart';
 import 'package:harness/widgets/update_notice.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -233,7 +234,7 @@ void main() {
       );
       expect(find.text('diego@autonomous.ai'), findsOneWidget);
       expect(find.byKey(const Key('account-menu-button')), findsOneWidget);
-      expect(find.byIcon(Icons.logout), findsNothing);
+      expect(find.byIcon(LucideIcons.logOut300), findsNothing);
       // left rail is present
       // The rail is present. Asserted on its section heading, not on the
       // filter field: that field lives behind the rail's search toggle now, so
@@ -245,7 +246,7 @@ void main() {
 
       expect(find.text('Diego'), findsOneWidget);
       expect(find.text('Sign out'), findsOneWidget);
-      expect(find.byIcon(Icons.logout), findsOneWidget);
+      expect(find.byIcon(LucideIcons.logOut300), findsOneWidget);
       expect(find.text('v1.0.0'), findsOneWidget);
       expect(find.text('Remote into another machine…'), findsOneWidget);
 
@@ -370,7 +371,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Harness 2.0.0 is required'), findsOneWidget);
-      expect(find.byKey(const Key('forced-update-install-button')), findsOneWidget);
+      expect(
+        find.byKey(const Key('forced-update-install-button')),
+        findsOneWidget,
+      );
       // No login screen underneath, and none of the optional-update escape hatches.
       expect(find.text('Sign in'), findsNothing);
       expect(find.byKey(const Key('skip-update-button')), findsNothing);
@@ -391,8 +395,7 @@ void main() {
           update: UpdateInfo(
             version: '2.0.0',
             url: 'https://example.test/Harness-macos.zip',
-            sha256:
-                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             size: 1,
             forced: true,
           ),
@@ -569,78 +572,77 @@ void main() {
     app.dispose();
   });
 
-  testWidgets(
-    'clicking link-required while another terminal is focused opens '
-    'the popup without opening a new pane',
-    (tester) async {
-      final app = makeNotifier(AppStatus.authenticated);
-      const otherMachine = Machine(
-        machineId: 'other-machine',
-        apiKey: '',
-        authMode: MachineAuthMode.remote,
-        name: 'other-mac',
-        status: 'online',
-      );
-      const machine = Machine(
-        machineId: 'link-machine',
-        apiKey: '',
-        authMode: MachineAuthMode.remote,
-        name: 'link-mac',
-        status: 'online',
-      );
-      final otherState = MachineState(otherMachine)
-        ..nodeOnline = true
-        ..agentLoadStatus = AgentLoadStatus.loaded;
-      final state = MachineState(machine)
-        ..nodeOnline = true
-        ..needsLink = true
-        ..agentLoadStatus = AgentLoadStatus.needsLink;
-      app.machines = [otherMachine, machine];
-      app.machineStates[otherMachine.machineId] = otherState;
-      app.machineStates[machine.machineId] = state;
-      app.expandedMachines.add(otherMachine.machineId);
-      app.expandedMachines.add(machine.machineId);
+  testWidgets('clicking link-required while another terminal is focused opens '
+      'the popup without opening a new pane', (tester) async {
+    final app = makeNotifier(AppStatus.authenticated);
+    const otherMachine = Machine(
+      machineId: 'other-machine',
+      apiKey: '',
+      authMode: MachineAuthMode.remote,
+      name: 'other-mac',
+      status: 'online',
+    );
+    const machine = Machine(
+      machineId: 'link-machine',
+      apiKey: '',
+      authMode: MachineAuthMode.remote,
+      name: 'link-mac',
+      status: 'online',
+    );
+    final otherState = MachineState(otherMachine)
+      ..nodeOnline = true
+      ..agentLoadStatus = AgentLoadStatus.loaded;
+    final state = MachineState(machine)
+      ..nodeOnline = true
+      ..needsLink = true
+      ..agentLoadStatus = AgentLoadStatus.needsLink;
+    app.machines = [otherMachine, machine];
+    app.machineStates[otherMachine.machineId] = otherState;
+    app.machineStates[machine.machineId] = state;
+    app.expandedMachines.add(otherMachine.machineId);
+    app.expandedMachines.add(machine.machineId);
 
-      // A terminal already open and FOCUSED on the other machine — this is what made
-      // activeMachineState (which prefers focusedPane's session) resolve to the wrong
-      // machine and made showMachinePane open a second, redundant "not linked" pane.
-      final otherPane = TerminalPane(
-        id: 1,
-        machineId: otherMachine.machineId,
-        agentId: 'other-agent',
-      )..session = TerminalSession(
-        machineId: otherMachine.machineId,
-        agentId: 'other-agent',
-        agentName: 'other-agent',
-        engineId: null,
-        send: (_, _) async => true,
-        sendBinary: (_) async => true,
-      );
-      app.panes.add(otherPane);
-      app.focusedPaneId = otherPane.id;
-      app.selectedMachineId = otherMachine.machineId;
+    // A terminal already open and FOCUSED on the other machine — this is what made
+    // activeMachineState (which prefers focusedPane's session) resolve to the wrong
+    // machine and made showMachinePane open a second, redundant "not linked" pane.
+    final otherPane =
+        TerminalPane(
+            id: 1,
+            machineId: otherMachine.machineId,
+            agentId: 'other-agent',
+          )
+          ..session = TerminalSession(
+            machineId: otherMachine.machineId,
+            agentId: 'other-agent',
+            agentName: 'other-agent',
+            engineId: null,
+            send: (_, _) async => true,
+            sendBinary: (_) async => true,
+          );
+    app.panes.add(otherPane);
+    app.focusedPaneId = otherPane.id;
+    app.selectedMachineId = otherMachine.machineId;
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [appStateProvider.overrideWithValue(app)],
-          child: const DesktopApp(),
-        ),
-      );
-      await tester.pump();
-      expect(find.text('Link this machine'), findsNothing);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Link this machine'), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('link-required')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('link-required')));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Link this machine'), findsOneWidget);
-      // No second pane was opened for the popup — just the one terminal pane that was
-      // already there.
-      expect(app.panes, hasLength(1));
-      expect(
-        find.text('link-mac is not linked to this computer yet.'),
-        findsNothing,
-      );
-      app.dispose();
-    },
-  );
+    expect(find.text('Link this machine'), findsOneWidget);
+    // No second pane was opened for the popup — just the one terminal pane that was
+    // already there.
+    expect(app.panes, hasLength(1));
+    expect(
+      find.text('link-mac is not linked to this computer yet.'),
+      findsNothing,
+    );
+    app.dispose();
+  });
 }

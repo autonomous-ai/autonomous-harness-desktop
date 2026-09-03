@@ -21,11 +21,10 @@ class _ShortcutsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     return Dialog(
-      backgroundColor: grid.AppGlass.surfaceFill,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(13),
-        side: BorderSide(color: grid.AppGlass.hair),
-      ),
+      // No backgroundColor, no shape: `dialogTheme` supplies both, at
+      // AppGlass.surfaceFill and AppCard.radius (12). The rim this used to
+      // carry is gone with them — §1 allows exactly one border in the app and
+      // it belongs to the menu panel, not to a dialog.
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: Column(
