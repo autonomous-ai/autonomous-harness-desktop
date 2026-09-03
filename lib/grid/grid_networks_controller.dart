@@ -84,3 +84,7 @@ class GridNetworksController extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Shared by the Settings pane and the sidebar's grid menu — two places that
+/// list the same grids and must not each hold their own half-stale copy.
+final gridNetworksController = GridNetworksController();

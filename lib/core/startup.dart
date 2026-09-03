@@ -1,3 +1,4 @@
+import '../grid/grid_selection_store.dart';
 import '../shared/theme/theme_mode_store.dart';
 import '../terminal/terminal_font_store.dart';
 
@@ -16,7 +17,11 @@ import '../terminal/terminal_font_store.dart';
 Future<void> loadPersistedSettings({
   ThemeModeStore? themeMode,
   TerminalFontStore? terminalFont,
+  GridSelectionStore? gridSelection,
 }) async {
   await (themeMode ?? themeModeStore).load();
   await (terminalFont ?? terminalFontStore).load();
+  // The sidebar names the chosen grid in its first frame; loading this later
+  // would show "each engine's own login" and then snap to the real choice.
+  await (gridSelection ?? gridSelectionStore).load();
 }

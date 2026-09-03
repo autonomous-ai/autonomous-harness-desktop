@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/harness_file_store.dart';
 import 'package:harness/core/startup.dart';
+import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/shared/theme/theme_mode_store.dart';
 import 'package:harness/terminal/terminal_font_store.dart';
 
@@ -29,18 +30,25 @@ void main() {
     final previousFont = TerminalFontStore(storage: previousRun);
     await previousFont.setFamily(TerminalFontChoice.menlo);
     await previousFont.setSize(17);
+    await GridSelectionStore(storage: previousRun)
+        .selectNetwork(networkId: 'grid-1', networkName: 'Office');
 
     // The next launch: brand-new stores over the same directory, loaded the way main() loads them.
     final themeMode = ThemeModeStore(storage: HarnessFileStore(directory: dir));
     final terminalFont = TerminalFontStore(storage: HarnessFileStore(directory: dir));
+    final gridSelection =
+        GridSelectionStore(storage: HarnessFileStore(directory: dir));
     await loadPersistedSettings(
       themeMode: themeMode,
       terminalFont: terminalFont,
+      gridSelection: gridSelection,
     );
 
     expect(themeMode.value, ThemeMode.dark);
     expect(terminalFont.family, TerminalFontChoice.menlo);
     expect(terminalFont.size, 17.0);
+    expect(gridSelection.value.networkId, 'grid-1');
+    expect(gridSelection.value.label, 'Office');
   });
 
   test('a first-ever launch lands on the defaults instead of throwing', () async {
@@ -48,12 +56,16 @@ void main() {
     final themeMode = ThemeModeStore(storage: HarnessFileStore(directory: dir));
     final terminalFont = TerminalFontStore(storage: HarnessFileStore(directory: dir));
 
+    final gridSelection =
+        GridSelectionStore(storage: HarnessFileStore(directory: dir));
     await loadPersistedSettings(
       themeMode: themeMode,
       terminalFont: terminalFont,
+      gridSelection: gridSelection,
     );
 
     expect(themeMode.value, ThemeMode.system);
     expect(terminalFont.family, TerminalFontChoice.sfMono);
+    expect(gridSelection.value.hasGrid, isFalse);
   });
 }

@@ -152,6 +152,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   `grid_api_client.dart` is a **hardcoded developer token** — TODO(BE), it must not ship; override it
   with `--dart-define=GRID_API_TOKEN=…`. Response fields were read off the live API, not the OpenAPI
   spec, whose `/v1/grid/me` response schema is empty.
+- **Picking a grid retargets NEW agents only.** `gridSelectionStore` (`lib/grid/`, persisted like
+  `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid + model; the sidebar's
+  `GridSelector` and Settings ▸ Grid both write it. At create time the New agent dialog calls
+  `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it as
+  `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it always
+  did. ⚠️ TODO(BE): the harness CLI (`autonomous-harness`, not this repo) still has to read that
+  field and export the engine's env (`ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`/…); until it does, the
+  choice changes what the app shows and not how an engine runs.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

@@ -15,6 +15,8 @@ class GridNetworkCard extends StatelessWidget {
     super.key,
     required this.network,
     required this.signedInEmail,
+    this.selected = false,
+    this.onUse,
   });
 
   final GridNetwork network;
@@ -22,6 +24,13 @@ class GridNetworkCard extends StatelessWidget {
   /// Whose session this is, so the card can say "you own this" rather than
   /// printing an email the reader has to compare against their own.
   final String signedInEmail;
+
+  /// This is the grid new agents are launched against.
+  final bool selected;
+
+  /// Make it that grid. Null hides the action — the same choice lives in the
+  /// sidebar, and a card that offered it with nowhere to record it would lie.
+  final VoidCallback? onUse;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +65,23 @@ class GridNetworkCard extends StatelessWidget {
               // Status lives beside the name because it is the one fact that
               // decides whether anything below it matters.
               _StatusDot(status: network.status),
+              if (onUse != null) ...[
+                const SizedBox(width: 10),
+                selected
+                    ? const _Pill(label: 'New agents use this', accent: true)
+                    : TextButton(
+                        onPressed: onUse,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 28),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Use for new agents',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+              ],
             ],
           ),
           if (network.description?.trim().isNotEmpty ?? false) ...[

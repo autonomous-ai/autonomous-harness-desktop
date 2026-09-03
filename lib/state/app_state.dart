@@ -12,6 +12,7 @@ import '../auth/cli_login.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/models.dart';
+import '../grid/grid_agent_override.dart';
 import '../settings/config_store.dart';
 import '../terminal/terminal_session.dart';
 import 'pane_layout_store.dart';
@@ -1514,6 +1515,7 @@ class AppNotifier extends ChangeNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
+    GridAgentOverride? grid,
   }) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
@@ -1526,6 +1528,10 @@ class AppNotifier extends ChangeNotifier {
           'engine': engine,
           'cwd': folder,
           'bypassPermission': bypassPermission,
+          // Only when the user picked a grid, so a build with no selection
+          // sends byte for byte the frame it sent before this existed — see
+          // GridAgentOverride for what the CLI still has to do with it.
+          if (grid != null) 'grid': grid.toJson(),
         },
         timeout: const Duration(seconds: 20),
       );

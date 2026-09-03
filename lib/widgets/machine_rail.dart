@@ -16,6 +16,7 @@ import '../state/app_state.dart';
 import 'agent_drag.dart';
 import 'account_footer.dart';
 import 'engine_identity.dart';
+import 'grid_selector.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
 import 'window_chrome.dart';
@@ -235,6 +236,7 @@ class MachineRailState extends State<MachineRail> {
                       ),
                     ),
             ),
+            const GridSelector(),
             AccountFooter(notifier: widget.notifier),
           ],
         );

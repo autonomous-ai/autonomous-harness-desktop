@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../grid/grid_network.dart';
+import '../../grid/grid_selection_store.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
@@ -119,7 +120,20 @@ class _Networks extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 8),
                   children: [
                     for (final network in networks)
-                      GridNetworkCard(network: network, signedInEmail: email),
+                      ValueListenableBuilder<GridSelection>(
+                        valueListenable: gridSelectionStore,
+                        builder: (context, chosen, _) => GridNetworkCard(
+                          network: network,
+                          signedInEmail: email,
+                          selected: chosen.networkId == network.networkId,
+                          onUse: () => unawaited(
+                            gridSelectionStore.selectNetwork(
+                              networkId: network.networkId,
+                              networkName: network.displayName,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
         ),

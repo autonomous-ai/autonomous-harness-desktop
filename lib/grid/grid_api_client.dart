@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../api/api_client.dart' show ApiException;
+import 'grid_credentials.dart';
 import 'grid_network.dart';
 
 /// The Grid control plane, called DIRECTLY — the one place in this app that
@@ -38,11 +39,53 @@ class GridApiClient {
   /// is why this screen uses it rather than `/v1/grid/networks`: that endpoint
   /// returns the same list without the account behind it, and the pane names
   /// the account at the top.
-  Future<GridMe> me() async {
-    final response = await _dio.get<dynamic>(
-      '/v1/grid/me',
-      options: Options(headers: {'Authorization': 'Bearer $_token'}),
+  Future<GridMe> me() async =>
+      GridMe.fromJson(Map<String, dynamic>.from(await _get('/v1/grid/me')));
+
+  /// A key for one grid's relay, minted on demand.
+  ///
+  /// Not cached — see [GridCredentials] for why.
+  Future<GridCredentials> credentials(String networkId) async =>
+      GridCredentials.fromJson(
+        Map<String, dynamic>.from(
+          await _get('/v1/grid/networks/$networkId/credentials'),
+        ),
+      );
+
+  /// The model ids this grid serves, in the order the relay lists them.
+  ///
+  /// The relay is OpenAI-compatible, so this is `GET {baseUrl}/models` — a
+  /// different host and a different credential from every other call on this
+  /// client, which is why it takes both explicitly rather than reading the
+  /// session token.
+  Future<List<String>> models({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await _dio.getUri<dynamic>(
+      Uri.parse('$baseUrl/models'),
+      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
     );
+    final body = _unwrap(response);
+    final data = body['data'];
+    if (data is! List) return const [];
+    return [
+      for (final model in data)
+        if (model is Map && model['id'] is String && model['id'] != '')
+          model['id'] as String,
+    ];
+  }
+
+  /// One authenticated GET against the control plane, unwrapped into a map or
+  /// an [ApiException] — the shape every call above shares.
+  Future<Map<dynamic, dynamic>> _get(String path) async => _unwrap(
+    await _dio.get<dynamic>(
+      path,
+      options: Options(headers: {'Authorization': 'Bearer $_token'}),
+    ),
+  );
+
+  Map<dynamic, dynamic> _unwrap(Response<dynamic> response) {
     final body = response.data;
     final status = response.statusCode ?? 0;
     if (status < 200 || status >= 300) {
@@ -54,7 +97,7 @@ class GridApiClient {
         status: status,
       );
     }
-    return GridMe.fromJson(Map<String, dynamic>.from(body));
+    return body;
   }
 
   /// FastAPI reports a failure as `{"detail": ...}`, where the detail is either

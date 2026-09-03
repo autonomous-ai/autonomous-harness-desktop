@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../grid/grid_agent_override.dart';
+import '../grid/grid_selection_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'engine_identity.dart';
@@ -62,12 +64,31 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       _submitting = true;
       _error = null;
     });
+    // A relay key is minted per launch, so it is fetched here rather than held
+    // in the store. Null when no grid is picked, which leaves the frame exactly
+    // as it was before this feature existed.
+    final GridAgentOverride? grid;
+    try {
+      grid = await resolveGridAgentOverride();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        // Named rather than swallowed: falling back to the engine's own login
+        // would silently run the agent somewhere the user did not choose.
+        _error =
+            'Could not get a key for '
+            '${gridSelectionStore.value.label}: $error';
+      });
+      return;
+    }
     final error = await widget.notifier.createAgent(
       widget.machineId,
       engine: _engine,
       folder: folder,
       bypassPermission:
           _bypassPermission && kEngineBypassPermissionFlag.containsKey(_engine),
+      grid: grid,
     );
     if (!mounted) return;
     if (error != null) {
@@ -155,6 +176,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+            const _FieldLabel('RUNS ON'),
+            const SizedBox(height: 6),
+            const _RunsOnRow(),
             if (bypassFlag != null) ...[
               const SizedBox(height: 14),
               const _FieldLabel('PERMISSIONS'),
@@ -207,12 +232,39 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                   height: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text(
-                  'Create agent',
-                  style: TextStyle(fontSize: 13.5),
-                ),
+              : const Text('Create agent', style: TextStyle(fontSize: 13.5)),
         ),
       ],
+    );
+  }
+}
+
+/// What this agent will be pointed at, read from the sidebar's own choice.
+///
+/// Shown, not offered: the picker lives in one place so the two cannot drift,
+/// and this is the moment the choice actually takes effect — which is exactly
+/// when a user wants to see it stated.
+class _RunsOnRow extends StatelessWidget {
+  const _RunsOnRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<GridSelection>(
+      valueListenable: gridSelectionStore,
+      builder: (context, chosen, _) => InputDecorator(
+        decoration: const InputDecoration(isDense: true),
+        child: Text(
+          chosen.hasGrid
+              ? '${chosen.label} · ${chosen.model ?? 'Auto'}'
+              : "This engine's own login — pick a grid in the sidebar",
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontFamily: AppFonts.sans,
+            fontSize: 13.5,
+            color: chosen.hasGrid ? AppColors.textSoft : AppColors.muted,
+          ),
+        ),
+      ),
     );
   }
 }
