@@ -1586,71 +1586,13 @@ class AppNotifier extends ChangeNotifier {
 
   // ── blocked agents ────────────────────────────────────────────────────────
 
-  /// Answers already sent and not yet confirmed gone, by requestId.
+  /// The question this agent stopped on, if it is waiting for one.
   ///
-  /// The row is NOT removed on send. Confirmation is the daemon's close frame,
-  /// which only fires once the dialog has actually left the pane — so an answer
-  /// that was dropped (no terminal control, another client driving the same
-  /// dialog) leaves the question standing, which is the truth. This set only
-  /// stops the same answer being keyed in twice while that round trip is out.
-  final Set<String> _answeringRequestIds = {};
-  final Map<String, Timer> _answerTimeouts = {};
-
-  /// Every agent waiting on the person, across every machine, longest wait
-  /// first. Order is the point: it is the sequence to work through, not a
-  /// listing.
-  List<PendingQuestion> get pendingQuestions {
-    final all = <PendingQuestion>[
-      for (final machine in machineStates.values) ...machine.blockedAgents.values,
-    ]..sort((a, b) => a.since.compareTo(b.since));
-    return all;
-  }
-
+  /// Read by the tile, which rings itself while its agent is blocked. That ring
+  /// is the whole surface: an agent asking something is a fact about the pane
+  /// you are looking at, not a queue to be worked through somewhere else.
   PendingQuestion? questionFor(String machineId, String agentId) =>
       machineStates[machineId]?.blockedAgents[agentId];
-
-  bool isAnswering(PendingQuestion question) =>
-      _answeringRequestIds.contains(question.requestId);
-
-  /// Key one option into the agent's dialog without opening its pane.
-  ///
-  /// `question_response` is the same frame the dial sends, and it lands in the
-  /// same place: the daemon types the answer into the pane, because there is no
-  /// control channel into an interactive CLI. Loopback clients are exempt from
-  /// the E2EE requirement on this frame, so it goes in the clear on a wire that
-  /// never leaves the computer.
-  Future<void> answerQuestion(PendingQuestion question, String option) async {
-    if (!question.answerable || _answeringRequestIds.contains(question.requestId)) {
-      return;
-    }
-    // The socket the question ARRIVED on, not a fresh one: `_conn` would dial a
-    // machine just to send an answer into a dialog that only exists because
-    // that machine was already talking to us. No connection means nothing can
-    // be keyed in anywhere, so the question is left standing rather than being
-    // marked as answered.
-    final connection = _pool?[question.machineId];
-    if (connection == null) return;
-    _answeringRequestIds.add(question.requestId);
-    // Nothing replies to `question_response`, so the only thing that can end
-    // this state is the close frame — or this timer, when the answer was
-    // dropped on the far side and no close is ever coming.
-    _answerTimeouts[question.requestId]?.cancel();
-    _answerTimeouts[question.requestId] = Timer(const Duration(seconds: 12), () {
-      _answerTimeouts.remove(question.requestId);
-      if (_answeringRequestIds.remove(question.requestId)) notifyListeners();
-    });
-    notifyListeners();
-    connection.sendRaw('question_response', {
-      'agentId': question.agentId,
-      'requestId': question.requestId,
-      'answers': {question.answerKey: option},
-    });
-  }
-
-  void _forgetAnswerAttempt(String requestId) {
-    _answerTimeouts.remove(requestId)?.cancel();
-    _answeringRequestIds.remove(requestId);
-  }
 
   void _cancelTurnActivity(String machineId, String agentId) {
     _turnActivityWatchdogs
@@ -1662,8 +1604,7 @@ class AppNotifier extends ChangeNotifier {
     // same thing from the other end, tearing down and announcing a close when
     // the turn ends. Clearing here as well means the row cannot survive a close
     // frame that was dropped, and this is also the path a deleted agent takes.
-    final dropped = machine?.blockedAgents.remove(agentId);
-    if (dropped != null) _forgetAnswerAttempt(dropped.requestId);
+    machine?.blockedAgents.remove(agentId);
   }
 
   void _clearMachineActivity(MachineState machine) {
@@ -1672,9 +1613,6 @@ class AppNotifier extends ChangeNotifier {
     }
     machine.processingAgentIds.clear();
     machine.pendingProcessingSessions.clear();
-    for (final question in machine.blockedAgents.values) {
-      _forgetAnswerAttempt(question.requestId);
-    }
     machine.blockedAgents.clear();
   }
 
@@ -1686,9 +1624,6 @@ class AppNotifier extends ChangeNotifier {
     for (final machine in machineStates.values) {
       machine.processingAgentIds.clear();
       machine.pendingProcessingSessions.clear();
-      for (final question in machine.blockedAgents.values) {
-        _forgetAnswerAttempt(question.requestId);
-      }
       machine.blockedAgents.clear();
     }
   }
@@ -2542,7 +2477,6 @@ class AppNotifier extends ChangeNotifier {
                   requestId.isEmpty ||
                   open.requestId == requestId)) {
             machine.blockedAgents.remove(agentId);
-            _forgetAnswerAttempt(open.requestId);
           }
         }
         break;

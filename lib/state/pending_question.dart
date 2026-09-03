@@ -9,9 +9,11 @@
 /// including someone answering it on a different client.
 ///
 /// That second frame is the whole reason this is state and not a widget flag.
-/// A question can be answered from the pane, from this window, from another
-/// window, or from the dial cabled to this computer, and every one of those
-/// arrives back here down the same path.
+/// A question can be answered from the pane, from another window, or from the
+/// dial cabled to this computer, and every one of those arrives back here down
+/// the same path — so the ring cannot outlive a dialog somebody else closed.
+///
+/// The tile's amber ring is the only thing that reads this.
 class PendingQuestion {
   PendingQuestion({
     required this.machineId,
@@ -40,9 +42,8 @@ class PendingQuestion {
   final String prompt;
   final List<String> options;
 
-  /// Multi-select dialogs need more than one option keyed in, and the reply
-  /// carries a single string — so this window offers those the pane, not a
-  /// one-tap answer. See [answerable].
+  /// Whether the dialog takes more than one option. Parsed because the frame
+  /// carries it; nothing acts on it while the ring is the only surface.
   final bool multi;
 
   /// When this window first heard about it. Not when the agent actually
@@ -50,8 +51,6 @@ class PendingQuestion {
   /// re-announced on attach, so the age shown is "how long we have known",
   /// which is the honest claim.
   final DateTime since;
-
-  bool get answerable => !multi && options.isNotEmpty;
 
   /// Same question, same agent — used to keep [since] across the re-announce
   /// that follows a reconnect, so reattaching does not reset every clock.

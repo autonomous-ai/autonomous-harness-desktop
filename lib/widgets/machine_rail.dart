@@ -804,10 +804,6 @@ class _AgentRowState extends State<_AgentRow> {
       displayName: agent.engineDisplayName,
     );
     final processing = state.processingAgentIds.contains(agent.id);
-    // An agent that stopped to ask something. Read here rather than derived
-    // from `processing`: an agent is BOTH while a dialog is up — the turn is
-    // still open — and which of the two the row shows is the whole point.
-    final blocked = state.blockedAgents[agent.id];
     // Right-click wraps the row rather than fighting it: SidebarItem owns the
     // primary tap and the press/hover states that go with it, and exposes no
     // secondary gesture.
@@ -860,11 +856,7 @@ class _AgentRowState extends State<_AgentRow> {
             height: 16,
             child: AnimatedSwitcher(
               duration: grid.AppMotion.hover,
-              // Blocked outranks working. Both are true at once, and only one
-              // of them is a claim on the person reading the rail.
-              child: blocked != null
-                  ? const _BlockedDot(key: ValueKey('blocked'))
-                  : processing
+              child: processing
                   ? Padding(
                       key: const ValueKey('processing'),
                       padding: const EdgeInsets.all(2),
@@ -936,43 +928,10 @@ class _AgentRowState extends State<_AgentRow> {
       ),
     );
 
-    // The question's own words, under the row that raised it. Without this the
-    // dot says an agent wants something and the only way to learn what is to
-    // open it — which is the pane switch this whole thing exists to avoid.
-    final listed = blocked == null
-        ? row
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              row,
-              Padding(
-                // Under the LABEL, not under the row: the rail's own indent,
-                // plus SidebarItem's gutter, its 16px leading and the 10px gap
-                // after it.
-                padding: EdgeInsets.fromLTRB(
-                  28 + depth * 14.0 + SidebarItem.iconGutter + 26,
-                  0,
-                  10,
-                  6,
-                ),
-                child: Text(
-                  blocked.prompt,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: grid.AppPalette.warn,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-            ],
-          );
-
     // A row that cannot be opened cannot be dropped either: dragging it would
     // promise a tile that assignAgentToPane would then refuse to fill, and the
     // grid would answer a deliberate gesture with nothing at all.
-    if (!enabled) return listed;
+    if (!enabled) return row;
 
     return Draggable<AgentDragRef>(
       data: AgentDragRef(
@@ -998,61 +957,8 @@ class _AgentRowState extends State<_AgentRow> {
       // The row stays put and dims. Removing it would reflow the list under the
       // pointer mid-drag, moving every other row out from under the place the
       // hand had already aimed at.
-      childWhenDragging: Opacity(opacity: 0.4, child: listed),
-      child: listed,
-    );
-  }
-}
-
-/// The rail's mark for "this agent stopped and is waiting on you".
-///
-/// A slow pulse rather than a spinner: the spinner beside it means work is
-/// happening, and this means the opposite — nothing is happening until someone
-/// answers. Amber, never the accent, because the focused pane already wears an
-/// accent border and a second blue thing would be read as focus.
-class _BlockedDot extends StatefulWidget {
-  const _BlockedDot({super.key});
-
-  @override
-  State<_BlockedDot> createState() => _BlockedDotState();
-}
-
-class _BlockedDotState extends State<_BlockedDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    final dot = Container(
-      width: 9,
-      height: 9,
-      decoration: BoxDecoration(
-        color: grid.AppPalette.warn,
-        shape: BoxShape.circle,
-      ),
-    );
-    // A pulse that cannot be turned off is a pulse in the corner of the eye all
-    // day. The dot alone still carries the state.
-    if (MediaQuery.disableAnimationsOf(context)) {
-      return Center(child: dot);
-    }
-    return Center(
-      child: FadeTransition(
-        opacity: Tween<double>(begin: 1, end: 0.35).animate(
-          CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-        ),
-        child: dot,
-      ),
+      childWhenDragging: Opacity(opacity: 0.4, child: row),
+      child: row,
     );
   }
 }

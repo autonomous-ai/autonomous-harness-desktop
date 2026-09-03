@@ -66,22 +66,8 @@ void main() {
       expect(question.prompt, 'Which colour theme do you want?');
       expect(question.options, ['Blue', 'Red']);
       // The daemon keys the answer by the question's own text for a
-      // pane-derived dialog, and `answers` must come back keyed the same way.
+      // pane-derived dialog; kept so a client that answers has the key.
       expect(question.answerKey, 'Which colour theme do you want?');
-      expect(question.answerable, isTrue);
-    });
-
-    test('a multi-select is not answerable in one tap', () {
-      // The reply carries ONE string. Offering a single option for a dialog
-      // that wants several would key in half an answer and submit it.
-      final question = PendingQuestion.fromPayload(
-        machineId: 'm1',
-        agentId: 'a1',
-        payload: (asked(multi: true)['payload'] as Map<String, dynamic>),
-        now: DateTime(2026),
-      )!;
-      expect(question.multi, isTrue);
-      expect(question.answerable, isFalse);
     });
 
     test('refuses a payload with nothing to draw', () {
@@ -107,11 +93,11 @@ void main() {
     test('a question makes its agent blocked, and the close clears it', () async {
       final n = notifierWithMachine();
       await n.handleMachineEventForTest('m1', asked());
-      expect(n.pendingQuestions.single.agentId, 'a1');
+      expect(n.questionFor('m1', 'a1')!.agentId, 'a1');
       expect(n.questionFor('m1', 'a1')!.prompt, contains('colour theme'));
 
       await n.handleMachineEventForTest('m1', closed());
-      expect(n.pendingQuestions, isEmpty);
+      expect(n.questionFor('m1', 'a1'), isNull);
     });
 
     test('a re-announce of the same question keeps the original clock', () async {
@@ -162,7 +148,7 @@ void main() {
         'agentId': 'a1',
         'payload': <String, dynamic>{},
       });
-      expect(n.pendingQuestions, isEmpty);
+      expect(n.questionFor('m1', 'a1'), isNull);
     });
 
     test('deleting the agent takes its question with it', () async {
@@ -173,17 +159,8 @@ void main() {
         'agentId': 'a1',
         'payload': <String, dynamic>{},
       });
-      expect(n.pendingQuestions, isEmpty);
+      expect(n.questionFor('m1', 'a1'), isNull);
     });
 
-    test('the list is ordered by who has been waiting longest', () async {
-      final n = notifierWithMachine();
-      await n.handleMachineEventForTest('m1', asked(agentId: 'a1', requestId: 'q_1'));
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-      await n.handleMachineEventForTest('m1', asked(agentId: 'a2', requestId: 'q_2'));
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-      await n.handleMachineEventForTest('m1', asked(agentId: 'a3', requestId: 'q_3'));
-      expect([for (final q in n.pendingQuestions) q.agentId], ['a1', 'a2', 'a3']);
-    });
   });
 }
