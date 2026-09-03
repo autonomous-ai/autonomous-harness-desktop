@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/skeleton.dart';
 
 /// Lets the user browse folders ON THE REMOTE MACHINE (via the `fs_list_dir` RPC) and returns the
 /// chosen absolute path, or null if cancelled. Desktop-app and the harness CLI usually run on two
@@ -151,13 +152,10 @@ class _RemoteFolderPickerDialogState extends State<_RemoteFolderPickerDialog> {
         borderRadius: BorderRadius.circular(6),
       ),
       child: _loading
-          ? const Center(
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
+          // Every click into a folder passes through here, so the rows are
+          // drawn where rows will be rather than a spinner in the middle of
+          // a well that empties and refills on each step.
+          ? const _FolderRowsSkeleton(key: Key('folders-skeleton'))
           : _error != null
           ? Center(
               child: Padding(
@@ -252,6 +250,35 @@ class _Breadcrumbs extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Five [_FolderRow]s with nothing in them: the glyph's square and a name of
+/// varying length, at the row's own padding.
+class _FolderRowsSkeleton extends StatelessWidget {
+  const _FolderRowsSkeleton({super.key});
+
+  static const _widths = [0.42, 0.28, 0.56, 0.34, 0.48];
+
+  @override
+  Widget build(BuildContext context) => SkeletonList(
+    rows: _widths.length,
+    semanticsLabel: 'Loading folders',
+    itemBuilder: (context, i) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      child: Row(
+        children: [
+          const Skeleton(width: 14, height: 14, radius: 3),
+          const SizedBox(width: 9),
+          Expanded(
+            child: SkeletonText(
+              style: TextStyle(fontFamily: AppFonts.sans, fontSize: 13.5),
+              widthFactor: _widths[i],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _FolderRow extends StatelessWidget {

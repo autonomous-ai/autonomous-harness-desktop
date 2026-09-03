@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/skeleton.dart';
 import '../state/app_state.dart';
 import '../update/desktop_updater.dart';
 import '../update/manual_update_check.dart';
@@ -662,10 +663,31 @@ class _Fact extends StatelessWidget {
   }
 }
 
-class _InstalledVersion extends StatelessWidget {
+class _InstalledVersion extends StatefulWidget {
+  @override
+  State<_InstalledVersion> createState() => _InstalledVersionState();
+}
+
+class _InstalledVersionState extends State<_InstalledVersion> {
+  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
+
   @override
   Widget build(BuildContext context) => FutureBuilder<PackageInfo>(
-    future: PackageInfo.fromPlatform(),
-    builder: (context, snapshot) => Text(snapshot.data?.version ?? '—'),
+    future: _info,
+    builder: (context, snapshot) {
+      final version = snapshot.data?.version;
+      if (version == null) {
+        // Still reading: a blank measured against the ambient mono style the
+        // row sets, so it and the version it becomes are the same line.
+        // Answered with nothing: the dash, which is a value.
+        return snapshot.connectionState == ConnectionState.done
+            ? const Text('—')
+            : SkeletonText(
+                style: DefaultTextStyle.of(context).style,
+                width: 44,
+              );
+      }
+      return Text(version);
+    },
   );
 }

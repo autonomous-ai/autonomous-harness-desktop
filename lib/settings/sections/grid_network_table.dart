@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../grid/grid_network.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/skeleton.dart';
 
 /// Every grid this account can reach, as one table you pick from.
 ///
@@ -1052,4 +1053,165 @@ String? _shortUrl(String? url) {
     if (url.startsWith(scheme)) return url.substring(scheme.length);
   }
   return url;
+}
+
+/// The table while the grids are still on their way.
+///
+/// Same frame, same header, same "no grid" row — those are known before the
+/// control plane answers — and four placeholder rows at the real row's
+/// metrics under them, fading down. Four rather than a screenful: an account
+/// on two grids gets a two-row table, and a skeleton taller than the answer
+/// jumps *up* when it lands, which is worse than jumping down.
+///
+/// Nothing in it takes the pointer, the "no grid" radio included: a row that
+/// could be picked while the list is still loading is a row that reads as the
+/// list.
+class GridNetworkTableSkeleton extends StatelessWidget {
+  const GridNetworkTableSkeleton({super.key, required this.noGridSelected});
+
+  /// Whether "each engine's own login" is in force, so the first row is drawn
+  /// exactly as it will be once the grids arrive.
+  final bool noGridSelected;
+
+  static const int rows = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = _Columns.forWidth(constraints.maxWidth);
+        return Container(
+          decoration: BoxDecoration(
+            color: grid.AppGlass.surfaceFill,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: grid.AppGlass.hair),
+            boxShadow: grid.AppGlass.shadow,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: SkeletonBlock(
+              semanticsLabel: 'Loading grids',
+              child: Column(
+                children: [
+                  _HeaderRow(columns: columns),
+                  _NoGridRow(selected: noGridSelected, onTap: () {}),
+                  Expanded(
+                    child: SkeletonList(
+                      rows: rows,
+                      itemBuilder: (context, i) =>
+                          _SkeletonRow(index: i, columns: columns),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// One placeholder row, cell for cell against [_NetworkRow].
+class _SkeletonRow extends StatelessWidget {
+  const _SkeletonRow({required this.index, required this.columns});
+
+  final int index;
+  final _Columns columns;
+
+  // Unequal on purpose: equal bars read as one grey slab.
+  static const _names = [0.56, 0.42, 0.64, 0.38];
+  static const _ids = [0.72, 0.6, 0.66, 0.54];
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    const name = TextStyle(fontSize: 13, letterSpacing: -0.05);
+    const mono = TextStyle(fontSize: 11);
+    // A tag is an 11pt line in 2px of vertical padding — measured, not typed.
+    final tagHeight = SkeletonText.lineHeight(context, mono) + 4;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: grid.AppPalette.divider)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: _Columns.pickWidth,
+            child: Center(child: Skeleton.circle(size: 16)),
+          ),
+          Expanded(
+            flex: _Columns.nameFlex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SkeletonText(style: name, widthFactor: _names[index % 4]),
+                  const SizedBox(height: 2),
+                  SkeletonText(style: mono, widthFactor: _ids[index % 4]),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            flex: _Columns.accessFlex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Skeleton(width: 46, height: tagHeight, radius: 5),
+                      const SizedBox(width: 5),
+                      Skeleton(width: 58, height: tagHeight, radius: 5),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  const SkeletonText(style: mono, widthFactor: 0.62),
+                ],
+              ),
+            ),
+          ),
+          if (columns.router)
+            const Expanded(
+              flex: _Columns.routerFlex,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: SkeletonText(style: TextStyle(fontSize: 12), width: 24),
+              ),
+            ),
+          if (columns.signaling)
+            const Expanded(
+              flex: _Columns.signalingFlex,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: SkeletonText(style: mono, widthFactor: 0.7),
+              ),
+            ),
+          if (columns.status)
+            const SizedBox(
+              width: _Columns.statusWidth,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Skeleton.circle(size: 7),
+                    SizedBox(width: 6),
+                    SkeletonText(style: TextStyle(fontSize: 11.5), width: 36),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(width: _Columns.detailsWidth),
+        ],
+      ),
+    );
+  }
 }

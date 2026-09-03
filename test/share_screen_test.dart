@@ -59,10 +59,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('The Grid CLI is not on this computer.'),
-      findsOneWidget,
-    );
+    expect(find.text('The Grid CLI is not on this computer.'), findsOneWidget);
     expect(find.text('Start sharing'), findsNothing);
   });
 
@@ -73,8 +70,10 @@ void main() {
       _app(
         Scaffold(
           body: SizedBox(
+            // The viewport a widget test runs in, so the rail is exercised at
+            // the height it actually has to scroll inside.
             width: 396,
-            height: 900,
+            height: 600,
             child: ShareRail(
               gridName: 'autonomous.ai',
               offers: buildShareRouteOffers(
@@ -118,8 +117,10 @@ void main() {
       _app(
         Scaffold(
           body: SizedBox(
+            // The viewport a widget test runs in, so the rail is exercised at
+            // the height it actually has to scroll inside.
             width: 396,
-            height: 900,
+            height: 600,
             child: ShareRail(
               gridName: 'autonomous.ai',
               offers: buildShareRouteOffers(
@@ -147,8 +148,13 @@ void main() {
       findsOneWidget,
     );
     // The cards stay on screen and stop responding — removing them would take
-    // away the only place that says what the alternatives were.
-    await tester.tap(find.text('Start an engine you already have'));
+    // away the only place that says what the alternatives were. Scrolled to
+    // first: the rail is a scrolling column, and a tap at an offset outside
+    // the viewport proves nothing about whether the card responds.
+    final third = find.text('Start an engine you already have');
+    await tester.ensureVisible(third);
+    await tester.pumpAndSettle();
+    await tester.tap(third);
     await tester.pump();
   });
 }

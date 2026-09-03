@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
 
-/// The app's one "this is alive" heartbeat.
+/// The app's one "still alive" rhythm.
 ///
-/// The design system asks for a subtle pulse on anything long-running — "no
-/// static loaders". That animation was written three separate times (the
-/// playground's status LED, the login mark's glow, the model pill) and only two
-/// of them honoured Reduce Motion, so the same heartbeat beat at three tempos
-/// and one of them kept moving for users who had asked it not to.
+/// `t` runs 0 → 1 → 0 forever on an ease-in-out curve; [builder] turns it
+/// into whatever the caller is breathing — a skeleton's fill, a dot's alpha.
+/// This widget owns the *timing* and nothing about the *shape*, which is what
+/// lets every long-running thing in the app beat at the same tempo instead of
+/// each pane hand-rolling its own `AnimationController`. That animation had
+/// been written three separate times (the status LED, the login mark, the
+/// model pill) and only two honoured Reduce Motion — the same heartbeat at
+/// three tempos, one of them still moving for someone who had asked it to
+/// stop.
 ///
-/// [Pulse] is that primitive, extracted once: a controller that eases 0→1→0 and
-/// holds still at rest when Reduce Motion is on. Build the visual yourself from
-/// `t` — this owns the timing, not the look.
+/// Two decisions live here so no call site has to remember them:
+///
+/// - **Reduce Motion stops the beat at the peak (`t = 1`), not the middle.**
+///   A block frozen at 40% opacity reads as *disabled*, which is the opposite
+///   of what a placeholder means.
+/// - **The [RepaintBoundary] is inside.** Everything built on this is
+///   long-running by definition, and the shell keeps rail, bar and pane in one
+///   layer — without the boundary a breathing skeleton in the sidebar repaints
+///   the terminal beside it sixty times a second.
 class Pulse extends StatefulWidget {
   const Pulse({
     super.key,
@@ -20,16 +30,18 @@ class Pulse extends StatefulWidget {
     this.child,
   });
 
-  /// Called with `t` in 0..1, sweeping up and back down forever.
+  /// Called with `t` in `[0, 1]`. [child] is passed through untouched so a
+  /// subtree that does not depend on `t` is built once.
   final Widget Function(BuildContext context, double t, Widget? child) builder;
 
-  /// One half-cycle. 1600ms is the app's LED blink; the login mark breathes at
-  /// 4s. Slower reads as calmer.
+  /// One half of the cycle — rest to peak. The whole breath is twice this.
+  ///
+  /// 1600ms is the status LED's blink, which is what the bare default serves.
+  /// A skeleton asks for 1100 explicitly; slower reads as calmer, and the two
+  /// are different instruments rather than one drifting.
   final Duration duration;
 
   final Curve curve;
-
-  /// Passed through to [builder] unrebuilt — hoist anything static into this.
   final Widget? child;
 
   @override
@@ -41,8 +53,7 @@ class _PulseState extends State<Pulse> with SingleTickerProviderStateMixin {
     vsync: this,
     duration: widget.duration,
   );
-
-  late final Animation<double> _curved = CurvedAnimation(
+  late final Animation<double> _t = CurvedAnimation(
     parent: _controller,
     curve: widget.curve,
   );
@@ -50,22 +61,21 @@ class _PulseState extends State<Pulse> with SingleTickerProviderStateMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reduce Motion parks the pulse at full strength rather than mid-fade — a
-    // dot frozen at 40% opacity reads as "disabled", which is the opposite of
-    // what it means.
-    if (MediaQuery.of(context).disableAnimations) {
-      _controller.stop();
-      _controller.value = 1;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller
+        ..stop()
+        ..value = 1;
     } else if (!_controller.isAnimating) {
       _controller.repeat(reverse: true);
     }
   }
 
   @override
-  void didUpdateWidget(Pulse oldWidget) {
+  void didUpdateWidget(covariant Pulse oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.duration != oldWidget.duration) {
+    if (oldWidget.duration != widget.duration) {
       _controller.duration = widget.duration;
+      if (_controller.isAnimating) _controller.repeat(reverse: true);
     }
   }
 
@@ -76,20 +86,13 @@ class _PulseState extends State<Pulse> with SingleTickerProviderStateMixin {
   }
 
   @override
-  Widget build(BuildContext context) {
-    // Its own layer. This is the app's one heartbeat primitive, so the boundary
-    // belongs here rather than at each call site — every visual built on it is
-    // long-running by definition, and the shell keeps the rail, the bar and the
-    // pane in a single layer. See the note in `status_dot.dart`.
-    return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _curved,
-        builder: (context, child) =>
-            widget.builder(context, _curved.value, child),
-        child: widget.child,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: AnimatedBuilder(
+      animation: _t,
+      child: widget.child,
+      builder: (context, child) => widget.builder(context, _t.value, child),
+    ),
+  );
 }
 
 /// A soft-glowing dot that blinks to signal "live" — the status LED used by the

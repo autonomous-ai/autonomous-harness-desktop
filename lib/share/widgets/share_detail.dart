@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
@@ -126,14 +127,24 @@ class ShareDetail extends StatelessWidget {
     ),
   };
 
+  /// The route's three steps. Keyed by route so switching one out replaces its
+  /// state rather than handing the next route the last one's controllers — the
+  /// endpoint typed on route 03 has no business surviving into route 01.
   Widget get _form => switch (controller.route) {
     ShareRoute.local => ServeLocalForm(
+      key: const ValueKey('local'),
       controller: controller,
       pull: pull,
       cli: cli,
+      gridName: gridName,
     ),
-    ShareRoute.server => ServeServerForm(controller: controller),
+    ShareRoute.server => ServeServerForm(
+      key: const ValueKey('server'),
+      controller: controller,
+      gridName: gridName,
+    ),
     ShareRoute.key => ServeKeyForm(
+      key: const ValueKey('key'),
       controller: controller,
       offers: controller.capabilities.keyProviders,
     ),
@@ -220,8 +231,7 @@ class LiveSharePanel extends StatelessWidget {
           children: [
             for (final (index, spec)
                 in (run?.engines ?? const <EngineSpec>[]).indexed) ...[
-              if (index > 0)
-                Divider(height: 25, color: SharePalette.innerRule),
+              if (index > 0) Divider(height: 25, color: SharePalette.innerRule),
               _EngineRow(spec: spec, port: run?.endpointPort),
             ],
             if (run == null || run.engines.isEmpty)
@@ -235,29 +245,12 @@ class LiveSharePanel extends StatelessWidget {
         const SizedBox(height: 18),
         Row(
           children: [
-            OutlinedButton.icon(
-              onPressed: stopping ? null : controller.stop,
-              icon: stopping
-                  ? const SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.stop_rounded, size: 18),
-              label: Text(stopping ? 'Stopping…' : 'Stop sharing'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: SharePalette.ink,
-                side: BorderSide(color: SharePalette.fieldRim),
-                minimumSize: const Size(0, ShareMetrics.buttonHeight),
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(ShareMetrics.fieldRadius),
-                ),
-                textStyle: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: grid.AppFont.semibold,
-                ),
-              ),
+            ShareButton(
+              label: stopping ? 'Stopping…' : 'Stop sharing',
+              icon: LucideIcons.square300,
+              kind: ShareButtonKind.secondary,
+              busy: stopping,
+              onPressed: controller.stop,
             ),
             const SizedBox(width: ShareMetrics.buttonGap),
             Flexible(
