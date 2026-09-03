@@ -7,6 +7,7 @@ import '../widgets/window_chrome.dart';
 import 'sections/about_section.dart';
 import 'sections/appearance_section.dart';
 import 'sections/grid_section.dart';
+import 'sections/share_intelligence_section.dart';
 import 'sections/shortcuts_section.dart';
 import 'sections/terminal_section.dart';
 import 'settings_nav.dart';
@@ -28,13 +29,17 @@ Future<void> showSettingsScreen(
   BuildContext context,
   AppNotifier notifier, {
   GridNetworksController? gridNetworks,
+  SettingsSection? initialSection,
 }) {
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
       // Opaque: it covers the window, and letting the shell show through would
       // mean compositing four live terminals under it for nothing.
-      pageBuilder: (context, animation, _) =>
-          SettingsScreen(notifier: notifier, gridNetworks: gridNetworks),
+      pageBuilder: (context, animation, _) => SettingsScreen(
+        notifier: notifier,
+        gridNetworks: gridNetworks,
+        initialSection: initialSection,
+      ),
       transitionsBuilder: (context, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
       // A cross-fade, not a slide. A screen that slides in from the right reads
@@ -48,9 +53,19 @@ Future<void> showSettingsScreen(
 
 /// Settings: pick on the left, work on the right.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.notifier, this.gridNetworks});
+  const SettingsScreen({
+    super.key,
+    required this.notifier,
+    this.gridNetworks,
+    this.initialSection,
+  });
 
   final AppNotifier notifier;
+
+  /// Which row Settings opens on. Null takes [kDefaultSettingsSection] — the
+  /// first row of the first group, so the screen never opens on a pane its rail
+  /// does not show as selected.
+  final SettingsSection? initialSection;
 
   /// Injected by tests so the Grid pane reads a fake client instead of the
   /// live control plane. Null in the app, where the screen makes — and
@@ -62,7 +77,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  SettingsSection _section = kDefaultSettingsSection;
+  late SettingsSection _section =
+      widget.initialSection ?? kDefaultSettingsSection;
 
   /// Owned here, not by the Grid pane: the rail unmounts a pane the moment you
   /// leave it, so a controller living in the pane would refetch every time the
@@ -138,6 +154,7 @@ class _SettingsBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final screen = switch (section) {
       SettingsSection.grid => GridSection(controller: gridNetworks),
+      SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),
       SettingsSection.shortcuts => const ShortcutsSection(),

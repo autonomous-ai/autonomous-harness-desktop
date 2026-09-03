@@ -163,6 +163,19 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   grid-capable engine**; the CLI refuses the rest with `GRID_ENGINE_UNSUPPORTED` rather than running
   them on their own login, and `kGridCapableEngines` in `widgets/new_agent_dialog.dart` mirrors that
   list to warn before the click. Keep the two in sync.
+- **Share Intelligence is the one place this app drives a SECOND CLI.** `lib/share/` runs the *Grid*
+  CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
+  `harness` cannot serve inference: the models live in `~/.grid/models`, the engine is
+  `~/.grid/bin/llama-server`, and `grid join <grid-id> …` is what puts this Mac on a grid. This app
+  never installs `grid` — "not installed" is a state the pane explains, not a failure it repairs.
+  Three routes (`ShareRoute`): a local GGUF, a vendor key, or an OpenAI-compatible server already
+  running here. **A key never reaches argv** (`ps` is world-readable) — it goes in the child's
+  environment, which is why `GridCli.start` takes `secrets` separately. The engine `grid join`
+  starts is **detached and outlives the app**, so "am I sharing?" is answered by re-reading the
+  CLI's run record (`~/.grid/run/engines/<grid-id>/*.json`, `share/engine_run.dart`), never by
+  anything this app remembers — and closing Harness does not stop it, which the rail's footnote
+  says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
+  is the page's own palette, copied value-for-value from Grid — keep the two in step.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

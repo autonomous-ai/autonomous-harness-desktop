@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
   grid(LucideIcons.zap300, 'Grid'),
+  shareIntelligence(LucideIcons.share2300, 'Share Intelligence'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
@@ -36,9 +37,13 @@ class SettingsGroup {
 
 /// What Settings lists, in order.
 const kSettingsGroups = [
-  // Which grids this account can talk to. First, and its own group, because it
-  // is the only screen here that is about something outside this Mac.
-  SettingsGroup('Grid', [SettingsSection.grid]),
+  // The two directions of the same relationship, and the only run here about
+  // something outside this Mac: which grids this account can talk to, and what
+  // this computer gives back to the one that is picked.
+  SettingsGroup('Grid', [
+    SettingsSection.grid,
+    SettingsSection.shareIntelligence,
+  ]),
   SettingsGroup('Preferences', [
     SettingsSection.appearance,
     SettingsSection.terminal,

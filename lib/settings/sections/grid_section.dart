@@ -122,17 +122,27 @@ class _Networks extends StatelessWidget {
                     for (final network in networks)
                       ValueListenableBuilder<GridSelection>(
                         valueListenable: gridSelectionStore,
-                        builder: (context, chosen, _) => GridNetworkCard(
-                          network: network,
-                          signedInEmail: email,
-                          selected: chosen.networkId == network.networkId,
-                          onUse: () => unawaited(
-                            gridSelectionStore.selectNetwork(
-                              networkId: network.networkId,
-                              networkName: network.displayName,
+                        builder: (context, chosen, _) {
+                          final selected =
+                              chosen.networkId == network.networkId;
+                          return GridNetworkCard(
+                            network: network,
+                            signedInEmail: email,
+                            selected: selected,
+                            // Pressing the chosen grid again clears the choice,
+                            // which is what "each engine's own login" is — the
+                            // state with no grid, reachable from the card that
+                            // set it.
+                            onToggle: () => unawaited(
+                              selected
+                                  ? gridSelectionStore.clear()
+                                  : gridSelectionStore.selectNetwork(
+                                      networkId: network.networkId,
+                                      networkName: network.displayName,
+                                    ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                   ],
                 ),
