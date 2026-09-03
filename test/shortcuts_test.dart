@@ -128,12 +128,22 @@ void main() {
     test('nothing is bound with Control, or with Option alone', () {
       // Ctrl belongs to tmux and the shell; Option alone is how a terminal
       // sends Meta, which is why ⌥⏎ reaches the engine.
+      //
+      // ⌃⇥ / ⌃⇧⇥ are the single exception, and are pinned by chord rather than
+      // waved through by action: the terminal is made to let exactly that pair
+      // past (see terminal_view.dart) because no shell or tmux binding uses it.
+      // Any *other* Ctrl chord would be taking a key from downstairs.
+      const ctrlAllowed = {'⌃⇥', '⌃⇧⇥'};
       for (final shortcut in kAppShortcuts) {
-        expect(
-          shortcut.activator.control,
-          isFalse,
-          reason: '${shortcut.label} takes a Ctrl key the shell needs',
-        );
+        final chord = describeShortcut(shortcut.activator);
+        if (shortcut.activator.control) {
+          expect(
+            ctrlAllowed.contains(chord),
+            isTrue,
+            reason: '${shortcut.label} takes a Ctrl key the shell needs',
+          );
+          continue;
+        }
         expect(
           shortcut.activator.meta,
           isTrue,
@@ -180,6 +190,69 @@ void main() {
     test('a shortcut with no handler is left unbound, not bound to nothing', () {
       final bindings = buildShortcutBindings(handlers: const {});
       expect(bindings, isEmpty);
+    });
+  });
+
+  group('the rows the UI prints', () {
+    test('two chords for one action are one row, not two', () {
+      // ⌘] and ⌃⇥ both focus the next pane. Printed as two rows — which is
+      // what the list did before it merged them — the screen reads as though
+      // it forgot to collapse a duplicate.
+      final rows = shortcutRows();
+      final labels = rows.map((row) => row.label).toList();
+      expect(labels.toSet().length, labels.length, reason: 'a label repeats');
+
+      final next = rows.firstWhere((row) => row.label == 'Focus the next pane');
+      expect(next.chords, [
+        ['⌘', ']'],
+        ['⌃', '⇥'],
+      ]);
+    });
+
+    test('every declared shortcut reaches a row', () {
+      final rows = shortcutRows();
+      for (final shortcut in kAppShortcuts) {
+        final row = rows.firstWhere((row) => row.label == shortcut.label);
+        expect(
+          row.chords,
+          contains(equals(describeShortcutKeys(shortcut.activator))),
+          reason: '${shortcut.label} is bound but not printed',
+        );
+      }
+    });
+
+    test('the digits are one row, at the end of their own group', () {
+      final rows = shortcutRows();
+      final digits = rows.indexWhere(
+        (row) => row.label == 'Jump to the 1st–9th agent',
+      );
+      expect(digits, isNot(-1));
+      expect(rows[digits].chords, [
+        ['⌘', '1 – 9'],
+      ]);
+      expect(rows[digits].group, ShortcutGroup.navigate);
+      // Last of Navigate, so it does not split the group it belongs to.
+      expect(rows[digits + 1].group, isNot(ShortcutGroup.navigate));
+    });
+
+    test('a chord is split into the keys a keyboard has', () {
+      expect(
+        describeShortcutKeys(
+          const SingleActivator(
+            LogicalKeyboardKey.bracketRight,
+            meta: true,
+            shift: true,
+          ),
+        ),
+        ['⇧', '⌘', ']'],
+      );
+      // Tab prints as ⇥, the way a Mac menu prints it — `keyLabel` says 'Tab'.
+      expect(
+        describeShortcutKeys(
+          const SingleActivator(LogicalKeyboardKey.tab, control: true),
+        ),
+        ['⌃', '⇥'],
+      );
     });
   });
 }

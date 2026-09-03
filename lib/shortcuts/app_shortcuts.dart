@@ -238,6 +238,97 @@ List<SingleActivator> agentDigitActivators() => const [
   SingleActivator(LogicalKeyboardKey.digit9, meta: true),
 ];
 
+/// One line in the shortcuts UI: what it does, and every chord that does it.
+///
+/// Not the same shape as [AppShortcut], and deliberately. Two activators can
+/// drive one action — `⌘]` and `⌃⇥` both focus the next pane — which the
+/// bindings need as two entries and the reader needs as one line. Printed as
+/// two rows it reads as a duplicate the screen forgot to collapse.
+class ShortcutRow {
+  const ShortcutRow({
+    required this.label,
+    required this.chords,
+    required this.group,
+  });
+
+  final String label;
+
+  /// Every way to fire it, in declaration order — the first is the one to
+  /// learn, the rest are alternates.
+  final List<KeyChord> chords;
+
+  final ShortcutGroup group;
+}
+
+/// [kAppShortcuts] as the UI prints it: one row per action, alternates folded
+/// in, and `⌘1`–`⌘9` as the single line it deserves.
+///
+/// Derived rather than written out, so a shortcut cannot be added to the
+/// bindings and forgotten here.
+List<ShortcutRow> shortcutRows() {
+  final byAction = <ShortcutAction, List<KeyChord>>{};
+  final order = <ShortcutAction>[];
+  final labels = <ShortcutAction, String>{};
+  final groups = <ShortcutAction, ShortcutGroup>{};
+
+  for (final shortcut in kAppShortcuts) {
+    if (byAction.putIfAbsent(shortcut.action, () => []).isEmpty) {
+      order.add(shortcut.action);
+      labels[shortcut.action] = shortcut.label;
+      groups[shortcut.action] = shortcut.group;
+    }
+    byAction[shortcut.action]!.add(describeShortcutKeys(shortcut.activator));
+  }
+
+  final rows = [
+    for (final action in order)
+      ShortcutRow(
+        label: labels[action]!,
+        chords: byAction[action]!,
+        group: groups[action]!,
+      ),
+  ];
+
+  // The digits are not in [kAppShortcuts] — nine near-identical rows would bury
+  // everything around them — so they join here, at the end of their group.
+  final digits = ShortcutRow(
+    label: 'Jump to the 1st–9th agent',
+    chords: const [
+      ['⌘', '1 – $kAgentDigitCount'],
+    ],
+    group: ShortcutGroup.navigate,
+  );
+  final lastNavigate = rows.lastIndexWhere(
+    (row) => row.group == ShortcutGroup.navigate,
+  );
+  rows.insert(lastNavigate + 1, digits);
+  return rows;
+}
+
+/// A key this app deliberately does **not** take, and who has it instead.
+class TerminalKey {
+  const TerminalKey(this.chord, this.label);
+
+  final KeyChord chord;
+  final String label;
+}
+
+/// What the terminal keeps — the doc comment at the top of this file, stated
+/// where a user can read it.
+///
+/// The shortcuts screen prints these beside the ones the app takes, because
+/// "why is there no shortcut for X" is answered by seeing that X already
+/// belongs to something.
+const List<TerminalKey> kTerminalOwnedKeys = [
+  TerminalKey(['⌘', 'C'], 'Copy — xterm\'s own'),
+  TerminalKey(['⌘', 'V'], 'Paste'),
+  TerminalKey(['⌘', 'A'], 'Select all'),
+  TerminalKey(['esc'], 'Interrupt the engine'),
+  TerminalKey(['⌥', '⏎'], "Newline in the engine's prompt"),
+  TerminalKey(['⌃', 'B'], 'tmux prefix'),
+  TerminalKey(['⌃', 'C'], "The shell's own keys"),
+];
+
 /// Turns the declared shortcuts into the map [CallbackShortcuts] wants.
 ///
 /// A missing handler is left unbound rather than bound to nothing: a key that
@@ -261,16 +352,25 @@ Map<ShortcutActivator, VoidCallback> buildShortcutBindings({
   return bindings;
 }
 
-/// "⌘⇧]" — the way a Mac menu prints it, in the order Apple prints it.
-String describeShortcut(SingleActivator activator) {
-  final buffer = StringBuffer();
-  if (activator.control) buffer.write('⌃');
-  if (activator.alt) buffer.write('⌥');
-  if (activator.shift) buffer.write('⇧');
-  if (activator.meta) buffer.write('⌘');
-  buffer.write(_keyLabel(activator.trigger));
-  return buffer.toString();
-}
+/// One chord, split into the keys a keyboard actually has — `['⇧', '⌘', ']']`.
+///
+/// Split rather than joined because the shortcuts UI draws one keycap per key.
+/// [describeShortcut] is the same thing run together, for the places that want
+/// a string (a tooltip, a test's failure message).
+typedef KeyChord = List<String>;
+
+/// The caps for [activator], in the order Apple prints them.
+KeyChord describeShortcutKeys(SingleActivator activator) => [
+  if (activator.control) '⌃',
+  if (activator.alt) '⌥',
+  if (activator.shift) '⇧',
+  if (activator.meta) '⌘',
+  _keyLabel(activator.trigger),
+];
+
+/// "⇧⌘]" — the way a Mac menu prints it, in the order Apple prints it.
+String describeShortcut(SingleActivator activator) =>
+    describeShortcutKeys(activator).join();
 
 String _keyLabel(LogicalKeyboardKey key) {
   // keyLabel spells these out ("Arrow Left"), which is not how a Mac prints a
@@ -280,6 +380,7 @@ String _keyLabel(LogicalKeyboardKey key) {
   if (key == LogicalKeyboardKey.arrowUp) return '↑';
   if (key == LogicalKeyboardKey.arrowDown) return '↓';
   if (key == LogicalKeyboardKey.enter) return '⏎';
+  if (key == LogicalKeyboardKey.tab) return '⇥';
   if (key == LogicalKeyboardKey.escape) return 'esc';
   return key.keyLabel;
 }
