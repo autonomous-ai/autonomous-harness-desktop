@@ -167,7 +167,11 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
   section widget — nothing else. Panes are framed by `shared/widgets/section_scaffold.dart` (copied
-  from Grid).
+  from Grid), and one setting inside a pane is a `shared/widgets/setting_row.dart` — a raised block
+  with its title and detail on the left and its control, fixed at `SettingRow.controlWidth`, on the
+  right. Appearance and Terminal both use it; a pane that invents its own row shape is the bug.
+  Controls come from `shared/widgets/` too (`AppSelectField`, `AppIconButton`) — raw Material
+  `DropdownButton`/`IconButton` do not match anything else in the app.
 - `lib/shortcuts/app_shortcuts.dart` is the one list that feeds both the live bindings and the ⌘/
   sheet; `shortcuts/shortcuts_list.dart` is the rendered body both the sheet and Settings ▸ Keyboard
   shortcuts draw, so the two cannot disagree. Every shortcut is ⌘-based: Ctrl belongs to the

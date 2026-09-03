@@ -7,6 +7,7 @@ import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/appearance_prefs_store.dart';
 import '../../shared/widgets/app_select_field.dart';
 import '../../shared/widgets/section_heading.dart';
+import '../../shared/widgets/setting_row.dart';
 import 'system_fonts.dart';
 
 /// Settings ▸ Appearance ▸ Typography — the face the app is set in, and how big.
@@ -63,7 +64,7 @@ class _TypographySectionState extends State<TypographySection> {
                   'its own — see Terminal.',
             ),
             const SizedBox(height: 14),
-            _SettingRow(
+            SettingRow(
               title: 'UI font',
               detail: 'Every label, menu and heading in the app',
               control: FutureBuilder<List<SelectOption<String?>>>(
@@ -75,12 +76,12 @@ class _TypographySectionState extends State<TypographySection> {
                   // column does not jump when the list arrives.
                   if (options == null) {
                     return const SizedBox(
-                      width: _SettingRow.controlWidth,
+                      width: SettingRow.controlWidth,
                       height: grid.AppControl.height,
                     );
                   }
                   return AppSelectField<String?>(
-                    width: _SettingRow.controlWidth,
+                    width: SettingRow.controlWidth,
                     value: prefs.uiFamily,
                     options: options,
                     onChanged: (family) =>
@@ -90,7 +91,7 @@ class _TypographySectionState extends State<TypographySection> {
               ),
             ),
             const SizedBox(height: 10),
-            _SettingRow(
+            SettingRow(
               title: 'UI font size',
               detail: 'The base size everything else scales against',
               control: _SizeField(
@@ -104,67 +105,6 @@ class _TypographySectionState extends State<TypographySection> {
           ],
         );
       },
-    );
-  }
-}
-
-/// One setting: a title and a line of detail on the left, its control on the
-/// right.
-class _SettingRow extends StatelessWidget {
-  const _SettingRow({
-    required this.title,
-    required this.detail,
-    required this.control,
-  });
-
-  final String title;
-  final String detail;
-  final Widget control;
-
-  /// Fixed, so every control on this screen lines up on one right edge.
-  static const double controlWidth = 188;
-
-  /// Below this the control drops under the text and takes the full width.
-  /// Squeezing it instead is what used to push it out past the row's own edge.
-  static const double _stackBelow = controlWidth + 20 + 130;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    final text = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 2),
-        Text(detail, style: Theme.of(context).textTheme.bodySmall),
-      ],
-    );
-
-    return Container(
-      // A raised block: fill plus a soft lift, no rim. The same recipe the rest
-      // of the app gives a row you can act on, so a setting here sits at the
-      // same height as a row anywhere else.
-      decoration: BoxDecoration(
-        color: grid.AppGlass.surfaceFill,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: grid.AppGlass.cardShadow,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: LayoutBuilder(
-        builder: (context, constraints) => constraints.maxWidth < _stackBelow
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [text, const SizedBox(height: 10), control],
-              )
-            : Row(
-                children: [
-                  Expanded(child: text),
-                  const SizedBox(width: 20),
-                  control,
-                ],
-              ),
-      ),
     );
   }
 }

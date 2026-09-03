@@ -51,8 +51,11 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
 
   static const _familyKey = 'terminal_font_family';
   static const _sizeKey = 'terminal_font_size';
-  static const _minSize = 9.0;
-  static const _maxSize = 22.0;
+  /// The bounds the size is held inside — public because the Settings stepper
+  /// has to *show* them: a + that stays lit at 22pt is a control that answers a
+  /// click by doing nothing.
+  static const minSize = 9.0;
+  static const maxSize = 22.0;
   static const _step = 1.0;
 
   final LocalKeyValueStore _storage;
@@ -104,7 +107,12 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
 
   Future<void> reset() => _set(TerminalFontChoice.sfMono, terminalFontSize);
 
-  double _clamp(double size) => size.clamp(_minSize, _maxSize);
+  /// Whether the current pick *is* the default — what [reset] would leave the
+  /// store at, so a Reset control can say it has nothing to do.
+  bool get isDefault =>
+      family == TerminalFontChoice.sfMono && size == terminalFontSize;
+
+  double _clamp(double size) => size.clamp(minSize, maxSize);
 
   Future<void> _set(TerminalFontChoice choice, double size) async {
     final next = _styleFor(choice, _clamp(size));
