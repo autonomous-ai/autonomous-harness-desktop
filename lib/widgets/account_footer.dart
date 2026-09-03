@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import 'link_machine_dialog.dart';
-import 'settings_dialog.dart';
+import '../settings/settings_screen.dart';
 
 class AccountFooter extends StatefulWidget {
   final AppNotifier notifier;
@@ -28,7 +28,6 @@ class AccountFooter extends StatefulWidget {
 }
 
 class _AccountFooterState extends State<AccountFooter> {
-
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
@@ -72,7 +71,8 @@ class _AccountFooterState extends State<AccountFooter> {
         MenuItemButton(
           key: const Key('settings-menu-item'),
           leadingIcon: const Icon(Icons.settings, size: 18),
-          onPressed: () => unawaited(showSettingsDialog(context)),
+          onPressed: () =>
+              unawaited(showSettingsScreen(context, widget.notifier)),
           child: const Text('Settings', style: TextStyle(fontSize: 13.5)),
         ),
         const Divider(height: 17),

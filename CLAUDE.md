@@ -146,9 +146,15 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - `macos/Runner/MainFlutterWindow.swift` installs native menu items and calls into Dart over the
   `harness/app_menu` MethodChannel (`checkForUpdates`, `flashFirmware`, `showShortcuts`, terminal font
   size). Keep the menu in Swift; only the handler lives in `RootShell`.
+- Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
+  whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
+  `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
+  section widget — nothing else. Panes are framed by `shared/widgets/section_scaffold.dart` (copied
+  from Grid).
 - `lib/shortcuts/app_shortcuts.dart` is the one list that feeds both the live bindings and the ⌘/
-  sheet. Every shortcut is ⌘-based: Ctrl belongs to the shell/tmux, ⌥ is a Meta prefix for the pty,
-  and ⌘C/⌘V/⌘A are owned by xterm.
+  sheet; `shortcuts/shortcuts_list.dart` is the rendered body both the sheet and Settings ▸ Keyboard
+  shortcuts draw, so the two cannot disagree. Every shortcut is ⌘-based: Ctrl belongs to the
+  shell/tmux, ⌥ is a Meta prefix for the pty, and ⌘C/⌘V/⌘A are owned by xterm.
 - `lib/flash/` flashes the ESP32-S3 dial through the CLI runner; `SerialPortLease` pauses daemon
   supervision while the port is held so `harness start` cannot steal it mid-write.
 - `lib/update/desktop_updater.dart` self-updates from the GCS manifest (sha256-verified, strictly
