@@ -38,6 +38,7 @@ class _TerminalComposerState extends State<TerminalComposer> {
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
+    widget.focusNode.addListener(_onFocusChanged);
     terminalFontStore.addListener(_onFontChanged);
   }
 
@@ -51,11 +52,16 @@ class _TerminalComposerState extends State<TerminalComposer> {
       // one, and silently sending it to its replacement would be worse than losing it.
       _controller.clear();
     }
+    if (!identical(oldWidget.focusNode, widget.focusNode)) {
+      oldWidget.focusNode.removeListener(_onFocusChanged);
+      widget.focusNode.addListener(_onFocusChanged);
+    }
   }
 
   @override
   void dispose() {
     widget.session.removeListener(_onSessionChanged);
+    widget.focusNode.removeListener(_onFocusChanged);
     terminalFontStore.removeListener(_onFontChanged);
     _controller.dispose();
     super.dispose();
@@ -68,6 +74,13 @@ class _TerminalComposerState extends State<TerminalComposer> {
 
   /// Keeps this box's face in step with the terminal above it — see the `style:` comment below.
   void _onFontChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// The composer is the primary input on a remote terminal. Its surface stays
+  /// visible at rest, then the rim and prompt glyph take the accent when the
+  /// keyboard lands here so the destination of typing is unmistakable.
+  void _onFocusChanged() {
     if (mounted) setState(() {});
   }
 
@@ -107,37 +120,97 @@ class _TerminalComposerState extends State<TerminalComposer> {
 
   @override
   Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
     final enabled = widget.session.acceptsInput;
+    final focused = widget.focusNode.hasFocus;
+    final terminalStyle = terminalFontStore.value;
     // No top border of its own: [ComposerGrip] is the line between this and the terminal.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
-      child: Focus(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      child: AnimatedContainer(
+        key: const ValueKey('terminal-composer-surface'),
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        constraints: const BoxConstraints(minHeight: 48),
+        decoration: BoxDecoration(
+          color: enabled
+              ? grid.AppGlass.surfaceFill
+              : grid.AppGlass.surfaceFill.withValues(alpha: 0.66),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: focused
+                ? grid.AppPalette.accentOnSurface
+                : grid.AppGlass.lift,
+            width: focused ? 1.5 : 1,
+          ),
+          boxShadow: focused
+              ? grid.AppSurface.composerShadow
+              : grid.AppGlass.shadow,
+        ),
+        child: Focus(
           onKeyEvent: _onKeyEvent,
-          child: TextField(
-            controller: _controller,
-            focusNode: widget.focusNode,
-            enabled: enabled,
-            minLines: 1,
-            maxLines: 6,
-            // The message is going to a terminal, so it is shown in the terminal's own face: what
-            // is typed here should look like what will land over there.
-            style: TextStyle(
-              color: grid.AppPalette.textPrimary,
-              fontFamily: terminalFontStore.value.fontFamily,
-              fontFamilyFallback: terminalFontStore.value.fontFamilyFallback,
-              fontSize: terminalFontStore.value.fontSize,
-            ),
-            textInputAction: TextInputAction.newline,
-            keyboardType: TextInputType.multiline,
-            decoration: InputDecoration(
-              hintText: enabled
-                  // Says what the box is FOR, not just how it works: that it is the fast path,
-                  // and that the terminal above is still there for selecting and copying. ⇧⏎ is
-                  // left unadvertised on purpose — it is the one a user stumbles into anyway, and
-                  // the room buys the selection hint, which nobody guesses.
-                  ? 'Fast input · ⏎ send · select in the terminal above'
-                  : 'Terminal is not accepting input',
-            ),
+          child: Row(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 14, right: 10),
+                child: AnimatedDefaultTextStyle(
+                  key: const ValueKey('terminal-composer-prompt-style'),
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOut,
+                  style: terminalStyle
+                      .toTextStyle(
+                        color: focused
+                            ? grid.AppPalette.accentOnSurface
+                            : grid.AppPalette.textSecondary,
+                        bold: true,
+                      )
+                      .copyWith(letterSpacing: 0),
+                  child: const Text(
+                    '›',
+                    key: ValueKey('terminal-composer-prompt'),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: widget.focusNode,
+                  enabled: enabled,
+                  minLines: 1,
+                  maxLines: 6,
+                  // The message is going to a terminal, so it is shown in the terminal's own face:
+                  // what is typed here should look like what will land over there.
+                  style: terminalStyle
+                      .toTextStyle(color: grid.AppPalette.textPrimary)
+                      .copyWith(letterSpacing: 0),
+                  textInputAction: TextInputAction.newline,
+                  keyboardType: TextInputType.multiline,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    hintText: enabled
+                        ? 'Message agent…  ·  ↵ send'
+                        : 'Connecting to terminal…',
+                    // InputDecorator merges this with the app-wide field hint
+                    // style. Set tracking explicitly so the UI-control font's
+                    // letter spacing cannot leak into terminal typography.
+                    hintStyle: terminalStyle
+                        .toTextStyle(
+                          color: enabled
+                              ? grid.AppPalette.textSecondary
+                              : grid.AppPalette.textFaint,
+                        )
+                        .copyWith(letterSpacing: 0),
+                    contentPadding: const EdgeInsets.fromLTRB(0, 12, 14, 12),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
