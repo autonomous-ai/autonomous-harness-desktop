@@ -180,12 +180,11 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            onPressed: onClose,
-            icon: const Icon(LucideIcons.x300, size: 17),
-            color: SharePalette.eyebrow,
+          ShareGlyphButton(
+            icon: LucideIcons.x300,
+            size: 17,
             tooltip: 'Close',
-            splashRadius: 16,
+            onPressed: onClose,
           ),
         ],
       ),

@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/share/backend_detector.dart';
+import 'package:harness/share/catalog_models.dart';
 import 'package:harness/share/context_ladder.dart';
+import 'package:harness/share/recommended_models.dart';
 import 'package:harness/share/context_length.dart';
 import 'package:harness/share/pull_spec.dart';
 import 'package:harness/share/engine_run.dart';
@@ -120,6 +122,89 @@ void main() {
       );
       expect(offers.last.detected, 1);
     });
+
+    test('every route says what it costs, in downloads and money', () {
+      final offers = buildShareRouteOffers(
+        canRunLocal: true,
+        needsModel: true,
+        keyProviders: const ['OpenAI'],
+        backends: const [],
+      );
+      // Three appealing sentences cannot be compared; two units can.
+      expect(offers[0].cost, contains('One download'));
+      expect(offers[0].cost, contains('nothing to pay'));
+      expect(offers[1].cost, contains('billed to your key'));
+      expect(offers[2].cost, contains('No download'));
+    });
+  });
+
+  group("what grid catalog says this machine should run", () {
+    test('a row becomes a pick, with the figures the CLI actually sent', () {
+      final pick = RecommendedPick.fromCatalogRow(const {
+        'label': 'qwen36-35b-a3b-mtp',
+        'hf_repo': 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
+        'file': 'Qwen3.6-35B-A3B-UD-IQ3_S.gguf',
+        'min_vram_gb': 32,
+      });
+      expect(pick, isNotNull);
+      expect(pick!.name, 'Qwen3.6-35B-A3B-MTP');
+      expect(pick.quant, 'UD-IQ3_S');
+      expect(pick.minVramGb, 32);
+      // Downloadable before the shelf has been asked anything.
+      expect(pick.specs, [
+        'unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Qwen3.6-35B-A3B-UD-IQ3_S.gguf',
+      ]);
+      // The weight is the shelf's to know, so it is null rather than 0.
+      expect(pick.sizeBytes, isNull);
+    });
+
+    test('a row missing either half is not offered at all', () {
+      expect(
+        RecommendedPick.fromCatalogRow(const {'hf_repo': 'org/repo-GGUF'}),
+        isNull,
+      );
+      expect(RecommendedPick.fromCatalogRow('not a row'), isNull);
+    });
+
+    test('a version adopted from the shelf brings its size and its shards', () {
+      final pick =
+          RecommendedPick.fromCatalogRow(const {
+            'hf_repo': 'org/r-GGUF',
+            'file': 'a-00001-of-00002.gguf',
+          })!.withVersion(
+            const ModelVersion(
+              version: 'Q4_K_M',
+              sizeBytes: 16500000000,
+              pullSpec: 'org/r-GGUF:a-00001-of-00002.gguf',
+              urls: [
+                'https://huggingface.co/org/r-GGUF/resolve/main/a-00001-of-00002.gguf',
+                'https://huggingface.co/org/r-GGUF/resolve/main/a-00002-of-00002.gguf',
+              ],
+            ),
+          );
+      expect(pick.sizeBytes, 16500000000);
+      // Both shards, because half a split set is a model that will not load.
+      expect(pick.specs, hasLength(2));
+    });
+
+    test('the machine line is what the CLI measured, or nothing', () {
+      expect(
+        machineSummary(const {
+          'cpu': {'brand': 'Apple M1 Pro'},
+          'memory': {'total_gb': 32},
+          'disk': {'free_gb': 572},
+        }),
+        'Apple M1 Pro · 32 GB memory · 572 GB free',
+      );
+      // A shape this build does not recognise falls back to the CLI's own
+      // sentence rather than to a spec nobody measured.
+      expect(
+        machineSummary(const {'detected': 'Apple Silicon, 27.2 GB usable'}),
+        'Apple Silicon, 27.2 GB usable',
+      );
+      expect(machineSummary(const {}), isNull);
+      expect(machineSummary(null), isNull);
+    });
   });
 
   group('the models on disk', () {
@@ -190,12 +275,18 @@ void main() {
         contextSize: 204800,
       );
       expect(args, [
-        'join', _grid,
-        '--serve', 'model.gguf',
-        '--endpoint-port', '51234',
-        '--advertise-as', 'Qwen3.6',
-        '--ctx-size', '204800',
-        '--name', 'MacBookPro2021',
+        'join',
+        _grid,
+        '--serve',
+        'model.gguf',
+        '--endpoint-port',
+        '51234',
+        '--advertise-as',
+        'Qwen3.6',
+        '--ctx-size',
+        '204800',
+        '--name',
+        'MacBookPro2021',
       ]);
     });
 
@@ -246,7 +337,10 @@ void main() {
       expect(leaveArgs(gridId: _grid), ['leave', _grid]);
       expect(leaveArgs(gridId: _grid, selector: ''), ['leave', _grid]);
       expect(leaveArgs(gridId: _grid, selector: 'm.gguf'), [
-        'leave', _grid, '--engine', 'm.gguf',
+        'leave',
+        _grid,
+        '--engine',
+        'm.gguf',
       ]);
     });
   });
@@ -272,8 +366,13 @@ void main() {
         'endpoint_port': 51234,
         'models': ['Qwen3.6', 'openai:gpt-5.5'],
         'engines': [
-          {'models': ['Qwen3.6']},
-          {'models': ['openai:gpt-5.5'], 'api_kind': 'openai'},
+          {
+            'models': ['Qwen3.6'],
+          },
+          {
+            'models': ['openai:gpt-5.5'],
+            'api_kind': 'openai',
+          },
         ],
       });
       expect(record.pid, 4242);
@@ -322,7 +421,9 @@ void main() {
     });
 
     test('a missing run directory is a computer that is not sharing', () {
-      final missing = Directory('${Directory.systemTemp.path}/no-such-grid-dir');
+      final missing = Directory(
+        '${Directory.systemTemp.path}/no-such-grid-dir',
+      );
       expect(readEngineRuns(_grid, runDir: missing), isEmpty);
     });
   });
@@ -360,8 +461,10 @@ void main() {
     });
 
     test('the filename is the tail, because the CLI stores downloads flat', () {
-      expect(pullSpecFileName('$repo:UD-IQ3_S/m-00001-of-00003.gguf'),
-          'm-00001-of-00003.gguf');
+      expect(
+        pullSpecFileName('$repo:UD-IQ3_S/m-00001-of-00003.gguf'),
+        'm-00001-of-00003.gguf',
+      );
       expect(pullSpecFileName('$repo:plain.gguf'), 'plain.gguf');
       expect(pullSpecFileName('no-colon'), isNull);
     });
@@ -413,7 +516,12 @@ void main() {
 
   group('the context ladder', () {
     test('offers nothing the server cannot serve', () {
-      expect(contextLadder(max: 32768, current: 8192), [4096, 8192, 16384, 32768]);
+      expect(contextLadder(max: 32768, current: 8192), [
+        4096,
+        8192,
+        16384,
+        32768,
+      ]);
     });
 
     test('keeps a value that is not on the ladder as its own rung', () {

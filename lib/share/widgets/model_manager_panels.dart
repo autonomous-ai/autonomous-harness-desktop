@@ -9,6 +9,7 @@ import '../model_manager_controller.dart';
 import '../pull_spec.dart';
 import 'share_fields.dart';
 import 'share_form_parts.dart';
+import 'share_steps.dart';
 
 /// The specs that download one version. Named here so the dialog and its test
 /// agree on which field the URLs come from.
@@ -38,38 +39,11 @@ class CatalogList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(22, 0, 16, 10),
           child: Column(
             children: [
-              ShareFieldSkin(
-                child: Row(
-                  children: [
-                    Icon(
-                      LucideIcons.search300,
-                      size: 15,
-                      color: SharePalette.eyebrow,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: search,
-                        onChanged: manager.search,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: SharePalette.ink,
-                        ),
-                        cursorColor: SharePalette.accent,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          hintText: 'Search the catalogue',
-                          hintStyle: TextStyle(
-                            fontSize: 13,
-                            color: SharePalette.helper,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              ShareTextField(
+                controller: search,
+                hint: 'Search the catalogue',
+                onChanged: manager.search,
+                leading: LucideIcons.search300,
               ),
               const SizedBox(height: 8),
               // A ranking only means something with nothing to rank against, so
@@ -117,13 +91,9 @@ class CatalogList extends StatelessWidget {
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton(
+            child: ShareLink(
+              label: 'Try again',
               onPressed: manager.refreshList,
-              style: TextButton.styleFrom(
-                foregroundColor: SharePalette.accent,
-                textStyle: const TextStyle(fontSize: 12),
-              ),
-              child: const Text('Try again'),
             ),
           ),
         ],
@@ -134,8 +104,7 @@ class CatalogList extends StatelessWidget {
       children: [
         // Kept above the shelf and never mixed into it: this is the only list
         // that was ranked against THIS machine's memory and chip.
-        if (manager.recommended.isNotEmpty &&
-            manager.query.trim().isEmpty) ...[
+        if (manager.recommended.isNotEmpty && manager.query.trim().isEmpty) ...[
           const _GroupLabel('PICKED FOR THIS MAC'),
           for (final entry in manager.recommended)
             _EntryRow(entry: entry, manager: manager, busy: busy),
@@ -195,9 +164,13 @@ class _SortChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: selected ? SharePalette.accentRing : SharePalette.fieldFill,
+            color: selected
+                ? SharePalette.selectedFill
+                : SharePalette.fieldFill,
             border: Border.all(
-              color: selected ? SharePalette.accent : SharePalette.fieldRim,
+              color: selected
+                  ? SharePalette.fieldRimHover
+                  : SharePalette.fieldRim,
             ),
             borderRadius: BorderRadius.circular(999),
           ),
@@ -206,7 +179,7 @@ class _SortChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: selected ? grid.AppFont.semibold : FontWeight.w400,
-              color: selected ? SharePalette.accent : SharePalette.labelInk,
+              color: selected ? SharePalette.ink : SharePalette.labelInk,
             ),
           ),
         ),
@@ -242,7 +215,7 @@ class _EntryRow extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
             decoration: BoxDecoration(
-              color: selected ? SharePalette.accentRing : Colors.transparent,
+              color: selected ? SharePalette.selectedFill : Colors.transparent,
               borderRadius: BorderRadius.circular(ShareMetrics.cardRadius),
             ),
             child: Column(
@@ -346,13 +319,9 @@ class VersionPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              TextButton(
+              ShareLink(
+                label: 'On this disk →',
                 onPressed: manager.closeDetail,
-                style: TextButton.styleFrom(
-                  foregroundColor: SharePalette.accent,
-                  textStyle: const TextStyle(fontSize: 12),
-                ),
-                child: const Text('On this disk →'),
               ),
             ],
           ),
@@ -487,26 +456,17 @@ class _VersionRow extends StatelessWidget {
                   const SizedBox(width: 5),
                   Text(
                     'On this disk',
-                    style: ShareType.note.copyWith(
-                      color: SharePalette.liveInk,
-                    ),
+                    style: ShareType.note.copyWith(color: SharePalette.liveInk),
                   ),
                 ],
               )
             else
-              OutlinedButton(
+              ShareButton(
+                label: 'Download',
+                icon: LucideIcons.download300,
+                kind: ShareButtonKind.secondary,
+                small: true,
                 onPressed: busy || blocked ? null : onDownload,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: SharePalette.accent,
-                  side: BorderSide(color: SharePalette.fieldRim),
-                  minimumSize: const Size(0, 32),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      ShareMetrics.fieldRadius,
-                    ),
-                  ),
-                ),
-                child: const Text('Download'),
               ),
           ],
         ),
@@ -640,12 +600,11 @@ class _DiskRow extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             else
-              IconButton(
-                onPressed: busy ? null : onDelete,
-                icon: const Icon(LucideIcons.trash2300, size: 15),
-                color: SharePalette.helper,
+              ShareGlyphButton(
+                icon: LucideIcons.trash2300,
                 tooltip: 'Delete from this disk',
-                splashRadius: 15,
+                danger: true,
+                onPressed: busy ? null : onDelete,
               ),
           ],
         ),

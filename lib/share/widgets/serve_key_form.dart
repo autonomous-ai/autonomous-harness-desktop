@@ -5,17 +5,26 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
 import '../api_providers.dart';
+import '../node_identity.dart';
 import '../share_controller.dart';
+import '../share_route.dart';
 import '../stored_keys.dart';
 import 'share_fields.dart';
 import 'share_form_parts.dart';
+import 'share_steps.dart';
 
-/// Lend a vendor key to the grid.
+/// Lend a vendor key to the grid, as the same three steps as the other routes.
 ///
 /// Nothing is downloaded and nothing runs here: the grid forwards questions to
 /// the provider using this key, and what it spends is billed to the account the
 /// key belongs to. That sentence is the whole reason this route reads
 /// differently from the other two, so the pane says it before the field.
+///
+/// Step 3 is shorter here than on the other routes, and says why: the CLI
+/// refuses `--advertise-as` and `--ctx-size` for an API engine, because OpenAI
+/// owns both. What is left is this computer's own name, which every route sends
+/// — it used to be missing from this one, so a machine lending a key joined
+/// under a name the reader never saw.
 class ServeKeyForm extends StatefulWidget {
   const ServeKeyForm({
     super.key,
@@ -36,6 +45,7 @@ class ServeKeyForm extends StatefulWidget {
 
 class _ServeKeyFormState extends State<ServeKeyForm> {
   final _key = TextEditingController();
+  final _nodeName = TextEditingController(text: thisComputerName);
 
   late KeyProviderOffer _offer = widget.offers.first;
   late final Set<String> _stored = widget.storedKinds ?? readStoredApiKinds();
@@ -65,6 +75,7 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
   void dispose() {
     _key.removeListener(_onEdited);
     _key.dispose();
+    _nodeName.dispose();
     super.dispose();
   }
 
@@ -81,12 +92,14 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
             if (!_off.contains(model.advertised)) model.advertised,
         ];
 
+  int get _onCount => _offer.models.length - _off.length;
+
   Future<void> _share() async {
     await widget.controller.startKey(
       kind: _offer.provider.kind,
       envVar: _offer.provider.envVar,
       apiKey: _key.text.trim(),
-      nodeName: '',
+      nodeName: _nodeName.text,
       models: _models,
     );
   }
@@ -94,195 +107,179 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final joining = widget.controller.status == ShareStatus.starting;
-    final provider = _offer.provider;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // One plate, with a rule inside it: the key and what it may serve are
-        // two halves of one decision, and two cards made them read as two.
-        SharePlate(
-          children: [
-            if (widget.offers.length > 1) ...[
-              ShareField(
-                label: 'Provider',
-                child: ShareSelect(
-                  value: provider.label,
-                  options: [
-                    for (final offer in widget.offers)
-                      ShareOption(offer.provider.label),
-                  ],
-                  onSelected: (label) => setState(() {
-                    _offer = widget.offers.firstWhere(
-                      (offer) => offer.provider.label == label,
-                    );
-                    _off.clear();
-                  }),
-                  enabled: !joining,
-                ),
-              ),
-              const SizedBox(height: 18),
-            ],
-            ShareField(
-              label: '${provider.label} API key',
-              child: ShareFieldSkin(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _key,
-                        // Hidden by default: a key usually leaves a machine
-                        // over somebody's shoulder. Revealable, because a
-                        // mistyped one fails minutes later with a vendor error
-                        // nobody can connect back to a typo.
-                        obscureText: !_revealed,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          color: SharePalette.ink,
-                        ),
-                        cursorColor: SharePalette.accent,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          hintText: _hasStoredKey
-                              ? 'Using the key already on this computer'
-                              : provider.keyHint,
-                          hintStyle: TextStyle(
-                            fontSize: 13.5,
-                            color: SharePalette.helper,
-                          ),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => setState(() => _revealed = !_revealed),
-                      icon: Icon(
-                        _revealed ? LucideIcons.eyeOff300 : LucideIcons.eye300,
-                        size: 15,
-                      ),
-                      color: SharePalette.eyebrow,
-                      tooltip: _revealed ? 'Hide' : 'Show',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 26,
-                        height: 26,
-                      ),
-                      splashRadius: 14,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (provider.keyHelpUrl != null) ...[
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () => launchUrl(Uri.parse(provider.keyHelpUrl!)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: SharePalette.accent,
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    minimumSize: const Size(0, 26),
-                    textStyle: TextStyle(
-                      fontSize: 12,
-                      fontWeight: grid.AppFont.semibold,
-                    ),
-                  ),
-                  child: const Text('Where to find your key →'),
-                ),
-              ),
-            ],
-            const SizedBox(height: 14),
-            Divider(height: 1, color: SharePalette.innerRule),
-            const SizedBox(height: 16),
-            Text("Models you're willing to share", style: ShareType.fieldLabel),
-            const SizedBox(height: 3),
-            Text(
-              'Only the ones left on get offered to the grid.',
-              style: ShareType.note,
-            ),
-            const SizedBox(height: 11),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final model in _offer.models)
-                  _ModelToggle(
-                    // The state is IN the label, not only in the colour: a row
-                    // of chips where the difference is a tint asks the reader
-                    // to compare two greys to find out what they picked.
-                    label: model.vendorName,
-                    on: !_off.contains(model.advertised),
-                    onTap: () => setState(() {
-                      if (!_off.remove(model.advertised)) {
-                        _off.add(model.advertised);
-                      }
-                    }),
-                  ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        StartRow(
-          label: 'Start cloud engine',
-          note: switch ((_ready, _hasStoredKey && _key.text.trim().isEmpty)) {
-            (false, _) =>
-              'Enter a valid API key to start sharing cloud models.',
-            // Honest about which key is about to be used, which Grid's own form
-            // cannot say because it never looks.
-            (_, true) => 'Reusing the ${provider.label} key already on this '
-                'computer.',
-            _ => 'What the grid uses is billed to your ${provider.label} '
-                'account.',
-          },
-          onPressed: _ready && !joining ? _share : null,
-          busy: joining,
-        ),
-      ],
+    return ShareSteps(
+      children: [routeChosenStep(ShareRoute.key), _keyStep(), _startStep()],
     );
   }
-}
 
-/// One model, and whether it is on offer.
-class _ModelToggle extends StatelessWidget {
-  const _ModelToggle({
-    required this.label,
-    required this.on,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool on;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            color: on ? SharePalette.accentRing : SharePalette.fieldFill,
-            border: Border.all(
-              color: on ? SharePalette.accent : SharePalette.fieldRim,
-            ),
-            borderRadius: BorderRadius.circular(ShareMetrics.fieldRadius),
+  Widget _keyStep() {
+    final joining = widget.controller.status == ShareStatus.starting;
+    final provider = _offer.provider;
+    return ShareStep(
+      index: 2,
+      state: _ready ? ShareStepState.done : ShareStepState.current,
+      title: 'Your ${provider.label} key, and what it may serve',
+      blurb:
+          "The key goes into the engine's environment and never onto a command "
+          'line, so no other process on this Mac can read it.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 13),
+          // One plate, with a rule inside it: the key and what it may serve are
+          // two halves of one decision, and two cards made them read as two.
+          SharePlate(
+            children: [
+              if (widget.offers.length > 1) ...[
+                ShareField(
+                  label: 'Provider',
+                  child: ShareSelect(
+                    value: provider.label,
+                    options: [
+                      for (final offer in widget.offers)
+                        ShareOption(offer.provider.label),
+                    ],
+                    onSelected: (label) => setState(() {
+                      _offer = widget.offers.firstWhere(
+                        (offer) => offer.provider.label == label,
+                      );
+                      _off.clear();
+                    }),
+                    enabled: !joining,
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
+              ShareField(
+                label: '${provider.label} API key',
+                child: ShareTextField(
+                  controller: _key,
+                  // Hidden by default: a key usually leaves a machine over
+                  // somebody's shoulder. Revealable, because a mistyped one
+                  // fails minutes later with a vendor error nobody can connect
+                  // back to a typo.
+                  obscure: !_revealed,
+                  hint: _hasStoredKey
+                      ? 'Using the key already on this computer'
+                      : provider.keyHint,
+                  // Inside the box, on the text's line — the eye belongs to
+                  // this field rather than being a control parked beside it.
+                  trailing: ShareGlyphButton(
+                    icon: _revealed
+                        ? LucideIcons.eyeOff300
+                        : LucideIcons.eye300,
+                    tooltip: _revealed ? 'Hide' : 'Show',
+                    onPressed: () => setState(() => _revealed = !_revealed),
+                  ),
+                ),
+              ),
+              if (provider.keyHelpUrl != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ShareLink(
+                    label: 'Where to find your key →',
+                    onPressed: () => launchUrl(Uri.parse(provider.keyHelpUrl!)),
+                  ),
+                ),
+              const SizedBox(height: 14),
+              Divider(height: 1, color: SharePalette.innerRule),
+              const SizedBox(height: 16),
+              Text(
+                "Models you're willing to share",
+                style: ShareType.fieldLabel,
+              ),
+              const SizedBox(height: 11),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final model in _offer.models)
+                    ShareToggleChip(
+                      label: model.vendorName,
+                      on: !_off.contains(model.advertised),
+                      onTap: () => setState(() {
+                        if (!_off.remove(model.advertised)) {
+                          _off.add(model.advertised);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // The count is the state said in words, so the row of chips never
+              // has to be counted by eye to find out what it is offering.
+              Text(
+                _off.isEmpty
+                    ? 'All ${_offer.models.length} offered to the grid — '
+                          '${_offer.provider.label} picks whichever fits the '
+                          'question.'
+                    : '$_onCount of ${_offer.models.length} offered to the '
+                          'grid. Switch them all on to let '
+                          '${_offer.provider.label} decide.',
+                style: ShareType.note,
+              ),
+            ],
           ),
-          child: Text(
-            '$label · ${on ? 'on' : 'off'}',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: on ? grid.AppFont.semibold : FontWeight.w400,
-              color: on ? SharePalette.accent : SharePalette.helper,
-            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _startStep() {
+    final joining = widget.controller.status == ShareStatus.starting;
+    final provider = _offer.provider;
+    return ShareStep(
+      index: 3,
+      isLast: true,
+      // Never `waiting`, unlike the local route's third step. There the name is
+      // derived from a model that is not on the disk yet, so the step has
+      // nothing to show; here the only field is this computer's name, which can
+      // be typed before the key is. What is missing is said on the button's own
+      // line instead of greying out a box somebody can legitimately fill in.
+      state: ShareStepState.current,
+      title: 'Name it and start sharing',
+      blurb:
+          '${provider.label} owns the model names and the context window, so '
+          'there is nothing to rename or resize here — only what this Mac is '
+          'called on the grid.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 13),
+          SharePlate(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: ShareField(
+                      label: "This computer's name",
+                      child: ShareTextField(controller: _nodeName),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            ],
           ),
-        ),
+          const SizedBox(height: 18),
+          StartRow(
+            label: 'Start sharing',
+            note: switch ((_ready, _hasStoredKey && _key.text.trim().isEmpty)) {
+              (false, _) =>
+                'Enter a valid API key to start sharing cloud models.',
+              // Honest about which key is about to be used, which Grid's own
+              // form cannot say because it never looks.
+              (_, true) =>
+                'Reusing the ${provider.label} key already on this computer.',
+              _ =>
+                'What the grid uses is billed to your ${provider.label} '
+                    'account.',
+            },
+            onPressed: _ready && !joining ? _share : null,
+            busy: joining,
+          ),
+        ],
       ),
     );
   }
