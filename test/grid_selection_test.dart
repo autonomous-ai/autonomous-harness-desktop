@@ -261,5 +261,37 @@ void main() {
         );
       },
     );
+
+    testWidgets('picking closes the panel', (tester) async {
+      final selection = storeOnDisk();
+      final networks = GridNetworksController(client: FakeGridApi());
+      final models = GridModelsController(client: FakeGridApi());
+      addTearDown(networks.dispose);
+      addTearDown(models.dispose);
+      await pump(
+        tester,
+        selection: selection,
+        networks: networks,
+        models: models,
+      );
+
+      await tester.tap(find.byKey(const Key('grid-picker-row')));
+      await tester.pumpAndSettle();
+      // Open: the panel holds a row for every grid.
+      expect(find.text('hp-1-1'), findsOneWidget);
+
+      await tester.tap(find.text('Water Grid').last);
+      await tester.pumpAndSettle();
+
+      // The rows are built from AppMenuItem, a hand-rolled InkWell rather than
+      // a MenuItemButton — so nothing dismisses the panel unless the menu's own
+      // controller is told to. Left open, it covers the control underneath and
+      // eats the next click.
+      expect(
+        find.text('hp-1-1'),
+        findsNothing,
+        reason: 'the panel must close when a row is picked',
+      );
+    });
   });
 }
