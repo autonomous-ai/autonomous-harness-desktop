@@ -458,6 +458,11 @@ class EscapeParser {
           handler.unsetCursorBold();
           continue;
         case 22:
+          // ECMA-48 SGR 22 restores normal intensity: it clears both
+          // increased intensity (bold, SGR 1) and decreased intensity
+          // (faint, SGR 2). Treating it as faint-only leaves incremental
+          // terminal output stuck in bold until a full keyframe rebuild.
+          handler.unsetCursorBold();
           handler.unsetCursorFaint();
           continue;
         case 23:

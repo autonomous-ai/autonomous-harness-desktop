@@ -34,6 +34,25 @@ void main() {
     expect(cell.flags, CellAttr.underline | CellAttr.faint);
   });
 
+  test('SGR 22 clears bold and faint across live write chunks', () {
+    final terminal = Terminal(maxLines: 20, reflowEnabled: false)
+      ..resize(80, 4);
+    terminal.buffer.clear();
+    final cell = CellData.empty();
+
+    // tmux control mode can deliver the reset in a later output frame than
+    // the styled text. The parser must retain stream state across writes while
+    // still applying SGR 22 exactly like a native terminal.
+    terminal.write('\x1b[1;2mB');
+    terminal.write('\x1b[22mN');
+
+    terminal.buffer.currentLine.getCellData(0, cell);
+    expect(cell.flags, CellAttr.bold | CellAttr.faint);
+    terminal.buffer.currentLine.getCellData(1, cell);
+    expect(cell.flags, 0);
+    expect(terminal.cursor.attrs, 0);
+  });
+
   testWidgets('commits IME text once and never forwards its pre-edit keys', (
     tester,
   ) async {
