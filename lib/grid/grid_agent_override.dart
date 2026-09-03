@@ -20,6 +20,7 @@ const Set<String> kGridCapableEngines = {
   'grok',
   'hermes',
   'opencode',
+  'pi',
 };
 
 /// Where a newly created agent should send its inference, when the user has

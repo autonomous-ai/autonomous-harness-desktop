@@ -572,6 +572,19 @@ void main() {
     },
   );
 
+  test('restartAgent rejects an unknown machine', () async {
+    final notifier = AppNotifier(
+      config: AppConfig.dev,
+      authSession: AuthSession(),
+      configStore: null,
+    );
+    expect(
+      (await notifier.restartAgent('missing-machine', 'agent-1')).error,
+      'Machine not found',
+    );
+    notifier.dispose();
+  });
+
   test('renameMachine rejects an unknown machine or empty name', () async {
     final notifier = AppNotifier(
       config: AppConfig.dev,
