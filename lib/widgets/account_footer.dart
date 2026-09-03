@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_menu.dart';
 import 'link_machine_dialog.dart';
 import '../settings/settings_screen.dart';
 
@@ -28,6 +30,10 @@ class AccountFooter extends StatefulWidget {
 }
 
 class _AccountFooterState extends State<AccountFooter> {
+  /// Held here because [AppMenuItem] does not close the panel for you — unlike
+  /// `MenuItemButton`, which used to and was the only thing it did right.
+  final _menu = MenuController();
+
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
@@ -38,52 +44,60 @@ class _AccountFooterState extends State<AccountFooter> {
     final secondary = isLocal ? 'LOCAL SESSION' : null;
 
     return MenuAnchor(
+      controller: _menu,
       alignmentOffset: const Offset(8, -8),
-      style: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(grid.AppPalette.cardBg),
-        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-        shadowColor: WidgetStatePropertyAll(grid.AppSurface.shadow.first.color),
-        elevation: const WidgetStatePropertyAll(18),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 8),
-        ),
-        minimumSize: const WidgetStatePropertyAll(Size(276, 0)),
-        maximumSize: const WidgetStatePropertyAll(Size(292, 420)),
-        side: WidgetStatePropertyAll(BorderSide(color: grid.AppGlass.hair)),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      ),
+      // The app's one panel recipe, with only the two things that are specific
+      // to *this* menu passed in.
+      //
+      // The width is one of them: this panel holds an email address, and a menu
+      // that resized itself to the signed-in account would move its own rows
+      // between one user and the next. The height is the other — the summary
+      // block plus three rows and their rules run past the 240 a plain menu is
+      // capped at, and this one opens *upward*, so a cap that clipped it would
+      // also lift it clear of the pill it hangs off.
+      style: grid.AppMenu.style(minWidth: 276, maxWidth: 292, maxHeight: 420),
+      // The same rows the machine and agent ⋯ menus use.
+      //
+      // These were raw `MenuItemButton`s, which take Material's M3 defaults and
+      // land wrong on four counts at once: radius 0, a 14pt label, a grey
+      // `onSurface`-8% hover and an ink ripple every other menu here has turned
+      // off — plus a 48px tap target. The visible tell was the highlight: a
+      // full-bleed band touching both panel edges, running square into a panel
+      // rounded at 10. [AppMenuItem] carries a 6px gutter, so the hover reads as
+      // a pill INSET in the panel, which is what the ⋯ menus already looked like.
+      //
+      // Icons come from the same set as those menus too. Two glyph families for
+      // the same kind of row is a boundary nobody can see the logic of.
       menuChildren: [
         _AccountSummary(notifier: widget.notifier),
-        const Divider(height: 17),
-        MenuItemButton(
+        const AppMenuDivider(),
+        AppMenuItem(
           key: const Key('link-a-machine-menu-item'),
-          leadingIcon: const Icon(Icons.link, size: 18),
-          onPressed: () =>
-              unawaited(showLinkMachineDialog(context, widget.notifier)),
-          child: const Text(
-            'Remote into another machine…',
-            style: TextStyle(fontSize: 13.5),
-          ),
+          icon: LucideIcons.link2300,
+          label: 'Remote into another machine…',
+          onPressed: () {
+            _menu.close();
+            unawaited(showLinkMachineDialog(context, widget.notifier));
+          },
         ),
-        const Divider(height: 17),
-        MenuItemButton(
+        AppMenuItem(
           key: const Key('settings-menu-item'),
-          leadingIcon: const Icon(Icons.settings, size: 18),
-          onPressed: () =>
-              unawaited(showSettingsScreen(context, widget.notifier)),
-          child: const Text('Settings', style: TextStyle(fontSize: 13.5)),
+          icon: LucideIcons.settings300,
+          label: 'Settings',
+          onPressed: () {
+            _menu.close();
+            unawaited(showSettingsScreen(context, widget.notifier));
+          },
         ),
-        const Divider(height: 17),
-        MenuItemButton(
+        const AppMenuDivider(),
+        AppMenuItem(
           key: const Key('sign-out-menu-item'),
-          leadingIcon: const Icon(Icons.logout, size: 18),
-          onPressed: () => widget.notifier.logout(),
-          child: Text(
-            isLocal ? 'Disconnect local session' : 'Sign out',
-            style: const TextStyle(fontSize: 13.5),
-          ),
+          icon: LucideIcons.logOut300,
+          label: isLocal ? 'Disconnect local session' : 'Sign out',
+          onPressed: () {
+            _menu.close();
+            widget.notifier.logout();
+          },
         ),
       ],
       builder: (context, controller, child) => Padding(
@@ -240,7 +254,10 @@ class _AccountSummary extends StatelessWidget {
     final profile = notifier.currentUser;
     final isLocal = notifier.localManualFixture != null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 9, 16, 7),
+      // 15 = the row gutter (6) plus a row's own inner padding (9), so this
+      // block starts on the same left edge as the glyphs under it instead of
+      // one pixel off it.
+      padding: const EdgeInsets.fromLTRB(15, 10, 15, 8),
       child: Row(
         children: [
           _Avatar(
@@ -257,10 +274,13 @@ class _AccountSummary extends StatelessWidget {
                       (isLocal ? 'Local session' : 'Autonomous user'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  // Semibold, not w700: the weight ladder has three steps and
+                  // this is the top one. A fourth weight for one line makes it
+                  // shout at the rows it is introducing.
                   style: TextStyle(
                     color: grid.AppPalette.textPrimary,
                     fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: grid.AppFont.semibold,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -271,7 +291,8 @@ class _AccountSummary extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: grid.AppPalette.textSecondary,
-                    fontSize: 11.2,
+                    fontSize: 12,
+                    letterSpacing: grid.AppFont.trackingFor(12),
                   ),
                 ),
               ],

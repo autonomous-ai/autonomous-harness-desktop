@@ -10,9 +10,9 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'state/app_state.dart';
 import 'shared/theme/app_theme.dart' as grid;
+import 'shared/theme/appearance_prefs_store.dart';
 import 'shared/theme/theme_mode_store.dart';
 import 'terminal/terminal_font_store.dart';
-import 'theme/app_theme.dart';
 import 'widgets/awaiting_browser_login_screen.dart';
 import 'widgets/environment_setup_screen.dart';
 import 'widgets/flash_firmware_dialog.dart';
@@ -39,21 +39,51 @@ class DesktopApp extends StatelessWidget {
   Widget build(BuildContext context) {
     // Rebuilds MaterialApp on a theme change, which is what re-resolves both
     // ThemeData objects and, through the scope below, every Grid token with them.
+    //
+    // The type settings need the same treatment for a different reason:
+    // `buildAppTheme` bakes `AppControl.*Scaled` into plain numbers at the
+    // moment it runs, so a UI size that changed without rebuilding this would
+    // repaint nothing at all.
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeModeStore,
-      builder: (context, mode, _) => _app(mode),
+      builder: (context, mode, _) => ValueListenableBuilder<AppearancePrefs>(
+        valueListenable: appearancePrefsStore,
+        builder: (context, prefs, _) => _app(mode, prefs),
+      ),
     );
   }
 
-  Widget _app(ThemeMode mode) {
+  Widget _app(ThemeMode mode, AppearancePrefs prefs) {
+    // ⚠️ ORDER MATTERS, and it is why this is a statement rather than something
+    // tucked into the tree below: `buildAppTheme` reads `AppFont.sans` and
+    // `AppControl.*Scaled`, so the settings have to be on `AppFont` BEFORE the
+    // theme is built, in this same frame.
+    //
+    // Pushed through the notifier rather than calling `AppFont.apply` directly,
+    // so widgets past a `const` boundary — which a top-down rebuild never
+    // reaches — are marked dirty too.
+    //
+    // `codeSize` is passed through unchanged: code type is not on this screen
+    // yet, and `apply` takes the whole set, so reading the current value back is
+    // how "leave it alone" is spelled.
+    final scale = prefs.uiSize / grid.AppFont.uiSizeDefault;
+    grid.AppTheme.fonts.apply(
+      uiFamily: prefs.uiFamily,
+      uiScale: scale,
+      codeSize: grid.AppFont.codeSize,
+    );
     return MaterialApp(
       title: 'Harness',
-      // Both shells are built from the SAME chrome against different palettes —
-      // see AppTheme.terminal. Passing terminalDark twice, as this did, is why a
-      // light palette that had been written in full could never be worn: nothing
-      // in the app was ever asked for it.
-      theme: AppTheme.terminalLight,
-      darkTheme: AppTheme.terminalDark,
+      // Both shells are built from the SAME function against different
+      // palettes, so the two can never drift apart.
+      //
+      // ⚠️ This is the design system's own `buildAppTheme`, and until now it was
+      // NOT what the app wore — these two lines named a second, hand-written
+      // ThemeData that shadowed it, which is why the type ramp, `AppControl`,
+      // `AppMenu` and `trackingFor` rendered nothing at runtime. See the note
+      // where that theme used to live, in `lib/theme/app_theme.dart`.
+      theme: grid.buildAppTheme(brightness: Brightness.light),
+      darkTheme: grid.buildAppTheme(brightness: Brightness.dark),
       themeMode: mode,
       // Publishes the brightness Grid's tokens resolve against, and marks every
       // widget that reads one dirty when it changes.
@@ -61,8 +91,31 @@ class DesktopApp extends StatelessWidget {
       // It has to sit inside `builder` rather than above MaterialApp: only here
       // is there a Theme to read. Without it the tokens default to their light
       // values and the rail would paint white inside a dark window.
-      builder: (context, child) =>
-          _GridTokenScope(child: child ?? const SizedBox.shrink()),
+      // The UI size reaches every `Text` as a text SCALE rather than as hundreds
+      // of edited call sites. `withClampedTextScaling` with both bounds equal IS
+      // the way to force a factor — MediaQuery has no "set the scale"
+      // constructor that still inherits the platform's other metrics.
+      //
+      // ⚠️ It is a matched pair with the `AppControl.*Scaled` reads above, not a
+      // separate nicety: those grow the BOXES and this grows the TYPE, and
+      // `AppControl.fontSize` deliberately has no scaled twin so that the factor
+      // is applied exactly once. Ship one without the other and a 19px setting
+      // gives 19px-tall buttons wrapped around 13pt labels.
+      //
+      // ⚠️ The terminal is fenced out of this at five seams — see
+      // `terminal_panel.dart`, `terminal_composer.dart`, `engine_identity.dart`
+      // and `terminal_section.dart`, and the regression test in
+      // `test/terminal_ui_scale_isolation_test.dart`. The terminal keeps its own
+      // font settings because its type is a grid a remote program draws into.
+      //
+      // Outermost inside `builder`, with `_GridTokenScope` inside it: the clamp
+      // has to be an ancestor of everything that lays out text, while the scope
+      // only reads `Theme.of`, which comes from above the builder either way.
+      builder: (context, child) => MediaQuery.withClampedTextScaling(
+        minScaleFactor: scale,
+        maxScaleFactor: scale,
+        child: _GridTokenScope(child: child ?? const SizedBox.shrink()),
+      ),
       home: const RootShell(),
     );
   }

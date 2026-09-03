@@ -41,7 +41,7 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     if (engine == 'claude') return;
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byKey(const Key('new-agent-engine-field')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cursor').last);
     await tester.pumpAndSettle();
@@ -77,7 +77,7 @@ void main() {
     await openDialog(tester, engine: 'cursor');
     expect(warning, findsOneWidget);
     // The warning is only useful if it says what to do instead. It no longer names one engine:
-    // six can reach a grid now, and the dropdown right above it is the list.
+    // six can reach a grid now, and the picker right above it is the list.
     expect(find.textContaining('choose another engine'), findsOneWidget);
     expect(find.textContaining('clear the grid'), findsOneWidget);
   });

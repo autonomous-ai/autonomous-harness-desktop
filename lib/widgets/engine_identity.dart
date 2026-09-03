@@ -183,6 +183,11 @@ class _InitialMark extends StatelessWidget {
       child: Center(
         child: Text(
           identity.label.characters.first.toUpperCase(),
+          // ⚠️ Sized from [size], a FIXED box, not from the type ramp — so it
+          // must not take the app's UI scale either. At the top of the range the
+          // glyph would grow while its 17px square did not, and the letter would
+          // clip out of its own mark.
+          textScaler: TextScaler.noScaling,
           style: TextStyle(
             color: identity.color,
             fontFamily: 'Menlo',
