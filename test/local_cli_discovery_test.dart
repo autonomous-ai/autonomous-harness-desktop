@@ -287,4 +287,86 @@ void main() {
     expect(spawnCount, greaterThan(0));
     expect(spawnCount, lessThan(6));
   });
+
+  // The bug this closes: a daemon that signed ITSELF out (its machine was deleted from another
+  // machine) exits, and the supervisor respawned it forever — every replacement starting without a
+  // session and exiting again, silently, for the app's whole lifetime.
+  test('startSupervising stops respawning once the CLI reports it is signed out', () async {
+    const computerId = '0123456789abcdef0123456789abcdef';
+    final identityFile = File('${scratch.path}/computer-id')
+      ..writeAsStringSync(computerId);
+    final probe = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final closedPort = probe.port;
+    await probe.close(force: true);
+
+    var spawnCount = 0;
+    var signedOutCalls = 0;
+    final discovery = LocalCliDiscovery(
+      config: AppConfig(
+        apiBaseUrl: 'https://harness-api.autonomous.ai',
+        localCliBaseUrl: 'http://127.0.0.1:$closedPort',
+      ),
+      identity: LocalMachineIdentity(computerIdFile: identityFile),
+      spawnCommand: () async {
+        spawnCount++;
+      },
+    );
+
+    final timer = discovery.startSupervising(
+      checkInterval: const Duration(milliseconds: 20),
+      graceStep: const Duration(milliseconds: 10),
+      graceWindow: const Duration(milliseconds: 50),
+      initialBackoff: const Duration(milliseconds: 20),
+      maxBackoff: const Duration(milliseconds: 20),
+      stillSignedIn: () async => false,
+      onSignedOut: () => signedOutCalls++,
+    );
+    addTearDown(timer.cancel);
+
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    expect(spawnCount, 0, reason: 'a signed-out daemon must never be respawned');
+    expect(signedOutCalls, 1, reason: 'the caller is told exactly once');
+    expect(timer.isActive, isFalse, reason: 'supervision stops for good');
+  });
+
+  test('startSupervising keeps respawning while the CLI is still signed in', () async {
+    const computerId = '0123456789abcdef0123456789abcdef';
+    final identityFile = File('${scratch.path}/computer-id')
+      ..writeAsStringSync(computerId);
+    final probe = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final closedPort = probe.port;
+    await probe.close(force: true);
+
+    var spawnCount = 0;
+    var signedOutCalls = 0;
+    final discovery = LocalCliDiscovery(
+      config: AppConfig(
+        apiBaseUrl: 'https://harness-api.autonomous.ai',
+        localCliBaseUrl: 'http://127.0.0.1:$closedPort',
+      ),
+      identity: LocalMachineIdentity(computerIdFile: identityFile),
+      spawnCommand: () async {
+        spawnCount++;
+      },
+    );
+
+    final timer = discovery.startSupervising(
+      checkInterval: const Duration(milliseconds: 20),
+      graceStep: const Duration(milliseconds: 10),
+      graceWindow: const Duration(milliseconds: 50),
+      initialBackoff: const Duration(milliseconds: 20),
+      maxBackoff: const Duration(milliseconds: 20),
+      stillSignedIn: () async => true,
+      onSignedOut: () => signedOutCalls++,
+    );
+    addTearDown(timer.cancel);
+
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // A daemon that merely crashed, or was stopped by hand, must still be brought back.
+    expect(spawnCount, greaterThan(0));
+    expect(signedOutCalls, 0);
+    expect(timer.isActive, isTrue);
+  });
 }

@@ -568,6 +568,14 @@ class AppNotifier extends ChangeNotifier {
     final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
     final endpoint = await discovery.ensureRunning();
     if (endpoint == null) {
+      // Before blaming the environment, check whether the daemon is missing because it signed itself
+      // out. "Try running `harness start` yourself" is advice that cannot work in that case — the
+      // session file is gone, so every start exits again — and it is the advice this branch used to
+      // give unconditionally.
+      if (!(await cliLogin.checkStatus()).loggedIn) {
+        _signedOutAtRuntime(_signedOutMessage);
+        return;
+      }
       throw StateError(
         'The local Harness daemon did not start. Try running `harness start` yourself, then reopen the app.',
       );
@@ -576,7 +584,34 @@ class AppNotifier extends ChangeNotifier {
     // Only start supervising AFTER the first bootstrap attempt already succeeded above — starting it
     // earlier risks a concurrent `harness start` spawn from both places at once (the daemon's control
     // port is fixed, so a second spawn while the first is still binding fails loudly).
-    _daemonSupervisionTimer ??= discovery.startSupervising();
+    _daemonSupervisionTimer ??= discovery.startSupervising(
+      stillSignedIn: () async => (await cliLogin.checkStatus()).loggedIn,
+      onSignedOut: () => _signedOutAtRuntime(_signedOutMessage),
+    );
+  }
+
+  /// Deliberately says nothing about WHY. The daemon clears its session identically whether the
+  /// machine was deleted from another machine or the SSO token simply expired, and guessing between
+  /// them in the copy would sometimes be wrong. Signing in again is the answer to both.
+  static const _signedOutMessage =
+      'You were signed out on this computer. Sign in again to reconnect.';
+
+  /// The session went away while the app was already running — send the user to [LoginScreen] with a
+  /// reason, and stop the background work that can only fail from here.
+  ///
+  /// Cold start already handles this: [bootstrap] asks the CLI whether it is signed in. The hole this
+  /// fills is the app that was ALREADY authenticated when the session disappeared underneath it,
+  /// where nothing re-checked and the daemon supervisor simply respawned `harness start` forever.
+  void _signedOutAtRuntime(String message) {
+    if (status == AppStatus.unauthenticated) return; // idempotent: several sources can race here
+    _daemonSupervisionTimer?.cancel();
+    _daemonSupervisionTimer = null;
+    _cliEndpoint = null;
+    unawaited(_pool?.closeAll());
+    _pool = null;
+    _lastError = message;
+    status = AppStatus.unauthenticated;
+    notifyListeners();
   }
 
   void _startUpdateChecking() {
@@ -737,11 +772,7 @@ class AppNotifier extends ChangeNotifier {
           'unreachable: only the local-manual dev fixture uses a token-bearing WS transport',
         );
       },
-      onAuthFailure: (message) {
-        _lastError = message;
-        status = AppStatus.unauthenticated;
-        notifyListeners();
-      },
+      onAuthFailure: _signedOutAtRuntime,
       onLocalFailure: (machineId, code, reason) {
         final machine = machineStates[machineId];
         if (machine == null || code != 4404) return;
