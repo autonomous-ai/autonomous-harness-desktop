@@ -34,6 +34,17 @@ enum AgentLoadStatus { idle, needsLink, loading, loaded, error }
 
 enum MachineTransportMode { cloudE2ee, localPlaintext, localOffline }
 
+/// Result of [AppNotifier.restartAgent]. [error] null means the RPC succeeded; [resumed] then says
+/// whether the daemon reattached the agent's prior session or fell back to a fresh one (e.g. the
+/// engine's resume flag wasn't recognized) — worth telling the user about, since it's not a failure
+/// but the conversation may not have continued the way "Restart" implies.
+class RestartAgentResult {
+  final String? error;
+  final bool resumed;
+
+  const RestartAgentResult({this.error, this.resumed = true});
+}
+
 String? _normalizeComputerId(String? raw) {
   if (raw == null) return null;
   final value = raw.trim().toLowerCase().replaceAll('-', '');
@@ -1719,6 +1730,48 @@ class AppNotifier extends ChangeNotifier {
     await _removeAgent(machine, agentId);
     notifyListeners();
     return null;
+  }
+
+  /// Restarts an agent via `agent_restart` — exits its current engine process and relaunches it
+  /// daemon-side, resuming its session where possible.
+  ///
+  /// The reply carries the same fresh `Agent` shape `agent_synced` pushes once the new process is
+  /// confirmed, so this upserts from the reply directly — idempotent on `agent.id`, same as
+  /// [createAgent], and safe even if the CLI's own `agent_synced` push for the restart arrives
+  /// separately (fire-and-forget on the CLI side, unordered relative to this reply).
+  Future<RestartAgentResult> restartAgent(String machineId, String agentId) async {
+    final machine = machineStates[machineId];
+    if (machine == null) {
+      return const RestartAgentResult(error: 'Machine not found');
+    }
+    Map<String, dynamic> result;
+    try {
+      result = await _conn(
+        machineId,
+      ).request('agent_restart', payload: {'agentId': agentId});
+    } catch (error) {
+      return RestartAgentResult(error: 'Restart failed: $error');
+    }
+    final error = result['error'];
+    if (error is String) {
+      final detail = result['detail'];
+      return RestartAgentResult(
+        error: detail is String ? detail : 'Restart failed: $error',
+      );
+    }
+    final raw = result['agent'];
+    if (raw is Map) {
+      try {
+        _upsertAgent(machine, Agent.fromJson(Map<String, dynamic>.from(raw)));
+        notifyListeners();
+      } catch (_) {
+        // Malformed reply agent — harmless, the CLI's own agent_synced push still lands.
+      }
+    }
+    // Absent (older daemon build) reads as true — assume resumed rather than warn about a fresh
+    // session that may not have happened, since this field is purely additive UI polish.
+    final resumed = result['resumed'];
+    return RestartAgentResult(resumed: resumed is bool ? resumed : true);
   }
 
   Future<void> _applyNodeStatus(MachineState machine, bool online) async {

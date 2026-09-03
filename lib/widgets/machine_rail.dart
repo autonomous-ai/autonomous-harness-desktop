@@ -739,6 +739,29 @@ class _AgentRowState extends State<_AgentRow> {
     }
   }
 
+  // Restart is disruptive (it briefly kills the current process) but NOT destructive — the same
+  // agent survives, resumed where possible — so unlike delete it fires straight away, no
+  // confirmation dialog, and just surfaces a failure the same lightweight way.
+  Future<void> _restartAgent() async {
+    final result = await notifier.restartAgent(state.machine.machineId, agent.id);
+    if (!mounted) return;
+    final error = result.error;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    if (!result.resumed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Restarted with a new session — the previous one could not be resumed.',
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
@@ -872,6 +895,15 @@ class _AgentRowState extends State<_AgentRow> {
                 onPressed: () {
                   _agentMenu.close();
                   _showRenameDialog();
+                },
+              ),
+              const AppMenuDivider(),
+              AppMenuItem(
+                icon: LucideIcons.refreshCw300,
+                label: 'Restart',
+                onPressed: () {
+                  _agentMenu.close();
+                  _restartAgent();
                 },
               ),
               const AppMenuDivider(),
