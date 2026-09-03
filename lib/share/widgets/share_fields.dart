@@ -81,8 +81,8 @@ class ShareFieldSkin extends StatelessWidget {
     grid.AppTheme.watch(context);
     final live = enabled && (hovered || focused);
     final decorated = AnimatedContainer(
-      duration: const Duration(milliseconds: 110),
-      curve: Curves.easeOut,
+      duration: grid.AppMotion.hover,
+      curve: grid.AppMotion.curve,
       height: height,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -600,7 +600,8 @@ class _ShareToggleChipState extends State<ShareToggleChip> {
           selected: on,
           label: '${widget.label} · ${on ? 'on' : 'off'}',
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 110),
+            duration: grid.AppMotion.hover,
+            curve: grid.AppMotion.curve,
             height: ShareMetrics.controlHeightSmall,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
@@ -670,7 +671,8 @@ class ShareRadio extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 110),
+      duration: grid.AppMotion.hover,
+      curve: grid.AppMotion.curve,
       width: 16,
       height: 16,
       alignment: Alignment.center,

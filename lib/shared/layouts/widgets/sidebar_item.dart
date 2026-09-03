@@ -10,12 +10,12 @@ import '../../widgets/scroll_reveal_text.dart';
 /// 130/140/160ms with an instant weight change on top, so a row arrived in four
 /// stages within 30ms of each other: the label snapped bold, then the highlight
 /// caught up. Read as sluggish even though nothing was slow.
-const Duration _selectDuration = Duration(milliseconds: 160);
+const Duration _selectDuration = AppMotion.swap;
 
 /// How long the hover wash takes. Shorter than the selection: hover follows the
 /// pointer, and a pointer crossing the rail shouldn't leave a trail of rows
 /// still catching up.
-const Duration _hoverDuration = Duration(milliseconds: 130);
+const Duration _hoverDuration = AppMotion.hover;
 
 /// The accent rail's width, and how far left of its resting place it starts.
 const double _railWidth = 3;
@@ -150,18 +150,18 @@ class _SidebarItemState extends State<SidebarItem> {
       // back on release. A transform, so it never nudges neighbouring rows.
       child: AnimatedScale(
         scale: _pressed ? 0.97 : 1,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
+        duration: AppMotion.press,
+        curve: AppMotion.curve,
         child: TweenAnimationBuilder<double>(
           // No `begin`: a row that mounts already selected is settled, not
           // animating in.
           tween: Tween(end: widget.selected ? 1.0 : 0.0),
           duration: _selectDuration,
-          curve: Curves.easeOut,
+          curve: AppMotion.curve,
           builder: (context, select, _) => TweenAnimationBuilder<double>(
             tween: Tween(end: _hovered ? 1.0 : 0.0),
             duration: _hoverDuration,
-            curve: Curves.easeOut,
+            curve: AppMotion.curve,
             builder: (context, hover, _) => _SidebarRow(
               item: widget,
               select: select,
@@ -598,8 +598,8 @@ class _SidebarSectionLabelState extends State<SidebarSectionLabel> {
               // what shows the fold happening, and a swap would just blink.
               AnimatedRotation(
                 turns: widget.collapsed ? -0.25 : 0,
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
+                duration: AppMotion.swap,
+                curve: AppMotion.curve,
                 child: Icon(LucideIcons.chevronDown300, size: 14, color: ink),
               ),
           ],

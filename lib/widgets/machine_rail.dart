@@ -542,6 +542,41 @@ class _MachineNodeState extends State<_MachineNode> {
             ConnectionStatus.reconnecting => grid.AppPalette.warn,
             ConnectionStatus.disconnected => grid.AppPalette.textFaint,
           };
+    // One clock for the whole node, and it has to be one: the trunk under the
+    // caption, the agent count beside the name and the rows themselves all
+    // change at the moment the machine opens. Run on three timers they arrive
+    // in three stages 30ms apart and the row reads as sluggish even though
+    // nothing is slow.
+    //
+    // No `begin` on the tween: a rail that mounts with this machine already
+    // open is *settled*, not unfolding itself while the user watches.
+    //
+    // Leaving is the shorter half — the user has already decided to close it,
+    // and waiting on the rows to go is what makes a fold feel heavy.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: expanded ? 1.0 : 0.0),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : expanded
+          ? grid.AppMotion.fold
+          : grid.AppMotion.swap,
+      curve: grid.AppMotion.curve,
+      // Hoisted so the rows are not rebuilt on every frame of the fold. Built
+      // here but only *mounted* below while `fold > 0`, so a closed machine
+      // costs nothing.
+      child: _AgentTree(notifier: notifier, state: state, query: query),
+      builder: (context, fold, tree) =>
+          _node(context, fold, tree!, state, connectionColor),
+    );
+  }
+
+  Widget _node(
+    BuildContext context,
+    double fold,
+    Widget tree,
+    MachineState state,
+    Color connectionColor,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -566,7 +601,9 @@ class _MachineNodeState extends State<_MachineNode> {
         SidebarTimeline(
           role: SidebarTimelineRole.node,
           above: !widget.isFirst,
-          below: expanded && state.agents.isNotEmpty,
+          // While the rows are on their way out too: a trunk that vanished at
+          // frame one would leave them hanging off nothing.
+          below: fold > 0 && state.agents.isNotEmpty,
           child: MouseRegion(
             onEnter: (_) => setState(() => _hovered = true),
             onExit: (_) => setState(() => _hovered = false),
@@ -624,18 +661,28 @@ class _MachineNodeState extends State<_MachineNode> {
                       // How many agents are inside something you have closed.
                       // Only when closed: with the list open you can count
                       // them, and a number beside a list you can see is noise.
-                      if (!expanded && state.agents.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6),
-                          child: Text(
-                            '${state.agents.length}',
-                            style: TextStyle(
-                              color: grid.AppPalette.textFaint,
-                              fontFamily: grid.AppFont.sans,
-                              fontSize: 11,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
+                      if (fold < 1 && state.agents.isNotEmpty)
+                        // Width as well as opacity, so the name beside it
+                        // lengthens into the space the number gives up rather
+                        // than snapping wider the instant the fold starts.
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: 1 - fold,
+                          child: Opacity(
+                            opacity: 1 - fold,
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 6),
+                              child: Text(
+                                '${state.agents.length}',
+                                style: TextStyle(
+                                  color: grid.AppPalette.textFaint,
+                                  fontFamily: grid.AppFont.sans,
+                                  fontSize: 11,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -730,8 +777,21 @@ class _MachineNodeState extends State<_MachineNode> {
             ),
           ),
         ),
-        if (expanded)
-          _AgentTree(notifier: notifier, state: state, query: query),
+        if (fold > 0)
+          // Clipped, not re-laid out. The rows keep their full height and the
+          // box in front of them grows — laying the list out again at every
+          // height in between would be a dozen frames of rows reflowing, and it
+          // would look like it.
+          ClipRect(
+            child: Align(
+              alignment: Alignment.topLeft,
+              heightFactor: fold,
+              // `Align` hands its child loose constraints, which would drop the
+              // stretch this Column gives everything else and let the rows
+              // shrink-wrap mid-fold. This puts the width back.
+              child: SizedBox(width: double.infinity, child: tree),
+            ),
+          ),
       ],
     );
   }

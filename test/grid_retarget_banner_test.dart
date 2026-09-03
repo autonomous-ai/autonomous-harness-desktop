@@ -145,6 +145,44 @@ void main() {
     expect(find.textContaining('1 running agent is'), findsOneWidget);
   });
 
+  testWidgets('the offer and the receipt are two cards, not one edited', (
+    tester,
+  ) async {
+    // Both branches build the same private `_Card`, so without a key of its own
+    // `AnimatedSwitcher` reads the receipt as the offer being updated and cuts
+    // straight between them — no slide, no fade, exactly as if the switcher
+    // were not there. The keys are what make it a swap.
+    gridSelectionStore.value = kOnGrid;
+    await pump(
+      tester,
+      notifierWith([
+        const Agent(
+          id: 'a1',
+          name: 'One',
+          engine: 'claude',
+          terminalAvailable: true,
+        ),
+      ]),
+    );
+    expect(find.byKey(const ValueKey('retarget')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report')), findsNothing);
+
+    // Nothing can be minted in a test, so every agent fails to move and the
+    // receipt takes the offer's place.
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report')), findsOneWidget);
+    expect(find.byKey(const ValueKey('retarget')), findsNothing);
+
+    // Leaving is shorter than arriving: waiting on the old card is what makes a
+    // cross-fade feel sluggish.
+    final switcher = tester.widget<AnimatedSwitcher>(
+      find.byType(AnimatedSwitcher),
+    );
+    expect(switcher.reverseDuration, isNotNull);
+    expect(switcher.reverseDuration! < switcher.duration, isTrue);
+  });
+
   testWidgets('dismissing stops it nagging about that choice', (tester) async {
     gridSelectionStore.value = kOnGrid;
     final notifier = notifierWith([

@@ -215,8 +215,8 @@ class _RouteCard extends StatelessWidget {
           child: Stack(
             children: [
               AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                curve: Curves.easeOut,
+                duration: grid.AppMotion.hover,
+                curve: grid.AppMotion.curve,
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
                 decoration: BoxDecoration(
                   color: SharePalette.surface,

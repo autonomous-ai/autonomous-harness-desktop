@@ -1360,6 +1360,14 @@ abstract final class AppMotion {
   /// lingers turns into a toll on a gesture people make dozens of times an hour.
   static const Duration meter = Duration(milliseconds: 300);
 
+  /// A surface acknowledging a click while the button is still down.
+  ///
+  /// Shorter than [hover], and it has to be: hover follows a pointer that is
+  /// merely passing, while this one answers a press the user is *making*. A
+  /// dip that outlasts the click reads as lag in the click itself. Four call
+  /// sites had already converged on this number by hand before it had a name.
+  static const Duration press = Duration(milliseconds: 110);
+
   /// The app's curve. Fast to start, settling at the end — the thing arrives
   /// under the pointer rather than drifting toward it.
   static const Curve curve = Curves.easeOut;

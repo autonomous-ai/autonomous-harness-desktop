@@ -69,7 +69,7 @@ class _PulseHaloState extends State<_PulseHalo>
     super.didChangeDependencies();
     // Honor Reduce Motion — a still dot instead of a breathing one, matching the
     // rest of the app's animated marks.
-    if (MediaQuery.of(context).disableAnimations) {
+    if (MediaQuery.disableAnimationsOf(context)) {
       _controller.stop();
     } else if (!_controller.isAnimating) {
       _controller.repeat();
@@ -87,7 +87,7 @@ class _PulseHaloState extends State<_PulseHalo>
     // With Reduce Motion on, the controller is stopped at 0 — the halo would
     // sit at full size and full opacity, a solid disc around the dot. Drop it
     // entirely and show just the dot.
-    if (MediaQuery.of(context).disableAnimations) return widget.child;
+    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
 
     return SizedBox.square(
       dimension: widget.size,

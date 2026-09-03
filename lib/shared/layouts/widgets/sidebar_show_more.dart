@@ -135,8 +135,8 @@ class _SidebarShowMoreState extends State<SidebarShowMore> {
               behavior: HitTestBehavior.opaque,
               onTap: widget.onTap,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 130),
-                curve: Curves.easeOut,
+                duration: AppMotion.hover,
+                curve: AppMotion.curve,
                 height: 30,
                 alignment: Alignment.centerLeft,
                 padding: const EdgeInsets.symmetric(

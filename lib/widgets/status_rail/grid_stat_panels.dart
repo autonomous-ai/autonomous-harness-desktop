@@ -147,7 +147,7 @@ class _Entrance extends StatelessWidget {
   Widget build(BuildContext context) {
     // Reduce Motion means no motion, not less of it — the fade goes too, since
     // an opacity ramp is the part that reads as movement on a surface this size.
-    final instant = MediaQuery.of(context).disableAnimations;
+    final instant = MediaQuery.disableAnimationsOf(context);
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),
       duration: instant ? Duration.zero : AppMotion.swap,

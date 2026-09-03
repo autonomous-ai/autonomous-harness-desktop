@@ -75,7 +75,13 @@ class GridSelector extends StatelessWidget {
           );
         }
         return Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+          // A gap above, not just below. The list over this card scrolls and
+          // the card does not, so with a full rail the last agent row used to
+          // end flush against the card's top edge — which read as the card
+          // being the bottom of the list, or worse, as sitting on top of a row
+          // it had cut in half. The same 8 as the bottom inset, so the card
+          // sits evenly in the rail's foot.
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: grid.AppSurface.recess,

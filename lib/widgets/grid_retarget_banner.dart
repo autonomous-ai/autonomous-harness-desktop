@@ -5,6 +5,13 @@ import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 
+/// How long the card takes to arrive, and to go.
+///
+/// The app's 220 and 160, named here for what they do rather than reached for
+/// as `fold` and `swap`: this is a toast, not a panel folding.
+const Duration _enter = grid.AppMotion.fold;
+const Duration _leave = grid.AppMotion.swap;
+
 /// "2 agents are still on their old target — move them?"
 ///
 /// Picking a grid retargets new agents by itself; a running one has to be restarted, because a
@@ -64,8 +71,13 @@ class _GridRetargetBannerState extends State<GridRetargetBanner> {
             // Declarative rather than a controller driven from `build`: what is on screen is a pure
             // function of the selection and the report, so the animation should be too.
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
+              // Enter is the longer half. The card drops in from above and has
+              // to be caught; leaving is a decision the user already made, and
+              // waiting on the old one is what makes a switcher feel sluggish.
+              duration: _enter,
+              reverseDuration: _leave,
               switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
               transitionBuilder: (child, animation) => SlideTransition(
                 position: Tween(
                   begin: const Offset(0, -0.35),
@@ -85,6 +97,11 @@ class _GridRetargetBannerState extends State<GridRetargetBanner> {
     final report = _report;
     if (report != null) {
       return _Card(
+        // Keyed by which card this is, and it is load-bearing: both branches
+        // build a `_Card`, so without a key `AnimatedSwitcher` reads the
+        // receipt replacing the offer as the SAME widget being updated and
+        // cuts straight between them — exactly as if there were no switcher.
+        key: const ValueKey('report'),
         icon: Icons.warning_amber_rounded,
         tone: grid.AppPalette.warn,
         message: _reportMessage(report),
@@ -96,6 +113,7 @@ class _GridRetargetBannerState extends State<GridRetargetBanner> {
     if (stale.isEmpty) return null;
     final one = stale.length == 1;
     return _Card(
+      key: const ValueKey('retarget'),
       icon: Icons.bolt_rounded,
       tone: grid.AppPalette.accentOnSurface,
       message:
@@ -121,6 +139,7 @@ class _GridRetargetBannerState extends State<GridRetargetBanner> {
 /// The card itself — Grid's toast shape, with one action and a close.
 class _Card extends StatelessWidget {
   const _Card({
+    super.key,
     required this.icon,
     required this.tone,
     required this.message,

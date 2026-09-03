@@ -153,9 +153,15 @@ void main() {
     expect(find.text('Claude Code'), findsNothing);
 
     // Open: the count goes away, because a number beside a list you can see is
-    // noise.
+    // noise. It leaves on the same clock as the rows arrive on, though — cut at
+    // frame one it would be a second stage of a change that is meant to read as
+    // one.
     notifier.toggleExpand(machine.machineId);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.text('3'), findsOneWidget);
+
+    await tester.pumpAndSettle();
     expect(find.text('3'), findsNothing);
     expect(find.text('Claude Code'), findsOneWidget);
     notifier.dispose();
@@ -172,6 +178,11 @@ void main() {
     await tester.pump();
 
     expect(notifier.expandedMachines, isNot(contains(machine.machineId)));
+    // Still mounted, and that is the point: the rows are clipped away by a
+    // shrinking box rather than deleted the instant the caption is tapped.
+    expect(find.text('Claude Code'), findsOneWidget);
+
+    await tester.pumpAndSettle();
     expect(find.text('Claude Code'), findsNothing);
     notifier.dispose();
   });

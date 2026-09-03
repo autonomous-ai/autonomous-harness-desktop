@@ -398,7 +398,7 @@ class _PoolUsageBar extends StatelessWidget {
   Widget build(BuildContext context) {
     AppTheme.watch(context);
     final value = fraction.clamp(0.0, 1.0);
-    final instant = MediaQuery.of(context).disableAnimations;
+    final instant = MediaQuery.disableAnimationsOf(context);
     // No [Align] around the fill, and none around the track either: Align hands
     // its child *loose* constraints, so the height stops being tight, and a
     // ColoredBox with no child of its own takes the smallest size it is

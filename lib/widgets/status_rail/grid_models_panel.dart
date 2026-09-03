@@ -447,7 +447,7 @@ class _TokenSplitBar extends StatelessWidget {
     // Reduce Motion parks the legs at their length rather than easing to it:
     // the bar is a value being drawn, so what the setting removes is the drawing
     // and never the value.
-    final motion = MediaQuery.of(context).disableAnimations
+    final motion = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : AppMotion.meter;
     final legs = <(int, Color)>[
@@ -750,7 +750,7 @@ class _RowBar extends StatelessWidget {
   Widget build(BuildContext context) {
     AppTheme.watch(context);
     final delay = math.min(index * _stagger, _maxStagger);
-    final instant = MediaQuery.of(context).disableAnimations;
+    final instant = MediaQuery.disableAnimationsOf(context);
     return ClipRRect(
       borderRadius: BorderRadius.circular(1.5),
       child: SizedBox(

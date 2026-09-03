@@ -409,8 +409,8 @@ class _EngineOptionState extends State<_EngineOption> {
       child: GestureDetector(
         onTap: widget.enabled ? widget.onTap : null,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
-          curve: Curves.easeOut,
+          duration: grid.AppMotion.hover,
+          curve: grid.AppMotion.curve,
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
           decoration: BoxDecoration(
             color: selected
