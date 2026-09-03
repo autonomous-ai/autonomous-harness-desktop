@@ -182,6 +182,16 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   machine and that is far too short to browse. Both are shown, labelled apart. A version's
   `pull_spec` names only the FIRST file, so a split GGUF is downloaded through every URL in `urls`
   (`share/pull_spec.dart`) — pulling the named one alone leaves a model that will not load.
+- **The status rail is the app's one polling reader** (`lib/widgets/status_rail/`,
+  `grid/grid_overview_controller.dart`): a 26px full-bleed strip along the window's bottom edge
+  showing what the chosen grid is made of. Its data is `GET {relay}/grid/overview` — the RELAY, not
+  the control plane, because the relay is what dispatches the work — reached with a fresh key from
+  `credentials(networkId)` every 60s. **A figure the relay did not send is null, never zero**: a zero
+  is a measurement and a blank is an admission, and on this strip the difference is the whole point.
+  The last good answer stays on screen when a refresh fails (`stale` turns the dot amber). The work
+  figure is `answered.freshInput` (tokens_in − tokens_cached), not the total, which cache hits
+  dominate. Member count is owner-only on the server and reads null on a 403 — the figure is then
+  omitted, because "we may not ask" and "nobody is here" must not render the same.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

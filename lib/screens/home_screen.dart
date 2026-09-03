@@ -15,6 +15,7 @@ import '../shortcuts/app_shortcuts.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
+import '../widgets/status_rail/grid_status_rail.dart';
 import '../widgets/window_chrome.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -275,6 +276,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
+                  // What this grid is made of, along the very bottom. Outside
+                  // the Expanded above so it is full-bleed under the machine
+                  // rail as well as the panes — a strip that started after the
+                  // rail would put a step in the window's bottom edge.
+                  const GridStatusRail(),
                 ],
               ),
             ),

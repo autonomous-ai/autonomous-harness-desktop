@@ -6,6 +6,7 @@ import '../api/api_client.dart' show ApiException;
 import '../share/catalog_models.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
+import 'grid_overview.dart';
 
 /// The Grid control plane, called DIRECTLY — the one place in this app that
 /// does.
@@ -131,6 +132,48 @@ class GridApiClient {
           options: Options(headers: {'Authorization': 'Bearer $_token'}),
         ),
       );
+
+  /// What this grid is made of — its machines, its models and what they have
+  /// answered.
+  ///
+  /// On the RELAY, not the control plane: the relay is the thing dispatching
+  /// the work, so it is the only place that knows. Same host and same key as
+  /// [models], which is why both take them explicitly.
+  Future<GridOverview> overview({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await _dio.getUri<dynamic>(
+      Uri.parse('$baseUrl/grid/overview'),
+      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+    );
+    return GridOverview.fromJson(
+      Map<String, dynamic>.from(_unwrap(response)),
+    );
+  }
+
+  /// Everyone on this grid.
+  ///
+  /// Owner-only on the server, which is not an error: a grid somebody else owns
+  /// answers 403, and the rail then shows no member figure rather than a zero.
+  /// That is why this returns null instead of throwing — "we may not ask" and
+  /// "nobody is here" must not render the same.
+  Future<int?> memberCount(String networkId) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/v1/grid/managed-networks/$networkId/members',
+        options: Options(headers: {'Authorization': 'Bearer $_token'}),
+      );
+      final status = response.statusCode ?? 0;
+      if (status < 200 || status >= 300) return null;
+      final body = response.data;
+      // Either a `{"members": [...]}` envelope or a bare list.
+      final rows = body is Map ? body['members'] : body;
+      return rows is List ? rows.length : null;
+    } on DioException {
+      return null;
+    }
+  }
 
   /// One authenticated GET against the control plane, unwrapped into a map or
   /// an [ApiException] — the shape every call above shares.
