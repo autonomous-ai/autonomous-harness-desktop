@@ -154,33 +154,76 @@ class GridApiClient {
     );
   }
 
-  /// Everyone on this grid.
+  /// Everyone on this grid, or null when the roster is not ours to read.
   ///
   /// Owner-only on the server, which is not an error: a grid somebody else owns
   /// answers 403, and the rail then shows no member figure at all rather than a
-  /// zero. That is why this returns null instead of throwing — "we may not ask"
+  /// zero. That is why this swallows instead of throwing — "we may not ask"
   /// and "nobody is here" must not render the same.
+  ///
+  /// The share sheet calls [membersOrThrow] instead: a dialog opened *to* read
+  /// the roster has to say why it is empty, where the rail only has to stop
+  /// printing a figure.
   Future<List<ManagedNetworkMember>?> members(String networkId) async {
     try {
-      final response = await _dio.get<dynamic>(
-        '/v1/grid/managed-networks/$networkId/members',
-        options: Options(headers: {'Authorization': 'Bearer $_token'}),
-      );
-      final status = response.statusCode ?? 0;
-      if (status < 200 || status >= 300) return null;
-      final body = response.data;
-      // Either a `{"members": [...]}` envelope or a bare list.
-      final rows = body is Map ? body['members'] : body;
-      if (rows is! List) return null;
-      return [
-        for (final row in rows)
-          if (row is Map)
-            ManagedNetworkMember.fromJson(Map<String, dynamic>.from(row)),
-      ];
-    } on DioException {
+      return await membersOrThrow(networkId);
+    } on Object {
       return null;
     }
   }
+
+  /// [members], with the refusal left to reach the caller.
+  Future<List<ManagedNetworkMember>> membersOrThrow(String networkId) async {
+    final body = await _get(_membersPath(networkId));
+    // Either a `{"members": [...]}` envelope or a bare list. `_get` insists on
+    // a map, so a bare list arrives as the envelope's absence rather than here.
+    final rows = body['members'];
+    if (rows is! List) {
+      throw ApiException('Grid sent a member list we cannot read');
+    }
+    return [
+      for (final row in rows)
+        if (row is Map)
+          ManagedNetworkMember.fromJson(Map<String, dynamic>.from(row)),
+    ];
+  }
+
+  /// Invites [email] to this grid, or changes what they may already do.
+  ///
+  /// **One POST does both.** There is no `PATCH …/members/{email}`: the store
+  /// writes `ON CONFLICT(network_id, email) DO UPDATE SET roles_json = …` and
+  /// bumps `member_epoch`, so this endpoint upserts. Deliberately not
+  /// DELETE-then-POST for a role change — a POST that failed after the DELETE
+  /// succeeded would drop the person off the grid entirely.
+  ///
+  /// [roles] are wire values from [ManagedMemberRole]; `admin` is refused
+  /// server-side, and so is any grant above the caller's own (403
+  /// `role_above_caller`), which is why the app filters the picker rather than
+  /// letting a choice 403 after the fact.
+  Future<void> addMember(
+    String networkId, {
+    required String email,
+    required List<String> roles,
+  }) async {
+    await _post(_membersPath(networkId), {'email': email, 'roles': roles});
+  }
+
+  /// Takes [email] off this grid. Owner-only on the server.
+  ///
+  /// A membership admitted by the grid's email domain has no row to delete —
+  /// the control plane synthesises it — so the UI offers no Remove there rather
+  /// than sending a call that would take nothing away.
+  Future<void> removeMember(String networkId, {required String email}) async {
+    _unwrapEmpty(
+      await _dio.delete<dynamic>(
+        '${_membersPath(networkId)}/${Uri.encodeComponent(email)}',
+        options: Options(headers: {'Authorization': 'Bearer $_token'}),
+      ),
+    );
+  }
+
+  static String _membersPath(String networkId) =>
+      '/v1/grid/managed-networks/$networkId/members';
 
   /// What each person on this grid ran inside the relay's window.
   ///
@@ -226,6 +269,15 @@ class GridApiClient {
       options: Options(headers: {'Authorization': 'Bearer $_token'}),
     ),
   );
+
+  /// A call whose answer is its status code — a DELETE. Same failure shapes as
+  /// [_unwrap], without insisting on a body the endpoint need not send.
+  void _unwrapEmpty(Response<dynamic> response) {
+    final status = response.statusCode ?? 0;
+    if (status < 200 || status >= 300) {
+      throw ApiException(_errorMessage(response.data, status), status: status);
+    }
+  }
 
   Map<dynamic, dynamic> _unwrap(Response<dynamic> response) {
     final body = response.data;

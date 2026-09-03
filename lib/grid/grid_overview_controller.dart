@@ -68,13 +68,6 @@ class GridOverviewController extends ChangeNotifier {
 
   String? get networkId => _selection.value.networkId;
 
-  /// This grid on the web — the page the Grid app's own panels link out to.
-  /// Null before a grid is chosen, and the only place this app sends anyone
-  /// out of itself.
-  String? get gridUrl {
-    final id = networkId;
-    return id == null ? null : 'https://grid.autonomous.ai/$id';
-  }
   String get gridName => _selection.value.label;
   bool get hasGrid => _selection.value.hasGrid;
 

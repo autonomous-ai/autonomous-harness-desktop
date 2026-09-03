@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../grid/grid_overview_controller.dart';
 import '../../grid/node_metrics.dart';
@@ -9,6 +8,8 @@ import '../../shared/theme/app_theme.dart' as grid;
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
+import '../node_dashboard/node_dashboard_dialog.dart';
+import '../share_grid/share_grid_dialog.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
@@ -25,11 +26,17 @@ import 'memory_ring.dart';
 /// closes on one unbroken line. A strip that started after the rail would put a
 /// step in the bottom edge and read as part of the pane rather than the window.
 class GridStatusRail extends StatefulWidget {
-  const GridStatusRail({super.key, this.controller});
+  const GridStatusRail({super.key, this.controller, this.onShareIntelligence});
 
   /// Injected by tests. Null in the app, where the rail makes — and disposes —
   /// its own.
   final GridOverviewController? controller;
+
+  /// Opens Settings ▸ Share Intelligence — the other way a grid with no
+  /// machines on it grows one. Handed down from the shell, which is where the
+  /// `AppNotifier` that Settings needs actually lives; null simply drops the
+  /// offer rather than drawing a button that goes nowhere.
+  final VoidCallback? onShareIntelligence;
 
   /// Tall enough for an 11.5pt figure with a hit target around it, short enough
   /// to stay furniture.
@@ -71,7 +78,10 @@ class _GridStatusRailState extends State<GridStatusRail> {
               Expanded(
                 child: ListenableBuilder(
                   listenable: _controller,
-                  builder: (context, _) => _Readout(controller: _controller),
+                  builder: (context, _) => _Readout(
+                    controller: _controller,
+                    onShareIntelligence: widget.onShareIntelligence,
+                  ),
                 ),
               ),
               const _VersionMark(),
@@ -101,9 +111,12 @@ _FigureAnchor _newFigureAnchor() => (link: LayerLink(), key: GlobalKey());
 /// The figures, read from both ends: what this grid *is* on the left, what it
 /// is *made of* on the right.
 class _Readout extends StatefulWidget {
-  const _Readout({required this.controller});
+  const _Readout({required this.controller, this.onShareIntelligence});
 
   final GridOverviewController controller;
+
+  /// See [GridStatusRail.onShareIntelligence].
+  final VoidCallback? onShareIntelligence;
 
   @override
   State<_Readout> createState() => _ReadoutState();
@@ -304,11 +317,41 @@ class _ReadoutState extends State<_Readout> {
     );
   }
 
+  /// Opens the node dashboard, having got the panel out of the way first.
+  ///
+  /// Dismiss and push in that order, and `this.context` rather than the panel's:
+  /// the callback runs from inside an [OverlayPortal] child, and hiding it
+  /// unmounts the very element the dialog would be pushed from.
+  void _openNodes() {
+    _hide();
+    showNodeDashboard(
+      context,
+      controller: widget.controller,
+      onShareIntelligence: widget.onShareIntelligence,
+      // The dashboard's empty state offers the other way to fill a grid, and
+      // reaches it through the same sheet the members panel does.
+      onInvite: widget.controller.networkId == null ? null : _openShare,
+    );
+  }
+
+  void _openShare() {
+    final id = widget.controller.networkId;
+    if (id == null) return;
+    _hide();
+    showShareGridDialog(
+      context,
+      networkId: id,
+      gridName: widget.controller.gridName,
+      // An invite that lands changes the figure this rail prints, so the poll
+      // is asked again rather than left to come round in its own time.
+      onChanged: widget.controller.refresh,
+    );
+  }
+
   /// The panel [kind] asks for, anchored to the figure it belongs to.
   Widget _panelFor(_PanelKind kind) {
     final controller = widget.controller;
-    final url = controller.gridUrl;
-    final open = url == null ? null : () => launchUrl(Uri.parse(url));
+    final onShare = controller.networkId == null ? null : _openShare;
     return switch (kind) {
       _PanelKind.power => GridPowerPanel(
         link: _nameAnchor.link,
@@ -320,7 +363,7 @@ class _ReadoutState extends State<_Readout> {
         power: controller.power!,
         nodes: _onlineNodes,
         uptimePct: controller.overview?.stats.uptimePct,
-        onViewDashboard: open,
+        onViewDashboard: _openNodes,
       ),
       _PanelKind.tokens => _stat(
         kind,
@@ -337,7 +380,7 @@ class _ReadoutState extends State<_Readout> {
           usage: controller.memberUsage,
           usageLoading: controller.memberUsageLoading,
           rosterLoading: controller.rosterLoading,
-          onInvite: open,
+          onInvite: onShare,
         ),
         width: 320,
       ),
