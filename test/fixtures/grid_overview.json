@@ -1,0 +1,597 @@
+{
+  "grid": {
+    "state": "running"
+  },
+  "router_enabled": true,
+  "advertises_chat_completions": true,
+  "advertises_responses": true,
+  "advertises_messages": true,
+  "stats": {
+    "models": 10,
+    "nodes": 8,
+    "concurrent_capacity": 61,
+    "uptime_pct": 99.9
+  },
+  "answered": {
+    "window_seconds": 86400,
+    "tokens_in": 569552400,
+    "tokens_cached": 463404063,
+    "tokens_out": 7905357,
+    "requests": 8904
+  },
+  "models": [
+    {
+      "id": "comfyui:image_generation",
+      "name": "comfyui:image_generation",
+      "maker": null,
+      "modality": "chat",
+      "context_length": null,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "comfyui:krea2",
+      "name": "comfyui:krea2",
+      "maker": null,
+      "modality": "chat",
+      "context_length": null,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "comfyui:z_image",
+      "name": "comfyui:z_image",
+      "maker": null,
+      "modality": "chat",
+      "context_length": null,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "DeepSeek-V4-Flash-0731",
+      "name": "DeepSeek-V4-Flash-0731",
+      "maker": null,
+      "modality": "chat",
+      "context_length": 256000,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.08,
+        "output_per_1m": 0.18
+      },
+      "status": "available"
+    },
+    {
+      "id": "gemma-4-31B-it",
+      "name": "gemma-4-31B-it",
+      "maker": null,
+      "modality": "chat",
+      "context_length": null,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "gemma-4-31B-it",
+      "name": "gemma-4-31B-it",
+      "maker": null,
+      "modality": "chat",
+      "context_length": 204800,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "GLM-4.7-Flash",
+      "name": "GLM-4.7-Flash",
+      "maker": null,
+      "modality": "chat",
+      "context_length": null,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "Qwen3.6-35B-A3B",
+      "name": "Qwen3.6-35B-A3B",
+      "maker": null,
+      "modality": "chat",
+      "context_length": 131072,
+      "vision": false,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "Qwen3.8-Flash-Next",
+      "name": "Qwen3.8-Flash-Next",
+      "maker": null,
+      "modality": "chat",
+      "context_length": 262144,
+      "vision": true,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    },
+    {
+      "id": "Qwen/Qwen3.8-27B",
+      "name": "Qwen/Qwen3.8-27B",
+      "maker": null,
+      "modality": "chat",
+      "context_length": 256000,
+      "vision": true,
+      "pricing": {
+        "unit": "token",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
+      "status": "available"
+    }
+  ],
+  "nodes": [
+    {
+      "name": "alpha-machine-00",
+      "provider_email": "team1@example.com",
+      "device": "Mac Studio",
+      "chip": "Apple M2 Ultra",
+      "memory_gb": 192,
+      "vram_total_mb": 196608.0,
+      "vram_gb": 192.0,
+      "vram_used_mb": 140393.4,
+      "gpu_util_pct": 36.0,
+      "gpu_temp_c": null,
+      "gpu_power_w": null,
+      "gpu_power_limit_w": null,
+      "disk_total_gb": 1858.2,
+      "disk_used_gb": 973.7,
+      "platform": "macos-arm64",
+      "device_class": "gpu",
+      "model": "gemma-4-31b-it",
+      "models": [
+        "gemma-4-31b-it"
+      ],
+      "model_capabilities": {
+        "gemma-4-31b-it": {
+          "context_length": null,
+          "vision": false
+        }
+      },
+      "responses_models": [
+        "gemma-4-31b-it"
+      ],
+      "engine": "llama.cpp",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 15.7,
+      "max_concurrency": 1,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 12474,
+        "tokens_cached": 115,
+        "tokens_out": 94,
+        "requests": 5,
+        "by_model": [
+          {
+            "model": "gemma-4-31b-it",
+            "tokens_in": 12474,
+            "tokens_cached": 115,
+            "tokens_out": 94,
+            "requests": 5
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "beta-machine-01",
+      "provider_email": "team2@example.com",
+      "device": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition \u00d72",
+      "chip": null,
+      "memory_gb": 96,
+      "vram_total_mb": 195774.0,
+      "vram_gb": 191.2,
+      "vram_used_mb": 175426.0,
+      "gpu_util_pct": 99.0,
+      "gpu_temp_c": 69.0,
+      "gpu_power_w": 708.7,
+      "gpu_power_limit_w": 900.0,
+      "disk_total_gb": 914.8,
+      "disk_used_gb": 894.5,
+      "platform": "linux",
+      "device_class": "gpu",
+      "model": "qwen3.8-flash-next",
+      "models": [
+        "qwen3.8-flash-next"
+      ],
+      "model_capabilities": {
+        "qwen3.8-flash-next": {
+          "context_length": 262144,
+          "vision": true
+        }
+      },
+      "responses_models": [
+        "qwen3.8-flash-next"
+      ],
+      "engine": "external",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 161.5,
+      "max_concurrency": 24,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 367995629,
+        "tokens_cached": 336831908,
+        "tokens_out": 4829930,
+        "requests": 5304,
+        "by_model": [
+          {
+            "model": "qwen3.8-flash-next",
+            "tokens_in": 367995629,
+            "tokens_cached": 336831908,
+            "tokens_out": 4829930,
+            "requests": 5304
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "gamma-machine-02",
+      "provider_email": "team1@example.com",
+      "device": "Mac Studio",
+      "chip": "Apple M2 Ultra",
+      "memory_gb": 192,
+      "vram_total_mb": 196608.0,
+      "vram_gb": 192.0,
+      "vram_used_mb": 49543.1,
+      "gpu_util_pct": 8.0,
+      "gpu_temp_c": null,
+      "gpu_power_w": null,
+      "gpu_power_limit_w": null,
+      "disk_total_gb": 1858.2,
+      "disk_used_gb": 1167.1,
+      "platform": "macos-arm64",
+      "device_class": "gpu",
+      "model": "qwen3.6-35b-a3b",
+      "models": [
+        "qwen3.6-35b-a3b"
+      ],
+      "model_capabilities": {
+        "qwen3.6-35b-a3b": {
+          "context_length": 131072,
+          "vision": false
+        }
+      },
+      "responses_models": [
+        "qwen3.6-35b-a3b"
+      ],
+      "engine": "llama.cpp",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": null,
+      "max_concurrency": 1,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 0,
+        "tokens_cached": 0,
+        "tokens_out": 0,
+        "requests": 0,
+        "by_model": []
+      },
+      "online": true
+    },
+    {
+      "name": "alpha-machine-03",
+      "provider_email": "team3@example.com",
+      "device": "Mac Studio",
+      "chip": "Apple M2 Ultra",
+      "memory_gb": 192,
+      "vram_total_mb": 196608.0,
+      "vram_gb": 192.0,
+      "vram_used_mb": 143042.6,
+      "gpu_util_pct": 13.0,
+      "gpu_temp_c": null,
+      "gpu_power_w": null,
+      "gpu_power_limit_w": null,
+      "disk_total_gb": 1858.2,
+      "disk_used_gb": 215.2,
+      "platform": "macos-arm64",
+      "device_class": "gpu",
+      "model": "gemma-4-31b-it",
+      "models": [
+        "gemma-4-31b-it"
+      ],
+      "model_capabilities": {
+        "gemma-4-31b-it": {
+          "context_length": 204800,
+          "vision": false
+        }
+      },
+      "responses_models": [
+        "gemma-4-31b-it"
+      ],
+      "engine": "llama.cpp",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 10.0,
+      "max_concurrency": 1,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 12012,
+        "tokens_cached": 0,
+        "tokens_out": 78,
+        "requests": 3,
+        "by_model": [
+          {
+            "model": "gemma-4-31b-it",
+            "tokens_in": 12012,
+            "tokens_cached": 0,
+            "tokens_out": 78,
+            "requests": 3
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "beta-machine-04",
+      "provider_email": "team1@example.com",
+      "device": "Mac Studio",
+      "chip": "Apple M2 Ultra",
+      "memory_gb": 192,
+      "vram_total_mb": 196608.0,
+      "vram_gb": 192.0,
+      "vram_used_mb": 91831.5,
+      "gpu_util_pct": 14.0,
+      "gpu_temp_c": null,
+      "gpu_power_w": null,
+      "gpu_power_limit_w": null,
+      "disk_total_gb": 926.9,
+      "disk_used_gb": 531.0,
+      "platform": "macos-arm64",
+      "device_class": "gpu",
+      "model": "glm-4.7-flash",
+      "models": [
+        "glm-4.7-flash"
+      ],
+      "model_capabilities": {
+        "glm-4.7-flash": {
+          "context_length": null,
+          "vision": false
+        }
+      },
+      "responses_models": [
+        "glm-4.7-flash"
+      ],
+      "engine": "llama.cpp",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 20.5,
+      "max_concurrency": 1,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 526191,
+        "tokens_cached": 495336,
+        "tokens_out": 2081,
+        "requests": 21,
+        "by_model": [
+          {
+            "model": "glm-4.7-flash",
+            "tokens_in": 526191,
+            "tokens_cached": 495336,
+            "tokens_out": 2081,
+            "requests": 21
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "gamma-machine-05",
+      "provider_email": "team1@example.com",
+      "device": "Mac Studio",
+      "chip": "Apple M2 Ultra",
+      "memory_gb": 192,
+      "vram_total_mb": 196608.0,
+      "vram_gb": 192.0,
+      "vram_used_mb": 47322.2,
+      "gpu_util_pct": 0.0,
+      "gpu_temp_c": null,
+      "gpu_power_w": null,
+      "gpu_power_limit_w": null,
+      "disk_total_gb": 1858.2,
+      "disk_used_gb": 1293.1,
+      "platform": "macos-arm64",
+      "device_class": "gpu",
+      "model": "comfyui:image_generation",
+      "models": [
+        "comfyui:image_generation",
+        "comfyui:krea2",
+        "comfyui:z_image"
+      ],
+      "model_capabilities": {
+        "comfyui:image_generation": {
+          "context_length": null,
+          "vision": null
+        },
+        "comfyui:krea2": {
+          "context_length": null,
+          "vision": null
+        },
+        "comfyui:z_image": {
+          "context_length": null,
+          "vision": null
+        }
+      },
+      "responses_models": [],
+      "engine": "comfyui",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": null,
+      "max_concurrency": 1,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 0,
+        "tokens_cached": 0,
+        "tokens_out": 0,
+        "requests": 4,
+        "by_model": [
+          {
+            "model": "comfyui:image_generation",
+            "tokens_in": 0,
+            "tokens_cached": 0,
+            "tokens_out": 0,
+            "requests": 1
+          },
+          {
+            "model": "comfyui:krea2",
+            "tokens_in": 0,
+            "tokens_cached": 0,
+            "tokens_out": 0,
+            "requests": 3
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "alpha-machine-06",
+      "provider_email": "team2@example.com",
+      "device": "NVIDIA GeForce RTX 5090 \u00d78",
+      "chip": null,
+      "memory_gb": 32,
+      "vram_total_mb": 260856.0,
+      "vram_gb": 254.7,
+      "vram_used_mb": 140756.0,
+      "gpu_util_pct": 0.0,
+      "gpu_temp_c": 40.0,
+      "gpu_power_w": 43.42,
+      "gpu_power_limit_w": 4800.0,
+      "disk_total_gb": 914.8,
+      "disk_used_gb": 864.6,
+      "platform": "linux",
+      "device_class": "gpu",
+      "model": "qwen/qwen3.8-27b",
+      "models": [
+        "qwen/qwen3.8-27b"
+      ],
+      "model_capabilities": {
+        "qwen/qwen3.8-27b": {
+          "context_length": 256000,
+          "vision": true
+        }
+      },
+      "responses_models": [
+        "qwen/qwen3.8-27b"
+      ],
+      "engine": "external",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 80.8,
+      "max_concurrency": 16,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 16173528,
+        "tokens_cached": 0,
+        "tokens_out": 350834,
+        "requests": 253,
+        "by_model": [
+          {
+            "model": "qwen/qwen3.8-27b",
+            "tokens_in": 16173528,
+            "tokens_cached": 0,
+            "tokens_out": 350834,
+            "requests": 253
+          }
+        ]
+      },
+      "online": true
+    },
+    {
+      "name": "beta-machine-07",
+      "provider_email": "team2@example.com",
+      "device": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition \u00d74",
+      "chip": null,
+      "memory_gb": 96,
+      "vram_total_mb": 391548.0,
+      "vram_gb": 382.4,
+      "vram_used_mb": 283794.0,
+      "gpu_util_pct": 100.0,
+      "gpu_temp_c": 72.0,
+      "gpu_power_w": 947.06,
+      "gpu_power_limit_w": 2400.0,
+      "disk_total_gb": 914.8,
+      "disk_used_gb": 795.8,
+      "platform": "linux",
+      "device_class": "gpu",
+      "model": "deepseek-v4-flash-0731",
+      "models": [
+        "deepseek-v4-flash-0731"
+      ],
+      "model_capabilities": {
+        "deepseek-v4-flash-0731": {
+          "context_length": 256000,
+          "vision": false
+        }
+      },
+      "responses_models": [
+        "deepseek-v4-flash-0731"
+      ],
+      "engine": "external",
+      "plan_type": null,
+      "codex_rate_limits": null,
+      "throughput_tok_s": 43.7,
+      "max_concurrency": 16,
+      "answered": {
+        "window_seconds": 86400,
+        "tokens_in": 184832566,
+        "tokens_cached": 126076704,
+        "tokens_out": 2722340,
+        "requests": 3314,
+        "by_model": [
+          {
+            "model": "deepseek-v4-flash-0731",
+            "tokens_in": 184832566,
+            "tokens_cached": 126076704,
+            "tokens_out": 2722340,
+            "requests": 3314
+          }
+        ]
+      },
+      "online": true
+    }
+  ]
+}

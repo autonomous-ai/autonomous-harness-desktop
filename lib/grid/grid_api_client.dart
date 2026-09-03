@@ -7,6 +7,8 @@ import '../share/catalog_models.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
 import 'grid_overview.dart';
+import 'managed_network_member.dart';
+import 'member_usage.dart';
 
 /// The Grid control plane, called DIRECTLY — the one place in this app that
 /// does.
@@ -155,10 +157,10 @@ class GridApiClient {
   /// Everyone on this grid.
   ///
   /// Owner-only on the server, which is not an error: a grid somebody else owns
-  /// answers 403, and the rail then shows no member figure rather than a zero.
-  /// That is why this returns null instead of throwing — "we may not ask" and
-  /// "nobody is here" must not render the same.
-  Future<int?> memberCount(String networkId) async {
+  /// answers 403, and the rail then shows no member figure at all rather than a
+  /// zero. That is why this returns null instead of throwing — "we may not ask"
+  /// and "nobody is here" must not render the same.
+  Future<List<ManagedNetworkMember>?> members(String networkId) async {
     try {
       final response = await _dio.get<dynamic>(
         '/v1/grid/managed-networks/$networkId/members',
@@ -169,10 +171,51 @@ class GridApiClient {
       final body = response.data;
       // Either a `{"members": [...]}` envelope or a bare list.
       final rows = body is Map ? body['members'] : body;
-      return rows is List ? rows.length : null;
+      if (rows is! List) return null;
+      return [
+        for (final row in rows)
+          if (row is Map)
+            ManagedNetworkMember.fromJson(Map<String, dynamic>.from(row)),
+      ];
     } on DioException {
       return null;
     }
+  }
+
+  /// What each person on this grid ran inside the relay's window.
+  ///
+  /// Authenticated with the RELAY key, unlike the roster beside it, because it
+  /// names people rather than machines. Null means the relay reported no rollup
+  /// — an older master, or one whose first query has not landed — which the
+  /// panel renders differently from an empty map, the grid nobody used today.
+  Future<({int windowSeconds, Map<String, MemberUsage> byEmail})?> memberUsage({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await _dio.getUri<dynamic>(
+      Uri.parse('$baseUrl/grid/members/usage'),
+      options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+    );
+    final body = _unwrap(response);
+    final rows = body['members'];
+    if (rows == null) return null;
+    if (rows is! List) {
+      throw ApiException('The relay sent a usage report we cannot read');
+    }
+    final window = body['window_seconds'];
+    return (
+      windowSeconds: window is num ? window.toInt() : 0,
+      // Keyed by email, so a consumer the relay could not name is not in the
+      // map — the roster is keyed by address and has nowhere to show them. They
+      // are still counted by the grid's own token figure, which is why that one
+      // can read higher than this list's total.
+      byEmail: {
+        for (final row in rows)
+          if (MemberUsage.fromJson(row) case final usage?)
+            if (usage.email case final email? when email.isNotEmpty)
+              email.toLowerCase(): usage,
+      },
+    );
   }
 
   /// One authenticated GET against the control plane, unwrapped into a map or

@@ -1,14 +1,126 @@
-/// What a grid is made of, as its relay reports it.
-///
-/// `GET {relay}/grid/overview` — the same host that serves the models list, on
-/// the same short-lived key. Everything the status rail prints comes from here,
-/// so every field is parsed leniently and nothing is invented: a figure the
-/// relay did not send is **null**, never zero. The difference matters on this
-/// screen more than anywhere else in the app, because a zero is a measurement
-/// and a blank is an admission.
-library;
+import 'package:flutter/foundation.dart' show listEquals, mapEquals;
 
-/// The grid's own counters.
+/// Parsed `GET {relayBaseUrl}/grid/overview` — the live snapshot a grid's relay
+/// serves: headline stats, the models it advertises, and the nodes backing them.
+/// Every field is null-tolerant so a partial/evolving payload never throws.
+///
+/// Every class here compares **by value**, and that is load-bearing, not tidiness.
+/// The overview is re-fetched on a timer; without value equality each poll handed
+/// Riverpod a brand-new object, so identity alone counted as "changed" and the
+/// whole derived graph — models, media capabilities, grid power, online nodes —
+/// recomputed and rebuilt every cadence for figures that hadn't moved. Worse, a
+/// notification landing while a screen was mounting its providers made those
+/// dependents invalidate mid-build, which is the `setState() during build` the
+/// framework then reports against `UncontrolledProviderScope`. A grid that hasn't
+/// changed now notifies nobody.
+class GridOverview {
+  const GridOverview({
+    this.state,
+    required this.stats,
+    required this.models,
+    required this.nodes,
+    this.answered,
+    this.advertisesChatCompletions,
+    this.advertisesResponses,
+    this.advertisesMessages,
+  });
+
+  final String? state;
+  final GridStats stats;
+  final List<OverviewModel> models;
+  final List<OverviewNode> nodes;
+
+  /// What the **whole grid** answered in the relay's window — every completed
+  /// request, whoever asked and whatever machine served it.
+  ///
+  /// Read this rather than summing [nodes]. A node is listed only while its
+  /// heartbeat is live, so a machine that served all morning and then went
+  /// offline takes its tokens out of a summed total — and the relay's node
+  /// rollup also drops rows it cannot attribute to a machine. Adding the nodes
+  /// up therefore reports a figure that is quietly low, and low by an amount
+  /// that changes as machines come and go.
+  ///
+  /// **Null means the relay didn't say**: a master that predates the field, or
+  /// one whose first rollup hasn't landed. Callers fall back to the node sum
+  /// there — worse, but the only thing such a grid can offer — and must never
+  /// read it as zero.
+  final NodeAnswered? answered;
+
+  /// Whether the grid serves at least one model that answers on
+  /// `/v1/chat/completions`, one that answers on `/v1/responses`, and one that
+  /// answers on Anthropic's `/v1/messages` — the three wire dialects a client
+  /// can speak. Which clients and agents can work here is derived from these
+  /// (see `agentRunsOnGrid`, `clientRunsOnGrid`).
+  ///
+  /// **Null means "the relay didn't say"**, never "no": a relay that predates
+  /// the flags leaves them out, and reading absence as `false` would strand
+  /// every user of an older grid. Only an explicit `false` rules a dialect out.
+  final bool? advertisesChatCompletions;
+  final bool? advertisesResponses;
+  final bool? advertisesMessages;
+
+  factory GridOverview.fromJson(Map<String, dynamic> j) {
+    final grid = j['grid'];
+    return GridOverview(
+      state: grid is Map ? grid['state'] as String? : null,
+      stats: GridStats.fromJson(
+        j['stats'] is Map
+            ? (j['stats'] as Map).cast<String, dynamic>()
+            : const {},
+      ),
+      models: _list(j['models'], OverviewModel.fromJson),
+      nodes: _list(j['nodes'], OverviewNode.fromJson),
+      answered: j['answered'] is Map
+          ? NodeAnswered.fromJson(
+              (j['answered'] as Map).cast<String, dynamic>(),
+            )
+          : null,
+      advertisesChatCompletions: _flag(j['advertises_chat_completions']),
+      advertisesResponses: _flag(j['advertises_responses']),
+      advertisesMessages: _flag(j['advertises_messages']),
+    );
+  }
+
+  /// A tri-state flag: the boolean when the relay sent one, else null. Anything
+  /// that isn't a bool (a string `"true"`, a number, a missing key) reads as
+  /// unknown rather than throwing or guessing.
+  static bool? _flag(Object? raw) => raw is bool ? raw : null;
+
+  static List<T> _list<T>(
+    Object? raw,
+    T Function(Map<String, dynamic>) parse,
+  ) => raw is List
+      ? raw
+            .whereType<Map>()
+            .map((m) => parse(m.cast<String, dynamic>()))
+            .toList()
+      : const [];
+
+  @override
+  bool operator ==(Object other) =>
+      other is GridOverview &&
+      other.state == state &&
+      other.stats == stats &&
+      listEquals(other.models, models) &&
+      listEquals(other.nodes, nodes) &&
+      other.answered == answered &&
+      other.advertisesChatCompletions == advertisesChatCompletions &&
+      other.advertisesResponses == advertisesResponses &&
+      other.advertisesMessages == advertisesMessages;
+
+  @override
+  int get hashCode => Object.hash(
+    state,
+    stats,
+    Object.hashAll(models),
+    Object.hashAll(nodes),
+    answered,
+    advertisesChatCompletions,
+    advertisesResponses,
+    advertisesMessages,
+  );
+}
+
 class GridStats {
   const GridStats({
     required this.models,
@@ -19,140 +131,41 @@ class GridStats {
 
   final int models;
   final int nodes;
-
-  /// How many requests the relay will dispatch at once.
   final int? concurrentCapacity;
   final double? uptimePct;
 
-  factory GridStats.fromJson(Map<String, dynamic> json) => GridStats(
-    models: (json['models'] as num?)?.toInt() ?? 0,
-    nodes: (json['nodes'] as num?)?.toInt() ?? 0,
-    concurrentCapacity: (json['concurrent_capacity'] as num?)?.toInt(),
-    uptimePct: (json['uptime_pct'] as num?)?.toDouble(),
+  factory GridStats.fromJson(Map<String, dynamic> j) => GridStats(
+    models: (j['models'] as num?)?.toInt() ?? 0,
+    nodes: (j['nodes'] as num?)?.toInt() ?? 0,
+    concurrentCapacity: (j['concurrent_capacity'] as num?)?.toInt(),
+    uptimePct: (j['uptime_pct'] as num?)?.toDouble(),
   );
+
+  @override
+  bool operator ==(Object other) =>
+      other is GridStats &&
+      other.models == models &&
+      other.nodes == nodes &&
+      other.concurrentCapacity == concurrentCapacity &&
+      other.uptimePct == uptimePct;
+
+  @override
+  int get hashCode => Object.hash(models, nodes, concurrentCapacity, uptimePct);
 }
 
-/// What was answered inside the relay's rollup window.
-class Answered {
-  const Answered({
-    required this.windowSeconds,
-    required this.tokensIn,
-    required this.tokensCached,
-    required this.tokensOut,
-    required this.requests,
-  });
+/// What a model can do where it is being served: how much it will read in one
+/// go, and whether any of that may be an image.
+///
+/// [vision] is tri-state on purpose. `false` is an engine that says it reads no
+/// images; **`null` is one that never said**, which an older provider is, and
+/// the two must not be collapsed — one is a fact, the other a gap in what we
+/// were told.
+///
+/// Lives here rather than beside its display helpers because both the grid's
+/// model entries and each node carry one, and infrastructure may not depend on a
+/// feature (conventions §1).
+typedef ModelCapability = ({int? contextLength, bool? vision});
 
-  final int windowSeconds;
-
-  /// Tokens read, cached ones included.
-  final int tokensIn;
-
-  /// The share of [tokensIn] served from a prompt cache — nearly free, and the
-  /// reason input cannot be printed as one number.
-  final int tokensCached;
-  final int tokensOut;
-  final int requests;
-
-  /// Input that was NOT served from cache.
-  ///
-  /// This is the figure the rail prints, and the choice is deliberate: total
-  /// tokens is dominated by cache hits that cost almost nothing, so a grid
-  /// re-reading the same prompt all day would show a huge number for very
-  /// little work. This is the work.
-  int get freshInput => tokensIn - tokensCached;
-
-  factory Answered.fromJson(Map<String, dynamic> json) => Answered(
-    windowSeconds: (json['window_seconds'] as num?)?.toInt() ?? 0,
-    tokensIn: (json['tokens_in'] as num?)?.toInt() ?? 0,
-    tokensCached: (json['tokens_cached'] as num?)?.toInt() ?? 0,
-    tokensOut: (json['tokens_out'] as num?)?.toInt() ?? 0,
-    requests: (json['requests'] as num?)?.toInt() ?? 0,
-  );
-}
-
-/// One machine on the grid.
-class OverviewNode {
-  const OverviewNode({
-    required this.name,
-    required this.online,
-    this.device,
-    this.chip,
-    this.engine,
-    this.planType,
-    this.memoryGb,
-    this.vramGb,
-    this.vramTotalMb,
-    this.vramUsedMb,
-    this.gpuUtilPct,
-    this.throughputTokS,
-    this.maxConcurrency,
-    this.models = const [],
-    this.answered,
-  });
-
-  final String name;
-  final bool online;
-  final String? device;
-  final String? chip;
-  final String? engine;
-
-  /// A subscription seat names its plan here instead of bringing hardware.
-  final String? planType;
-
-  final double? memoryGb;
-  final double? vramGb;
-  final double? vramTotalMb;
-  final double? vramUsedMb;
-  final double? gpuUtilPct;
-  final double? throughputTokS;
-  final int? maxConcurrency;
-  final List<String> models;
-  final Answered? answered;
-
-  /// A seat relays to a hosted model, so whatever memory its machine reports
-  /// never runs anything for the grid. Counting it would inflate the pool with
-  /// capacity nobody can use.
-  bool get isSubscription => planType != null && planType!.isNotEmpty;
-
-  /// What this machine contributes to the memory pool, in GB, or null when it
-  /// contributes none.
-  double? get poolVramGb {
-    if (isSubscription) return null;
-    final gb = vramGb ?? (vramTotalMb == null ? null : vramTotalMb! / 1024);
-    return gb == null || gb <= 0 ? null : gb;
-  }
-
-  /// What to call this machine's hardware in one line.
-  String get hardware => [
-    if (chip != null && chip!.isNotEmpty) chip!,
-    if (device != null && device!.isNotEmpty && device != chip) device!,
-  ].join(' · ');
-
-  factory OverviewNode.fromJson(Map<String, dynamic> json) => OverviewNode(
-    name: json['name'] as String? ?? '',
-    online: json['online'] == true,
-    device: json['device'] as String?,
-    chip: json['chip'] as String?,
-    engine: json['engine'] as String?,
-    planType: json['plan_type'] as String?,
-    memoryGb: (json['memory_gb'] as num?)?.toDouble(),
-    vramGb: (json['vram_gb'] as num?)?.toDouble(),
-    vramTotalMb: (json['vram_total_mb'] as num?)?.toDouble(),
-    vramUsedMb: (json['vram_used_mb'] as num?)?.toDouble(),
-    gpuUtilPct: (json['gpu_util_pct'] as num?)?.toDouble(),
-    throughputTokS: (json['throughput_tok_s'] as num?)?.toDouble(),
-    maxConcurrency: (json['max_concurrency'] as num?)?.toInt(),
-    models: [
-      for (final model in (json['models'] as List?) ?? const [])
-        if (model is String) model,
-    ],
-    answered: json['answered'] is Map
-        ? Answered.fromJson(Map<String, dynamic>.from(json['answered'] as Map))
-        : null,
-  );
-}
-
-/// One model the grid advertises.
 class OverviewModel {
   const OverviewModel({
     required this.id,
@@ -160,7 +173,9 @@ class OverviewModel {
     this.maker,
     this.modality,
     this.contextLength,
+    this.pricing,
     this.status,
+    this.vision,
   });
 
   final String id;
@@ -168,177 +183,577 @@ class OverviewModel {
   final String? maker;
   final String? modality;
   final int? contextLength;
+  final ModelPricing? pricing;
   final String? status;
 
-  String get label => name?.isNotEmpty == true ? name! : id;
+  /// Whether the model can read attached images (vision chat). **Null means the
+  /// relay didn't say** — an older relay omits it, and reading absence as
+  /// `false` would misreport every model from one. Callers that need a definite
+  /// answer decide what to do with unknown.
+  final bool? vision;
 
-  factory OverviewModel.fromJson(Map<String, dynamic> json) => OverviewModel(
-    id: json['id'] as String? ?? '',
-    name: json['name'] as String?,
-    maker: json['maker'] as String?,
-    modality: json['modality'] as String?,
-    contextLength: (json['context_length'] as num?)?.toInt(),
-    status: json['status'] as String?,
+  factory OverviewModel.fromJson(Map<String, dynamic> j) => OverviewModel(
+    id: '${j['id'] ?? ''}',
+    name: j['name'] as String?,
+    maker: j['maker'] as String?,
+    modality: j['modality'] as String?,
+    contextLength: (j['context_length'] as num?)?.toInt(),
+    pricing: j['pricing'] is Map
+        ? ModelPricing.fromJson((j['pricing'] as Map).cast<String, dynamic>())
+        : null,
+    status: j['status'] as String?,
+    vision: j['vision'] is bool ? j['vision'] as bool : null,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is OverviewModel &&
+      other.id == id &&
+      other.name == name &&
+      other.maker == maker &&
+      other.modality == modality &&
+      other.contextLength == contextLength &&
+      other.pricing == pricing &&
+      other.status == status &&
+      other.vision == vision;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    maker,
+    modality,
+    contextLength,
+    pricing,
+    status,
+    vision,
   );
 }
 
-/// The whole answer.
-class GridOverview {
-  const GridOverview({
-    required this.stats,
-    required this.models,
-    required this.nodes,
-    this.state,
-    this.answered,
-  });
+class ModelPricing {
+  const ModelPricing({this.unit, this.inputPer1m, this.outputPer1m});
 
-  final GridStats stats;
-  final List<OverviewModel> models;
-  final List<OverviewNode> nodes;
-  final String? state;
+  final String? unit;
+  final double? inputPer1m;
+  final double? outputPer1m;
 
-  /// What the WHOLE grid answered — read this rather than summing [nodes].
-  ///
-  /// A node is listed only while its heartbeat is live, so a machine that
-  /// served all morning and then went offline takes its tokens out of a summed
-  /// total, and the relay's per-node rollup separately drops rows it cannot
-  /// attribute. Summing is quietly low, by an amount that moves as machines
-  /// come and go.
-  final Answered? answered;
+  factory ModelPricing.fromJson(Map<String, dynamic> j) => ModelPricing(
+    unit: j['unit'] as String?,
+    inputPer1m: (j['input_per_1m'] as num?)?.toDouble(),
+    outputPer1m: (j['output_per_1m'] as num?)?.toDouble(),
+  );
 
-  bool get running => state == null || state == 'running';
+  @override
+  bool operator ==(Object other) =>
+      other is ModelPricing &&
+      other.unit == unit &&
+      other.inputPer1m == inputPer1m &&
+      other.outputPer1m == outputPer1m;
 
-  factory GridOverview.fromJson(Map<String, dynamic> json) {
-    final grid = json['grid'];
-    return GridOverview(
-      state: grid is Map ? grid['state'] as String? : null,
-      stats: GridStats.fromJson(
-        json['stats'] is Map
-            ? Map<String, dynamic>.from(json['stats'] as Map)
-            : const {},
-      ),
-      models: [
-        for (final model in (json['models'] as List?) ?? const [])
-          if (model is Map)
-            OverviewModel.fromJson(Map<String, dynamic>.from(model)),
-      ],
-      nodes: [
-        for (final node in (json['nodes'] as List?) ?? const [])
-          if (node is Map)
-            OverviewNode.fromJson(Map<String, dynamic>.from(node)),
-      ],
-      answered: json['answered'] is Map
-          ? Answered.fromJson(
-              Map<String, dynamic>.from(json['answered'] as Map),
-            )
-          : null,
-    );
-  }
+  @override
+  int get hashCode => Object.hash(unit, inputPer1m, outputPer1m);
 }
 
-/// The grid's hardware, summed over the machines that are actually up.
+/// One rate-limit window (primary/secondary) of a codex seat, from the relay's
+/// `codex_rate_limits`. Percentages are 0–100; `windowMinutes` is the quota
+/// period (43200 = 30d free, 10080 = 7d weekly on paid); `resetAt` is a Unix
+/// epoch (seconds) and `resetAfterSeconds` the seconds until it rolls. All
+/// null-tolerant — an evolving/absent payload never throws.
+class CodexWindow {
+  const CodexWindow({
+    this.usedPercent,
+    this.remainingPercent,
+    this.windowMinutes,
+    this.resetAt,
+    this.resetAfterSeconds,
+  });
+
+  final int? usedPercent;
+  final int? remainingPercent;
+  final int? windowMinutes;
+  final int? resetAt;
+  final int? resetAfterSeconds;
+
+  factory CodexWindow.fromJson(Map<String, dynamic> j) => CodexWindow(
+    usedPercent: (j['used_percent'] as num?)?.toInt(),
+    remainingPercent: (j['remaining_percent'] as num?)?.toInt(),
+    windowMinutes: (j['window_minutes'] as num?)?.toInt(),
+    resetAt: (j['reset_at'] as num?)?.toInt(),
+    resetAfterSeconds: (j['reset_after_seconds'] as num?)?.toInt(),
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is CodexWindow &&
+      other.usedPercent == usedPercent &&
+      other.remainingPercent == remainingPercent &&
+      other.windowMinutes == windowMinutes &&
+      other.resetAt == resetAt &&
+      other.resetAfterSeconds == resetAfterSeconds;
+
+  @override
+  int get hashCode => Object.hash(
+    usedPercent,
+    remainingPercent,
+    windowMinutes,
+    resetAt,
+    resetAfterSeconds,
+  );
+}
+
+/// A codex seat's rate-limit snapshot the provider harvested from the vendor's
+/// `x-codex-*` headers (relay `codex_rate_limits`). Only present on a node whose
+/// `engine == 'codex'`; null for hardware nodes. `primary` is the main quota
+/// window; `secondary` is a shorter window some tiers add.
+class CodexRateLimits {
+  const CodexRateLimits({
+    this.planType,
+    this.activeLimit,
+    this.primary,
+    this.secondary,
+  });
+
+  final String? planType;
+  final String? activeLimit;
+  final CodexWindow? primary;
+  final CodexWindow? secondary;
+
+  factory CodexRateLimits.fromJson(Map<String, dynamic> j) => CodexRateLimits(
+    planType: j['plan_type'] as String?,
+    activeLimit: j['active_limit'] as String?,
+    primary: j['primary'] is Map
+        ? CodexWindow.fromJson((j['primary'] as Map).cast<String, dynamic>())
+        : null,
+    secondary: j['secondary'] is Map
+        ? CodexWindow.fromJson((j['secondary'] as Map).cast<String, dynamic>())
+        : null,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is CodexRateLimits &&
+      other.planType == planType &&
+      other.activeLimit == activeLimit &&
+      other.primary == primary &&
+      other.secondary == secondary;
+
+  @override
+  int get hashCode => Object.hash(planType, activeLimit, primary, secondary);
+}
+
+/// What one model produced on one node inside the overview's rollup window —
+/// the relay's `answered.by_model[]`.
+/// The three token figures the relay reports for a stretch of work, and the
+/// arithmetic that keeps them honest.
 ///
-/// Every total stays null unless at least one online node reported that field:
-/// a grid where nobody advertises throughput shows no throughput, rather than
-/// claiming "0 tok/s".
-class GridPower {
-  const GridPower({
-    required this.onlineNodes,
-    required this.models,
-    this.vramGb,
-    this.vramUsedGb,
-    this.gpuUtilPct,
-    this.parallel,
-    this.throughputTokS,
-    this.answered,
-  });
+/// **`tokensCached` is part of `tokensIn`, never additional to it.** The relay's
+/// settlement is explicit about this — it bills
+/// `(in − cached)·input + cached·cache + out·output` — so a grand total is
+/// [totalTokens] = in + out, and anything adding cache on top counts the cached
+/// prefill twice. Use [freshInputTokens] for the "input" leg of a three-way
+/// split, which is what makes the three legs add up to the total.
+mixin AnsweredTokens {
+  /// Tokens read. Includes [tokensCached].
+  int get tokensIn;
 
-  final int onlineNodes;
-  final int models;
+  /// The share of [tokensIn] that came from a prompt cache — nearly free, and
+  /// the reason input and output can't be one number.
+  int get tokensCached;
 
-  /// Total graphics memory across online nodes. Never 0 — absent and "zero GB"
-  /// are different claims and only one of them is honest.
-  final double? vramGb;
+  /// Tokens generated. Where the time actually goes.
+  int get tokensOut;
 
-  /// How much of [vramGb] is already spoken for. Summed over the same set of
-  /// machines, so the ratio is over one consistent pool.
-  final double? vramUsedGb;
+  /// Input that was not served from cache — the leg a three-way split needs.
+  int get freshInputTokens => tokensIn - tokensCached;
 
-  final double? gpuUtilPct;
-  final int? parallel;
-  final double? throughputTokS;
-  final Answered? answered;
-
-  bool get isEmpty => onlineNodes == 0 && models == 0;
-
-  /// What the ring draws, 0–1, or null when there is nothing honest to draw.
-  ///
-  /// Memory in use first, because it is the figure printed right beside it —
-  /// the ring and the text are then the same claim. Failing that, mean GPU
-  /// load. Failing both, no ring: an empty circle beside a total would imply a
-  /// measurement of zero.
-  double? get share {
-    final total = vramGb;
-    final used = vramUsedGb;
-    if (total != null && used != null && total > 0) return used / total;
-    final util = gpuUtilPct;
-    return util == null ? null : util / 100;
-  }
-
-  bool get ringIsMemory => vramGb != null && vramUsedGb != null;
+  /// Everything that passed through, counted once.
+  int get totalTokens => tokensIn + tokensOut;
 }
 
-/// Derive [GridPower] from an overview. Pure, so the summing rules are testable
-/// without a relay.
-GridPower gridPowerFrom(GridOverview overview) {
-  final online = [
-    for (final node in overview.nodes)
-      if (node.online) node,
-  ];
+/// What one model produced on one node inside the overview's rollup window —
+/// the relay's `answered.by_model[]`.
+class AnsweredModel with AnsweredTokens {
+  const AnsweredModel({
+    required this.model,
+    this.tokensIn = 0,
+    this.tokensCached = 0,
+    required this.tokensOut,
+    required this.requests,
+  });
 
-  double? vram;
-  double? vramUsed;
-  var utilSum = 0.0;
-  var utilNodes = 0;
-  int? concurrency;
-  double? throughput;
+  final String model;
 
-  for (final node in online) {
-    final gb = node.poolVramGb;
-    if (gb == null) continue;
-    vram = (vram ?? 0) + gb;
-    // Both live figures follow the pool's own membership rule: whatever
-    // `poolVramGb` refused contributes neither a used share nor a utilisation
-    // reading, so the ratio is over one consistent set of machines.
-    final usedMb = node.vramUsedMb;
-    if (usedMb != null && usedMb > 0) vramUsed = (vramUsed ?? 0) + usedMb / 1024;
-    final util = node.gpuUtilPct;
-    if (util != null && util >= 0) {
-      utilSum += util;
-      utilNodes++;
-    }
-  }
-  for (final node in online) {
-    final max = node.maxConcurrency;
-    if (max != null && max > 0) concurrency = (concurrency ?? 0) + max;
-    final tokS = node.throughputTokS;
-    if (tokS != null && tokS > 0) throughput = (throughput ?? 0) + tokS;
-  }
+  @override
+  final int tokensIn;
 
-  return GridPower(
-    onlineNodes: online.length,
-    // The relay sometimes reports `stats.models` as 0 with a populated list,
-    // so the list wins when there is one.
-    models: overview.models.isNotEmpty
-        ? overview.models.length
-        : overview.stats.models,
-    vramGb: vram,
-    vramUsedGb: vramUsed,
-    gpuUtilPct: utilNodes == 0 ? null : utilSum / utilNodes,
-    // The relay is the authority on how much work it will dispatch: it may cap
-    // or oversubscribe what the nodes individually advertise.
-    parallel: overview.stats.concurrentCapacity ?? concurrency,
-    throughputTokS: throughput,
-    answered: overview.answered,
+  @override
+  final int tokensCached;
+
+  @override
+  final int tokensOut;
+
+  /// How many answered requests those tokens came from. Shown beside them
+  /// because the token count alone can't tell 300 ordinary replies from three
+  /// enormous ones.
+  final int requests;
+
+  factory AnsweredModel.fromJson(Map<String, dynamic> j) => AnsweredModel(
+    model: '${j['model'] ?? ''}',
+    tokensIn: (j['tokens_in'] as num?)?.toInt() ?? 0,
+    tokensCached: (j['tokens_cached'] as num?)?.toInt() ?? 0,
+    tokensOut: (j['tokens_out'] as num?)?.toInt() ?? 0,
+    requests: (j['requests'] as num?)?.toInt() ?? 0,
   );
+
+  @override
+  bool operator ==(Object other) =>
+      other is AnsweredModel &&
+      other.model == model &&
+      other.tokensIn == tokensIn &&
+      other.tokensCached == tokensCached &&
+      other.tokensOut == tokensOut &&
+      other.requests == requests;
+
+  @override
+  int get hashCode =>
+      Object.hash(model, tokensIn, tokensCached, tokensOut, requests);
+}
+
+/// How much a node has answered lately: the totals, the per-model split, and
+/// the span they cover.
+///
+/// **Present with zeros is not the same as absent.** A node the relay measured
+/// and found idle sends real zeros here, and the dashboard prints `0` — a true
+/// statement about a machine that served nothing today. A relay too old to
+/// compute this, or one whose rollup has never succeeded, sends no `answered`
+/// object at all and the field is null, which the dashboard prints as `—`. The
+/// distinction is the whole reason this is a nullable object rather than a pair
+/// of int fields defaulting to 0 — see the telemetry note on [OverviewNode].
+class NodeAnswered with AnsweredTokens {
+  const NodeAnswered({
+    required this.windowSeconds,
+    this.tokensIn = 0,
+    this.tokensCached = 0,
+    required this.tokensOut,
+    required this.requests,
+    this.byModel = const [],
+  });
+
+  /// The span these figures cover, as the relay reported it. Carried rather
+  /// than assumed: the window is an operator knob, and a label hardcoded to
+  /// "24h" would go quietly wrong the moment someone retuned it.
+  final int windowSeconds;
+
+  @override
+  final int tokensIn;
+
+  @override
+  final int tokensCached;
+
+  @override
+  final int tokensOut;
+
+  final int requests;
+
+  /// The same totals split by model, biggest first. Empty on a node that
+  /// answered nothing in the window.
+  final List<AnsweredModel> byModel;
+
+  factory NodeAnswered.fromJson(Map<String, dynamic> j) => NodeAnswered(
+    windowSeconds: (j['window_seconds'] as num?)?.toInt() ?? 0,
+    tokensIn: (j['tokens_in'] as num?)?.toInt() ?? 0,
+    tokensCached: (j['tokens_cached'] as num?)?.toInt() ?? 0,
+    tokensOut: (j['tokens_out'] as num?)?.toInt() ?? 0,
+    requests: (j['requests'] as num?)?.toInt() ?? 0,
+    byModel: j['by_model'] is List
+        ? [
+            for (final m in j['by_model'] as List)
+              if (m is Map) AnsweredModel.fromJson(m.cast<String, dynamic>()),
+          ]
+        : const [],
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is NodeAnswered &&
+      other.windowSeconds == windowSeconds &&
+      other.tokensIn == tokensIn &&
+      other.tokensCached == tokensCached &&
+      other.tokensOut == tokensOut &&
+      other.requests == requests &&
+      listEquals(other.byModel, byModel);
+
+  @override
+  int get hashCode => Object.hash(
+    windowSeconds,
+    tokensIn,
+    tokensCached,
+    tokensOut,
+    requests,
+    Object.hashAll(byModel),
+  );
+}
+
+class OverviewNode {
+  const OverviewNode({
+    required this.name,
+    this.providerEmail,
+    this.device,
+    this.chip,
+    this.memoryGb,
+    this.vramGb,
+    this.vramTotalMb,
+    this.deviceClass,
+    this.model,
+    this.models = const [],
+    this.modelCapabilities = const {},
+    this.engine,
+    this.platform,
+    this.throughputTokS,
+    this.maxConcurrency,
+    this.planType,
+    this.codexRateLimits,
+    this.vramUsedMb,
+    this.gpuUtilPct,
+    this.gpuTempC,
+    this.gpuPowerW,
+    this.gpuPowerLimitW,
+    this.diskTotalGb,
+    this.diskUsedGb,
+    this.answered,
+    required this.online,
+  });
+
+  final String name;
+
+  /// The email of whoever put this machine on the grid, as the relay reports it
+  /// (`provider_email`). Null on an older relay, or when the control plane
+  /// couldn't resolve the owner.
+  ///
+  /// Shown as a handle, never whole — see `nodeHostHandle`.
+  final String? providerEmail;
+
+  final String? device;
+  final String? chip;
+  final int? memoryGb;
+
+  /// The subscription tier a seat-backed node serves on — `free` / `plus` /
+  /// `pro` from the relay's `plan_type` (a codex/ChatGPT subscription node, ADR
+  /// 0015). Null for an ordinary hardware node that carries no plan.
+  final String? planType;
+
+  /// GPU memory the node brings, in GB. The relay's `vram_gb`; `vram_total_mb`
+  /// is the raw fallback. Null on CPU-only nodes or providers that don't report
+  /// it. Surfaced per node via `nodeVramLabel`.
+  final double? vramGb;
+  final double? vramTotalMb;
+
+  final String? deviceClass;
+
+  /// The node's primary served model/capability.
+  final String? model;
+
+  /// Every model or capability this node advertises — for a `comfyui` engine
+  /// these are media capabilities like `comfyui:image_generation`. The media
+  /// picker reads these since media capabilities never appear in the model list.
+  final List<String> models;
+
+  /// What **this machine** advertises about each model in [models] — the context
+  /// window its engine was actually started with, and whether that route reads
+  /// images. Keyed by the same ids as [models].
+  ///
+  /// Distinct from the capabilities on the grid's [OverviewModel] entries, which
+  /// are a MAX/OR fold across every node of a provider: two machines serving one
+  /// model genuinely differ (`llama-server -c 8192` beside `-c 32768`), and the
+  /// grid entry can only quote one window. A figure shown beside a machine's
+  /// name has to come from here.
+  ///
+  /// Empty on a relay too old to send `model_capabilities`, and a model absent
+  /// from it is one this node published no capability envelope for — not one
+  /// with no window. Absent and null both mean "this node did not say".
+  final Map<String, ModelCapability> modelCapabilities;
+
+  final String? engine;
+
+  /// OS/arch the node reported: `macos-arm64` (Apple Silicon — unified memory,
+  /// so its "GPU memory" is really RAM), `macos-x86_64` / `linux` / `windows`
+  /// (discrete GPU with its own VRAM). Null on older providers that omit it.
+  final String? platform;
+
+  final double? throughputTokS;
+  final int? maxConcurrency;
+  final bool online;
+
+  /// Live telemetry from the node's last heartbeat: GPU memory in use, GPU
+  /// utilisation (0–100), die temperature in °C, power draw and the card's
+  /// power cap in watts, and the model volume's size and usage in GB.
+  ///
+  /// **Each one is independently null, and null is not zero.** A Mac reports
+  /// total VRAM but never utilisation or temperature (macOS exposes those only
+  /// to a root `powermetrics`); a CPU-only box reports neither; a datacenter
+  /// card reports all of them. Render nothing where a value is null — a `0%`
+  /// standing in for "not measured" is indistinguishable from a genuinely idle
+  /// node, which is the exact confusion this nullability exists to prevent.
+  final double? vramUsedMb;
+  final double? gpuUtilPct;
+  final double? gpuTempC;
+  final double? gpuPowerW;
+  final double? gpuPowerLimitW;
+  final double? diskTotalGb;
+  final double? diskUsedGb;
+
+  /// How much this node has answered inside the relay's rollup window. **Null
+  /// means the relay didn't say** — an older master computes no such figure —
+  /// and is rendered as unmeasured, never as an idle machine. See
+  /// [NodeAnswered] for why zeros and null must stay distinguishable.
+  final NodeAnswered? answered;
+
+  /// The codex seat's rate-limit snapshot, when this node serves a codex engine
+  /// (`engine == 'codex'`). Null for every other engine. Stale between the
+  /// provider's served requests — the relay only refreshes it on a response/seed.
+  final CodexRateLimits? codexRateLimits;
+
+  factory OverviewNode.fromJson(Map<String, dynamic> j) => OverviewNode(
+    name: '${j['name'] ?? ''}',
+    providerEmail: j['provider_email'] as String?,
+    device: j['device'] as String?,
+    chip: j['chip'] as String?,
+    memoryGb: (j['memory_gb'] as num?)?.toInt(),
+    vramGb: (j['vram_gb'] as num?)?.toDouble(),
+    vramTotalMb: (j['vram_total_mb'] as num?)?.toDouble(),
+    deviceClass: j['device_class'] as String?,
+    model: j['model'] as String?,
+    models: j['models'] is List
+        ? [for (final m in j['models'] as List) '$m']
+        : const [],
+    modelCapabilities: _capabilityMap(j['model_capabilities']),
+    engine: j['engine'] as String?,
+    platform: j['platform'] as String?,
+    throughputTokS: (j['throughput_tok_s'] as num?)?.toDouble(),
+    maxConcurrency: (j['max_concurrency'] as num?)?.toInt(),
+    planType: j['plan_type'] as String?,
+    codexRateLimits: j['codex_rate_limits'] is Map
+        ? CodexRateLimits.fromJson(
+            (j['codex_rate_limits'] as Map).cast<String, dynamic>(),
+          )
+        : null,
+    vramUsedMb: (j['vram_used_mb'] as num?)?.toDouble(),
+    gpuUtilPct: (j['gpu_util_pct'] as num?)?.toDouble(),
+    gpuTempC: (j['gpu_temp_c'] as num?)?.toDouble(),
+    gpuPowerW: (j['gpu_power_w'] as num?)?.toDouble(),
+    gpuPowerLimitW: (j['gpu_power_limit_w'] as num?)?.toDouble(),
+    diskTotalGb: (j['disk_total_gb'] as num?)?.toDouble(),
+    diskUsedGb: (j['disk_used_gb'] as num?)?.toDouble(),
+    answered: j['answered'] is Map
+        ? NodeAnswered.fromJson((j['answered'] as Map).cast<String, dynamic>())
+        : null,
+    online: j['online'] == true,
+  );
+
+  /// The relay's `model_capabilities` object, or empty when it sent none.
+  ///
+  /// Every level degrades rather than throws — the whole object, one entry, one
+  /// field. This is provider-self-reported data that reaches the app through an
+  /// unauthenticated endpoint, so a node sending junk must cost that node its
+  /// figures and nothing else; a `FormatException` here would blank the whole
+  /// dashboard over one bad row.
+  static Map<String, ModelCapability> _capabilityMap(Object? raw) {
+    if (raw is! Map) return const {};
+    final out = <String, ModelCapability>{};
+    for (final entry in raw.entries) {
+      final value = entry.value;
+      if (value is! Map) continue;
+      // Type-checked, not cast. `as num?` is the idiom everywhere else in this
+      // file and it is null-tolerant, not junk-tolerant: a string where a number
+      // belongs throws a `TypeError` mid-parse, which here would cost the whole
+      // dashboard rather than one node's figures.
+      final window = value['context_length'];
+      final vision = value['vision'];
+      out['${entry.key}'] = (
+        contextLength: window is num ? window.toInt() : null,
+        vision: vision is bool ? vision : null,
+      );
+    }
+    return out;
+  }
+
+  /// GPU memory still free, in GB — the headroom a new model has to fit into.
+  /// Null unless the node reported BOTH total and used: subtracting an absent
+  /// figure from a present one would invent headroom nobody measured.
+  double? get vramFreeGb {
+    final total = vramTotalMb;
+    final used = vramUsedMb;
+    if (total == null || used == null) return null;
+    return (total - used) / 1024;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is OverviewNode &&
+      other.name == name &&
+      other.providerEmail == providerEmail &&
+      other.device == device &&
+      other.chip == chip &&
+      other.memoryGb == memoryGb &&
+      other.vramGb == vramGb &&
+      other.vramTotalMb == vramTotalMb &&
+      other.deviceClass == deviceClass &&
+      other.model == model &&
+      listEquals(other.models, models) &&
+      // By value, like every other field here. Identity would make each poll's
+      // freshly-parsed map a "change", and an overview that always differs
+      // recomputes the whole derived graph every cadence — see the note on
+      // `gridOverviewSnapshot` for what that broke last time.
+      mapEquals(other.modelCapabilities, modelCapabilities) &&
+      other.engine == engine &&
+      other.platform == platform &&
+      other.throughputTokS == throughputTokS &&
+      other.maxConcurrency == maxConcurrency &&
+      other.planType == planType &&
+      other.codexRateLimits == codexRateLimits &&
+      other.vramUsedMb == vramUsedMb &&
+      other.gpuUtilPct == gpuUtilPct &&
+      other.gpuTempC == gpuTempC &&
+      other.gpuPowerW == gpuPowerW &&
+      other.gpuPowerLimitW == gpuPowerLimitW &&
+      other.diskTotalGb == diskTotalGb &&
+      other.diskUsedGb == diskUsedGb &&
+      other.answered == answered &&
+      other.online == online;
+
+  // `Object.hashAll` rather than `Object.hash`: the latter takes at most 20
+  // positional arguments and the telemetry fields push this past that ceiling.
+  @override
+  int get hashCode => Object.hashAll([
+    name,
+    providerEmail,
+    device,
+    chip,
+    memoryGb,
+    vramGb,
+    vramTotalMb,
+    deviceClass,
+    model,
+    Object.hashAll(models),
+    // Unordered: a Map's iteration order is not part of its equality, so a hash
+    // that depended on it could disagree with `==`.
+    Object.hashAllUnordered([
+      for (final e in modelCapabilities.entries) Object.hash(e.key, e.value),
+    ]),
+    engine,
+    platform,
+    throughputTokS,
+    maxConcurrency,
+    planType,
+    codexRateLimits,
+    vramUsedMb,
+    gpuUtilPct,
+    gpuTempC,
+    gpuPowerW,
+    gpuPowerLimitW,
+    diskTotalGb,
+    diskUsedGb,
+    answered,
+    online,
+  ]);
 }

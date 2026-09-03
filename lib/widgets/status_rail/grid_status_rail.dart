@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../grid/grid_overview_controller.dart';
+import '../../grid/node_metrics.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../grid/grid_overview.dart';
+import '../../grid/grid_power.dart';
+import 'grid_models_panel.dart';
+import 'grid_power_panel.dart';
+import 'grid_stat_panels.dart';
 import 'memory_ring.dart';
-import 'status_panels.dart';
+import 'pill_panel_shell.dart';
 
 /// The strip along the bottom of the window: what the chosen grid is made of,
 /// and which build of the app is reading it.
@@ -101,15 +108,24 @@ class _Readout extends StatelessWidget {
     final power = controller.power;
     final overview = controller.overview;
     final answered = power?.answered;
+    // Online only, once, so every panel and the rail's own count read the same
+    // set of machines.
+    final onlineNodes = [
+      for (final node in overview?.nodes ?? const <OverviewNode>[])
+        if (node.online) node,
+    ];
     return Row(
       children: [
         _GridMark(controller: controller),
-        if (power != null && answered != null && answered.freshInput > 0)
+        if (power != null && answered != null && answered.freshInputTokens > 0)
           _Figure(
-            value: formatTokens(answered.freshInput),
-            unit: formatWindow(answered.windowSeconds),
+            value: formatCount(answered.freshInputTokens),
+            unit: answeredWindowLabel(answered.windowSeconds),
             semantics: 'work answered',
-            panel: () => WorkPanel(answered: answered),
+            panel: () => _Panel(
+              width: 255,
+              child: GridTokensList(answered: answered),
+            ),
           ),
         const Spacer(),
         // WHAT THE GRID IS MADE OF — people, machines, models.
@@ -118,21 +134,44 @@ class _Readout extends StatelessWidget {
             icon: LucideIcons.users300,
             value: '${controller.members}',
             semantics: 'people on this grid',
-            panel: () => MembersPanel(members: controller.members!),
+            panel: () => _Panel(
+              width: 320,
+              child: GridMembersList(
+                gridName: controller.gridName,
+                roster: controller.roster,
+                usage: controller.memberUsage,
+                usageLoading: controller.memberUsageLoading,
+                rosterLoading: controller.rosterLoading,
+                onInvite: controller.gridUrl == null
+                    ? null
+                    : () => launchUrl(Uri.parse(controller.gridUrl!)),
+              ),
+            ),
           ),
         if (power != null)
           _Count(
             icon: LucideIcons.server300,
             value: '${power.onlineNodes}',
             semantics: 'machines hosting',
-            panel: () => NodesPanel(nodes: overview?.nodes ?? const []),
+            panel: () => _Panel(
+              width: 358,
+              child: GridNodesList(nodes: onlineNodes),
+            ),
           ),
         if (power != null)
           _Count(
             icon: LucideIcons.boxes,
             value: '${power.models}',
             semantics: 'models available',
-            panel: () => ModelsPanel(models: overview?.models ?? const []),
+            panel: () => _Panel(
+              width: 352,
+              child: GridModelsList(
+                models: overview?.models ?? const [],
+                nodes: onlineNodes,
+                gridTotal: power.answered,
+                loading: controller.loading,
+              ),
+            ),
           ),
       ],
     );
@@ -153,14 +192,32 @@ class _GridMark extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final power = controller.power;
-    final share = power?.share;
     final vram = power?.vramGb;
     final used = power?.vramUsedGb;
+    // What the ring is a share of, in the order the data allows. Memory in use
+    // is the honest first choice — it is the figure printed right beside it, so
+    // the ring and the text are the same claim. Failing that, mean GPU load.
+    // Failing both, no ring: an empty circle beside a total would imply a
+    // measurement of zero.
+    final share = (vram != null && used != null && vram > 0)
+        ? used / vram
+        : (power?.gpuUtilPct != null ? power!.gpuUtilPct! / 100 : null);
     return _Hoverable(
       semantics: 'grid ${controller.gridName}',
       panel: power == null
           ? null
-          : () => PowerPanel(power: power, gridName: controller.gridName),
+          : () => GridPowerPanel(
+              gridName: controller.gridName,
+              power: power,
+              nodes: [
+                for (final node in controller.overview?.nodes ?? const [])
+                  if (node.online) node,
+              ],
+              uptimePct: controller.overview?.stats.uptimePct,
+              onViewDashboard: controller.gridUrl == null
+                  ? null
+                  : () => launchUrl(Uri.parse(controller.gridUrl!)),
+            ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -198,7 +255,7 @@ class _GridMark extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               vram != null && used != null
-                  ? formatMemoryPair(used, vram)
+                  ? formatVramShare(used, vram)
                   : '${(share * 100).round()}% load',
               style: TextStyle(
                 color: grid.AppPalette.textSecondary,
@@ -476,4 +533,16 @@ class _VersionMark extends StatelessWidget {
       },
     );
   }
+}
+
+/// One panel on the shared surface, at the width its contents were drawn for.
+class _Panel extends StatelessWidget {
+  const _Panel({required this.width, required this.child});
+
+  final double width;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      SizedBox(width: width, child: PillPanelSurface(child: child));
 }

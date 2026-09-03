@@ -7,8 +7,10 @@ import 'package:harness/grid/grid_credentials.dart';
 import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
+import 'package:harness/grid/managed_network_member.dart';
+import 'package:harness/grid/member_usage.dart';
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
-import 'package:harness/widgets/status_rail/status_panels.dart';
+import 'package:harness/widgets/status_rail/pill_panel_shell.dart';
 
 class _MemoryStore implements LocalKeyValueStore {
   final Map<String, String> values = {};
@@ -21,10 +23,10 @@ class _MemoryStore implements LocalKeyValueStore {
 }
 
 class _Api extends GridApiClient {
-  _Api({this.fails = false, this.members = 33});
+  _Api({this.fails = false, this.memberCount = 33});
 
   bool fails;
-  final int? members;
+  final int? memberCount;
   int overviewCalls = 0;
 
   @override
@@ -71,7 +73,22 @@ class _Api extends GridApiClient {
   }
 
   @override
-  Future<int?> memberCount(String networkId) async => members;
+  Future<List<ManagedNetworkMember>?> members(String networkId) async =>
+      memberCount == null
+      ? null
+      : [
+          for (var i = 0; i < memberCount!; i++)
+            ManagedNetworkMember.fromJson({
+              'email': 'person$i@example.com',
+              'roles': const ['consumer'],
+            }),
+        ];
+
+  @override
+  Future<({int windowSeconds, Map<String, MemberUsage> byEmail})?> memberUsage({
+    required String baseUrl,
+    required String apiKey,
+  }) async => null;
 }
 
 Future<GridOverviewController> _pump(
@@ -114,8 +131,9 @@ void main() {
 
     // What this grid IS, on the left.
     expect(find.text('autonomous.ai'), findsOneWidget);
-    expect(find.text('1.7 / 1.7 TB'), findsNothing);
-    expect(find.text('1.0 / 1.7 TB'), findsOneWidget);
+    // `formatVramShare` writes the unit once, from the total, and trims a
+    // trailing `.0` — 1024 GB of 1740 is "1 / 1.7 TB".
+    expect(find.text('1 / 1.7 TB'), findsOneWidget);
     expect(find.text('92.4M'), findsOneWidget);
     expect(find.text(' / 24h'), findsOneWidget);
     // What it is MADE OF, on the right.
@@ -179,7 +197,7 @@ void main() {
   ) async {
     // Owner-only on the server: "we may not ask" and "nobody is here" must not
     // render the same.
-    final controller = await _pump(tester, api: _Api(members: null));
+    final controller = await _pump(tester, api: _Api(memberCount: null));
 
     expect(find.text('33'), findsNothing);
     expect(find.text('8'), findsOneWidget);
@@ -202,9 +220,11 @@ void main() {
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
     await tester.pumpAndSettle();
 
-    final panel = tester.getRect(find.byType(StatusPanel));
-    expect(panel.width, 300);
-    expect(panel.height, lessThan(200));
+    final panel = tester.getRect(find.byType(PillPanelSurface));
+    expect(panel.width, 312);
+    // Its own height, not the window's — which is what the bug looked like.
+    final window = tester.getRect(find.byType(MaterialApp));
+    expect(panel.height, lessThan(window.height));
     // It opens UPWARD: there is nothing below a strip on the window's bottom
     // edge.
     final rail = tester.getRect(find.byType(GridStatusRail));
@@ -223,15 +243,15 @@ void main() {
     addTearDown(gesture.removePointer);
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
     await tester.pumpAndSettle();
-    expect(find.byType(StatusPanel), findsOneWidget);
+    expect(find.byType(PillPanelSurface), findsOneWidget);
 
-    await gesture.moveTo(tester.getCenter(find.text('Requests at once')));
+    await gesture.moveTo(tester.getCenter(find.text('SELF-HOST')));
     await tester.pumpAndSettle();
-    expect(find.byType(StatusPanel), findsOneWidget);
+    expect(find.byType(PillPanelSurface), findsOneWidget);
 
     await gesture.moveTo(const Offset(500, 20));
     await tester.pumpAndSettle();
-    expect(find.byType(StatusPanel), findsNothing);
+    expect(find.byType(PillPanelSurface), findsNothing);
     controller.dispose();
   });
 
@@ -244,9 +264,9 @@ void main() {
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
     await tester.pumpAndSettle();
 
-    expect(find.text('8 machines online, serving 10 models.'), findsOneWidget);
-    expect(find.text('Requests at once'), findsOneWidget);
-    expect(find.text('61'), findsOneWidget);
+    // The hardware panel: the grid's name, its uptime, and the memory split.
+    expect(find.text('IN USE'), findsOneWidget);
+    expect(find.text('SELF-HOST'), findsOneWidget);
     controller.dispose();
   });
 }

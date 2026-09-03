@@ -1,0 +1,201 @@
+[
+  {
+    "email": "person13@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person14@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person15@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person16@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person10@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person03@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person17@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person18@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person19@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person07@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person04@example.com",
+    "roles": [
+      "admin",
+      "both"
+    ]
+  },
+  {
+    "email": "person20@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person21@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person22@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person23@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person24@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person25@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person08@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person26@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person06@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person27@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person09@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person11@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person05@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person28@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person12@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person01@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person29@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person30@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person31@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person32@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person02@example.com",
+    "roles": [
+      "both"
+    ]
+  },
+  {
+    "email": "person33@example.com",
+    "roles": [
+      "both"
+    ]
+  }
+]

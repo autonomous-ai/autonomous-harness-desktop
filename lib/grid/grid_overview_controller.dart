@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'grid_api_client.dart';
+import 'grid_credentials.dart';
 import 'grid_overview.dart';
+import 'grid_power.dart';
+import 'managed_network_member.dart';
+import 'member_usage.dart';
 import 'grid_selection_store.dart';
 
 /// The status rail's data: what the chosen grid is made of, kept current.
@@ -36,8 +40,26 @@ class GridOverviewController extends ChangeNotifier {
   GridOverview? overview;
   GridPower? power;
 
-  /// People on this grid, or null when the roster is not ours to read.
-  int? members;
+  /// Everyone on this grid, or null when the roster is not ours to read.
+  List<ManagedNetworkMember>? roster;
+
+  /// What each of them ran in the relay's window, keyed by address. Null means
+  /// the relay reported no rollup at all, which renders differently from an
+  /// empty map — see [GridApiClient.memberUsage].
+  ({int windowSeconds, Map<String, MemberUsage> byEmail})? memberUsage;
+
+  /// The usage call is still out and has never landed.
+  bool memberUsageLoading = false;
+
+  /// The roster call is still out and has never landed.
+  ///
+  /// Separate from `roster == null`, which means the control plane REFUSED it —
+  /// the roster is owner-only. The two render differently: one is a row of
+  /// skeleton bars, the other a sentence saying why the list is not here.
+  bool rosterLoading = false;
+
+  /// How many people are on this grid, or null when we may not ask.
+  int? get members => roster?.length;
 
   bool loading = false;
 
@@ -45,8 +67,20 @@ class GridOverviewController extends ChangeNotifier {
   bool stale = false;
 
   String? get networkId => _selection.value.networkId;
+
+  /// This grid on the web — the page the Grid app's own panels link out to.
+  /// Null before a grid is chosen, and the only place this app sends anyone
+  /// out of itself.
+  String? get gridUrl {
+    final id = networkId;
+    return id == null ? null : 'https://grid.autonomous.ai/$id';
+  }
   String get gridName => _selection.value.label;
   bool get hasGrid => _selection.value.hasGrid;
+
+  /// The relay key from this cycle's fetch, so the usage call beside it does
+  /// not mint a second one for the same grid a moment later.
+  GridCredentials? _credentials;
 
   Timer? _timer;
   bool _disposed = false;
@@ -58,7 +92,9 @@ class GridOverviewController extends ChangeNotifier {
     _loadedFor = id;
     overview = null;
     power = null;
-    members = null;
+    roster = null;
+    memberUsage = null;
+    rosterLoading = false;
     stale = false;
     _timer?.cancel();
     if (id == null) {
@@ -82,13 +118,21 @@ class GridOverviewController extends ChangeNotifier {
       // [GridCredentials] for why — and it is the same call the New agent
       // dialog makes, so this costs nothing new on the control plane.
       final credentials = await _api.credentials(id);
+      _credentials = credentials;
       final loaded = await _api.overview(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
       );
       if (request != _request || _disposed) return;
       overview = loaded;
-      power = gridPowerFrom(loaded);
+      power = gridPowerFrom(
+        loaded.nodes,
+        // The relay sometimes reports `stats.models` as 0 with a populated
+        // list, so the list wins when there is one.
+        loaded.models.isNotEmpty ? loaded.models.length : loaded.stats.models,
+        capacity: loaded.stats.concurrentCapacity,
+        gridAnswered: loaded.answered,
+      );
       stale = false;
     } on Object {
       if (request != _request || _disposed) return;
@@ -98,15 +142,38 @@ class GridOverviewController extends ChangeNotifier {
     }
     loading = false;
     _notify();
-    // Separate and after, because it is allowed to fail on its own — a grid
-    // somebody else owns refuses the roster and still has every other figure.
-    await _loadMembers(id, request);
+    // Separate and after, because both are allowed to fail on their own — a
+    // grid somebody else owns refuses the roster and still has every other
+    // figure, and an older relay computes no per-person rollup at all.
+    await Future.wait([_loadRoster(id, request), _loadUsage(request)]);
   }
 
-  Future<void> _loadMembers(String id, int request) async {
-    final count = await _api.memberCount(id);
+  Future<void> _loadRoster(String id, int request) async {
+    rosterLoading = roster == null;
+    _notify();
+    final members = await _api.members(id);
     if (request != _request || _disposed) return;
-    members = count;
+    roster = members;
+    rosterLoading = false;
+    _notify();
+  }
+
+  Future<void> _loadUsage(int request) async {
+    final credentials = _credentials;
+    if (credentials == null) return;
+    memberUsageLoading = memberUsage == null;
+    _notify();
+    try {
+      final usage = await _api.memberUsage(
+        baseUrl: credentials.baseUrl,
+        apiKey: credentials.apiKey,
+      );
+      if (request != _request || _disposed) return;
+      memberUsage = usage;
+    } on Object {
+      // Keep whatever was there. This figure is a nicety beside the roster.
+    }
+    memberUsageLoading = false;
     _notify();
   }
 

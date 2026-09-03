@@ -192,6 +192,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   figure is `answered.freshInput` (tokens_in − tokens_cached), not the total, which cache hits
   dominate. Member count is owner-only on the server and reads null on a 403 — the figure is then
   omitted, because "we may not ask" and "nobody is here" must not render the same.
+  **The five panels are Grid's own files, ported rather than rewritten** —
+  `grid_power_panel.dart`, `grid_stat_panels.dart`, `grid_models_panel.dart`,
+  `memory_split_bar.dart`, `pill_panel_shell.dart`, and the pure half of
+  `node_display.dart`/`node_metrics.dart`/`node_groups.dart`/`model_usage.dart` under
+  `lib/grid/`. The only change is Riverpod out, constructor parameters in; keep them in step
+  with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
+  `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
+  exist to fit.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

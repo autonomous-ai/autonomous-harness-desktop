@@ -1,0 +1,89 @@
+{
+  "window_seconds": 86400,
+  "members": [
+    {
+      "email": "person01@example.com",
+      "requests": 4224,
+      "tokens_in": 304200571,
+      "tokens_cached": 289863652,
+      "tokens_out": 3328500
+    },
+    {
+      "email": "person02@example.com",
+      "requests": 2006,
+      "tokens_in": 117566418,
+      "tokens_cached": 81334962,
+      "tokens_out": 2261713
+    },
+    {
+      "email": "person03@example.com",
+      "requests": 949,
+      "tokens_in": 42751533,
+      "tokens_cached": 28788734,
+      "tokens_out": 738176
+    },
+    {
+      "email": "person04@example.com",
+      "requests": 527,
+      "tokens_in": 31849927,
+      "tokens_cached": 22581792,
+      "tokens_out": 339721
+    },
+    {
+      "email": "person05@example.com",
+      "requests": 391,
+      "tokens_in": 30306262,
+      "tokens_cached": 7722912,
+      "tokens_out": 386104
+    },
+    {
+      "email": "person06@example.com",
+      "requests": 298,
+      "tokens_in": 17756465,
+      "tokens_cached": 14595427,
+      "tokens_out": 495777
+    },
+    {
+      "email": "person07@example.com",
+      "requests": 164,
+      "tokens_in": 10438935,
+      "tokens_cached": 8194432,
+      "tokens_out": 94876
+    },
+    {
+      "email": "person08@example.com",
+      "requests": 173,
+      "tokens_in": 8275247,
+      "tokens_cached": 5756382,
+      "tokens_out": 119084
+    },
+    {
+      "email": "person09@example.com",
+      "requests": 125,
+      "tokens_in": 5156843,
+      "tokens_cached": 4156076,
+      "tokens_out": 112820
+    },
+    {
+      "email": "person10@example.com",
+      "requests": 39,
+      "tokens_in": 1214293,
+      "tokens_cached": 398942,
+      "tokens_out": 24861
+    },
+    {
+      "email": "person11@example.com",
+      "requests": 5,
+      "tokens_in": 23894,
+      "tokens_cached": 10752,
+      "tokens_out": 3647
+    },
+    {
+      "email": "person12@example.com",
+      "requests": 3,
+      "tokens_in": 12012,
+      "tokens_cached": 0,
+      "tokens_out": 78
+    }
+  ]
+}
