@@ -138,6 +138,11 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - All local state is in `HarnessFileStore` (`~/.harness/desktop-app/state.json`, mode 0600, keyed
   strings behind `LocalKeyValueStore`): connection config, skipped update version, theme, font, pane
   layout. `~/.harness/computer-id` is the machine identity shared with the CLI.
+- The window is frameless on macOS via `window_manager` (`lib/core/desktop_window.dart`, same size and
+  `TitleBarStyle.hidden` as Grid). The traffic lights float over the rail's head, which leaves
+  `railTopInset` above the wordmark and is a `DragToMoveArea`; so are the pane headers. A screen that
+  fills the window goes through `FullWindowScreen` (`lib/widgets/window_chrome.dart`) for its drag
+  strip, and a full-width band at the top edge pads by `trafficLightClearance`.
 - `macos/Runner/MainFlutterWindow.swift` installs native menu items and calls into Dart over the
   `harness/app_menu` MethodChannel (`checkForUpdates`, `flashFirmware`, `showShortcuts`, terminal font
   size). Keep the menu in Swift; only the handler lives in `RootShell`.
