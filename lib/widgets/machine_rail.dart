@@ -21,6 +21,27 @@ import 'grid_selector.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
 
+/// The machine caption's type.
+///
+/// A function rather than a constant so its skeleton can borrow the exact
+/// metrics: `skeleton_sites_test.dart` measures a placeholder machine row
+/// against a real one, and a caption whose type drifts from its placeholder
+/// makes the rail resize the moment the list lands.
+TextStyle _machineCaptionStyle(Color color) => TextStyle(
+  color: color,
+  fontFamily: grid.AppFont.sans,
+  fontSize: 11,
+  fontWeight: grid.AppFont.semibold,
+  letterSpacing: 0.3,
+);
+
+/// The caption's own box: 18px mark at the rail's gutter, 22px of line, and
+/// symmetric padding so the mark lands on [SidebarTimeline]'s trunk break.
+/// Shared with the placeholder for the same reason as the type above.
+const EdgeInsets _machineCaptionPadding = EdgeInsets.fromLTRB(10, 7, 6, 7);
+const double _machineCaptionHeight = 22;
+const double _machineMarkSize = 18;
+
 class MachineRail extends StatefulWidget {
   final AppNotifier notifier;
 
@@ -559,9 +580,9 @@ class _MachineNodeState extends State<_MachineNode> {
                 // Symmetric top and bottom on purpose: [TimelineGuide] breaks
                 // the trunk around the middle of the band it is given, so an
                 // off-centre glyph would sit beside the gap left for it.
-                padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+                padding: _machineCaptionPadding,
                 child: SizedBox(
-                  height: 22,
+                  height: _machineCaptionHeight,
                   child: Row(
                     children: [
                       // 18px at the rail's 10px gutter puts this glyph's centre
@@ -572,14 +593,14 @@ class _MachineNodeState extends State<_MachineNode> {
                             ? 'This computer'
                             : 'Remote machine',
                         child: SizedBox(
-                          width: 18,
-                          height: 18,
+                          width: _machineMarkSize,
+                          height: _machineMarkSize,
                           child: Icon(
                             state.isLocalMachine
                                 ? LucideIcons.laptopMinimal300
                                 : LucideIcons.network300,
                             key: const ValueKey('machine-connection-icon'),
-                            size: 18,
+                            size: _machineMarkSize,
                             color: connectionColor,
                           ),
                         ),
@@ -593,14 +614,10 @@ class _MachineNodeState extends State<_MachineNode> {
                           machine.displayName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: _hovered
+                          style: _machineCaptionStyle(
+                            _hovered
                                 ? grid.AppPalette.textSecondary
                                 : grid.AppPalette.textFaint,
-                            fontFamily: grid.AppFont.sans,
-                            fontSize: 11,
-                            fontWeight: grid.AppFont.semibold,
-                            letterSpacing: 0.3,
                           ),
                         ),
                       ),
@@ -1234,10 +1251,42 @@ class _MachineListSkeleton extends StatelessWidget {
       role: SidebarTimelineRole.node,
       above: i > 0,
       below: false,
-      child: _SidebarRowSkeleton(
-        leading: 18,
-        leadingRadius: 5,
-        labelFactor: _labels[i],
+      child: _MachineCaptionSkeleton(labelFactor: _labels[i]),
+    ),
+  );
+}
+
+/// A machine caption with nothing in it yet.
+///
+/// Not [_SidebarRowSkeleton]: that one stands in for a [SidebarItem], which is
+/// what an AGENT row is. A machine is a caption at half the label size in a
+/// shorter box, and a placeholder built to the wrong one resizes the rail as
+/// the answer lands — which is the whole thing a skeleton exists to avoid.
+class _MachineCaptionSkeleton extends StatelessWidget {
+  const _MachineCaptionSkeleton({required this.labelFactor});
+
+  final double labelFactor;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: _machineCaptionPadding,
+    child: SizedBox(
+      height: _machineCaptionHeight,
+      child: Row(
+        children: [
+          Skeleton(
+            width: _machineMarkSize,
+            height: _machineMarkSize,
+            radius: 5,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SkeletonText(
+              style: _machineCaptionStyle(grid.AppPalette.textFaint),
+              widthFactor: labelFactor,
+            ),
+          ),
+        ],
       ),
     ),
   );
