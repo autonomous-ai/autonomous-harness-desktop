@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
+import 'package:harness/grid/grid_agent_override.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';

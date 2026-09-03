@@ -7,14 +7,6 @@ import '../theme/app_theme.dart';
 import 'engine_identity.dart';
 import 'remote_folder_picker.dart';
 
-/// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_ENV` in
-/// `autonomous-harness/cli/src/lib/gridLaunch.ts`.
-///
-/// Display only. The CLI is the enforcement point — it refuses every other engine rather than
-/// quietly launching it on its own login — so a stale list here costs a warning that did not
-/// appear, never a launch that should have worked. Keep both in sync anyway.
-const Set<String> kGridCapableEngines = {'claude'};
-
 /// Mirrors the harness CLI's `BYPASS_PERMISSION_FLAGS`
 /// (autonomous-harness/cli/src/lib/engineLaunch.ts) 1:1 — this is UI-only display + gating, the CLI
 /// is the actual enforcement point. An engine absent here shows no checkbox at all rather than

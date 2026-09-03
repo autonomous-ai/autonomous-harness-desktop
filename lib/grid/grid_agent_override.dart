@@ -1,6 +1,14 @@
 import 'grid_api_client.dart';
 import 'grid_selection_store.dart';
 
+/// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_ENV` in
+/// `autonomous-harness/cli/src/lib/gridLaunch.ts`.
+///
+/// Display only. The CLI is the enforcement point — it refuses every other engine rather than
+/// quietly launching it on its own login — so a stale list here costs a warning that did not
+/// appear, never a launch that should have worked. Keep both in sync anyway.
+const Set<String> kGridCapableEngines = {'claude'};
+
 /// Where a newly created agent should send its inference, when the user has
 /// picked a grid.
 ///

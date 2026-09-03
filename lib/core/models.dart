@@ -1,6 +1,8 @@
 /// Data models mirroring the backend/web types.
 library;
 
+import '../grid/agent_grid.dart';
+
 enum MachineAuthMode { managed, remote, self, provider }
 
 enum ConnectionStatus { disconnected, connecting, connected, reconnecting }
@@ -127,6 +129,10 @@ class Agent {
   final bool terminalAvailable;
   final String? terminalUnavailableReason;
 
+  /// The grid this agent is actually running against, null when it is on the
+  /// engine's own login. Read off the live process by the CLI — see [AgentGrid].
+  final AgentGrid? grid;
+
   const Agent({
     required this.id,
     this.sessionId,
@@ -138,6 +144,7 @@ class Agent {
     this.status = 'active',
     this.terminalAvailable = false,
     this.terminalUnavailableReason,
+    this.grid,
   });
 
   factory Agent.fromJson(Map<String, dynamic> j) {
@@ -169,6 +176,7 @@ class Agent {
           ? null
           : _safeLabel(terminalMap['reason']) ??
                 'terminal unavailable (no verified terminal pane)',
+      grid: AgentGrid.fromJson(j['grid']),
     );
   }
 
@@ -183,6 +191,7 @@ class Agent {
     status: status,
     terminalAvailable: terminalAvailable,
     terminalUnavailableReason: terminalUnavailableReason,
+    grid: grid,
   );
 
   static String? _safeEngine(Object? raw) {

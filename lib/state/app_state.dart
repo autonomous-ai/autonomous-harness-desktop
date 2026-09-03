@@ -1555,6 +1555,64 @@ class AppNotifier extends ChangeNotifier {
     return null;
   }
 
+  /// Moves an already-running agent onto [grid].
+  ///
+  /// This RESTARTS the agent. A process's environment is fixed when it is exec'd, so a live engine
+  /// cannot be re-pointed — the CLI respawns the pane in place (same pane, same agent id, same
+  /// scrollback) with the grid's environment and `--resume`, which brings the conversation back but
+  /// not a turn that was in flight. That is why the CLI refuses a busy agent rather than deciding for
+  /// the user, and why nothing here is automatic.
+  ///
+  /// Returns null on success, or a message to show the user.
+  Future<String?> moveAgentToGrid(
+    String machineId,
+    String agentId,
+    GridAgentOverride grid,
+  ) async {
+    final machine = machineStates[machineId];
+    if (machine == null) return 'Machine not found';
+    Map<String, dynamic> result;
+    try {
+      result = await _conn(machineId).request(
+        'agent_retarget',
+        payload: {'agentId': agentId, 'grid': grid.toJson()},
+        timeout: const Duration(seconds: 20),
+      );
+    } catch (error) {
+      return 'Move failed: $error';
+    }
+    final error = result['error'];
+    if (error is String) return _retargetMessage(error, result['detail']);
+    // The pane now runs a different process, and its grid is re-read by the CLI's next discovery
+    // pass. Ask for the list rather than guessing here: this method must not be the second place
+    // that has an opinion about which grid an agent is on.
+    await _loadMachineData(machine, force: true);
+    return null;
+  }
+
+  /// [moveAgentToGrid]'s answer when the agent was already gone.
+  ///
+  /// A sentinel rather than an error string because nobody can act on it, and rather than null
+  /// because it did not move either — the caller must be able to leave it out of both tallies.
+  static const String agentVanished = 'AGENT_GONE';
+
+  /// Turns a retarget refusal into something the user can act on.
+  ///
+  /// Every one of these is a deliberate refusal in the CLI, not a crash, so each has a way out worth
+  /// naming. `detail`, when present, already reads as a sentence and is preferred to anything
+  /// rewritten here.
+  static String _retargetMessage(String error, Object? detail) {
+    if (error == 'AGENT_NOT_FOUND') return agentVanished;
+    if (error == 'AGENT_BUSY') {
+      return 'It is running a turn. Move it when the turn finishes.';
+    }
+    if (error == 'UNSUPPORTED_ON_REMOTE') {
+      return 'Update the harness CLI on this machine to move running agents.';
+    }
+    if (detail is String && detail.isNotEmpty) return detail;
+    return 'Move failed: $error';
+  }
+
   /// Renames a machine via `PATCH /api/machines/:machineId` (control-plane REST — the machine's
   /// `name` is backend-owned, unlike an agent's, which lives on the harness CLI). Returns null on
   /// success, or an error message to show inline in the caller's dialog.

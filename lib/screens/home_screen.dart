@@ -9,6 +9,7 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
 import '../widgets/link_machine_screen.dart';
 import '../widgets/machine_rail.dart';
+import '../widgets/grid_retarget_banner.dart';
 import '../widgets/machine_rail_mini.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../widgets/new_agent_dialog.dart';
@@ -249,6 +250,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         message: notifier.lastError!,
                         onRetry: notifier.retryMachines,
                       ),
+                    )
+                  // One banner at a time, and a machine this app cannot reach
+                  // outranks a grid choice that has not been applied yet — the
+                  // second is not actionable while the first is true.
+                  else
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      child: GridRetargetBanner(notifier: notifier),
                     ),
                 ],
               ),
