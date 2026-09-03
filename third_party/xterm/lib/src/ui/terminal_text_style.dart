@@ -65,7 +65,10 @@ class TerminalStyle {
       fontFamilyFallback: fontFamilyFallback,
       color: color,
       backgroundColor: backgroundColor,
-      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      // Terminal.app's ANSI emphasis is optically closer to SF Mono Semibold
+      // than Bold. Using w700 makes highlighted runs noticeably heavier than
+      // the same pane rendered by the native terminal.
+      fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
       fontStyle: italic ? FontStyle.italic : FontStyle.normal,
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
