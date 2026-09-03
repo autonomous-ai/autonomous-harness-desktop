@@ -11,6 +11,8 @@ import '../widgets/link_machine_screen.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/grid_retarget_banner.dart';
 import '../widgets/machine_rail_mini.dart';
+import '../settings/settings_screen.dart';
+import '../settings/settings_section.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/pane_grid.dart';
@@ -280,7 +282,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   // the Expanded above so it is full-bleed under the machine
                   // rail as well as the panes — a strip that started after the
                   // rail would put a step in the window's bottom edge.
-                  const GridStatusRail(),
+                  GridStatusRail(
+                    // The node dashboard's empty state offers to put THIS
+                    // computer on the grid, and the screen that does it is a
+                    // Settings pane — which needs the notifier the shell holds
+                    // and the rail does not.
+                    onShareIntelligence: () => unawaited(
+                      showSettingsScreen(
+                        context,
+                        notifier,
+                        initialSection: SettingsSection.shareIntelligence,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

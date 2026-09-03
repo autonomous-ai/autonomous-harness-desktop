@@ -200,6 +200,33 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
   `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
   exist to fit.
+- **The rail's two panels open two dialogs, and they are the only screens this
+  app grew that the CLI knows nothing about.** "View dashboard" opens the node
+  dashboard (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`
+  + `node_dashboard_layout.dart`) — one card per machine, off the same overview
+  poll the rail already runs, so opening it starts no second timer. Rows are
+  laid out with `IntrinsicHeight`, never a `GridView`: a tile has to be given its
+  height up front and the fullest cards overflowed the guess by 22px. **No card
+  may contain a `LayoutBuilder`** for the same reason — `IntrinsicHeight` asks
+  every child for its intrinsic height and `LayoutBuilder` throws rather than
+  answer, so both tracks are `CustomPaint`. `NodeDashboardViewStore` holds the
+  sort and filters for as long as the app runs (not persisted: a filter that
+  survived a relaunch would greet somebody with half their grid hidden since
+  yesterday).
+  "Invite people to X" opens the share sheet (`lib/widgets/share_grid/`,
+  `grid/grid_members_controller.dart`, `grid/invite_email.dart`) — invite,
+  change a grant, remove. **A role change is ONE `POST …/members`**, which
+  upserts; DELETE-then-POST drops the person off the grid entirely if its second
+  half fails. Removing is the owner's alone and gates the whole trailing column;
+  a member admitted by the grid's email domain has no row to delete, so it draws
+  none. **"Who can join" is a STATEMENT, not a control** (`grid/grid_access.dart`):
+  Grid lets an owner flip the rule, and flipping it restarts the grid under
+  everyone on it — under one shared developer token that would land on somebody
+  else's grid, in somebody else's name. The wire values are the control plane's
+  own (`grid_networks/store.py`), not Grid's client enum, which only half
+  overlaps them; a `private-domain` grid's NAME is its domain, which is where
+  "@autonomous.ai emails" comes from, because `access_domain` reads null on
+  every network `GET /v1/grid/me` returns.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

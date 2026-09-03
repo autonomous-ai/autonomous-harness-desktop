@@ -47,6 +47,15 @@ class AppMenuRowMetrics {
   /// mis-sizing every panel.
   final double extent;
 
+  /// What a row with a [AppMenuItem.detail] line lays out at instead.
+  ///
+  /// [extent] plus the second line's own box — [noteSize] × 1.25, rounded up
+  /// the same way a line box rounds, plus the 2px that separates the two lines.
+  /// Stated rather than derived at the call site for the same reason [extent]
+  /// is: a panel sized by arithmetic that disagrees with the layout by half a
+  /// pixel per row wears a scrollbar it does not need.
+  double get detailExtent => extent + noteSize * 1.25 + 2;
+
   /// A context menu's row: the macOS control scale.
   static const compact = AppMenuRowMetrics(
     fontSize: 13,
@@ -112,6 +121,7 @@ class AppMenuItem extends StatefulWidget {
     this.danger = false,
     this.selected = false,
     this.note,
+    this.detail,
     this.leading,
     this.metrics = AppMenuRowMetrics.compact,
   });
@@ -125,6 +135,19 @@ class AppMenuItem extends StatefulWidget {
   /// apart by ink rather than by a separator character, so it reads as an aside
   /// instead of as part of the name.
   final String? note;
+
+  /// A quiet SECOND LINE under the label, for a row whose label alone does not
+  /// say what picking it does — "Most tokens read in the last 24h" under
+  /// "Input tokens", "That, plus…" under a role.
+  ///
+  /// Distinct from [note], which sits *beside* the label and qualifies the same
+  /// noun ("System — SF Pro"). A sentence cannot go there: a menu is as wide as
+  /// its button, and the qualifier would arrive clipped to its first three
+  /// words. So this row grows a line instead of the panel growing a column.
+  ///
+  /// It makes the row taller, which is why a caller that has to SIZE a panel
+  /// asks [AppMenuRowMetrics.detailExtent] rather than [AppMenuRowMetrics.extent].
+  final String? detail;
 
   /// A mark that belongs to the ROW's subject rather than to its action — an
   /// engine's logo, say. It gets a slot of its own AFTER the tick's, so the tick
@@ -217,20 +240,43 @@ class _AppMenuItemState extends State<AppMenuItem> {
                   const SizedBox(width: 9),
                 ],
                 Flexible(
-                  child: Text(
-                    widget.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: widget.danger ? error : AppPalette.textPrimary,
-                      fontFamily: AppFont.sans,
-                      fontFamilyFallback: AppFont.sansFallback,
-                      fontSize: widget.metrics.fontSize,
-                      height: 1.2,
-                      fontWeight: widget.selected
-                          ? AppFont.semibold
-                          : AppFont.medium,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: widget.danger
+                              ? error
+                              : AppPalette.textPrimary,
+                          fontFamily: AppFont.sans,
+                          fontFamilyFallback: AppFont.sansFallback,
+                          fontSize: widget.metrics.fontSize,
+                          height: 1.2,
+                          fontWeight: widget.selected
+                              ? AppFont.semibold
+                              : AppFont.medium,
+                        ),
+                      ),
+                      if (widget.detail case final detail?) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          detail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontFamily: AppFont.sans,
+                            fontFamilyFallback: AppFont.sansFallback,
+                            fontSize: widget.metrics.noteSize,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if (widget.note != null) ...[

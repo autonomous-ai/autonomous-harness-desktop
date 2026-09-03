@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/local_key_value_store.dart';
@@ -17,6 +15,8 @@ import 'package:harness/grid/member_usage.dart';
 import 'package:harness/shared/theme/app_theme.dart' as grid;
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
 import 'package:harness/widgets/status_rail/pill_panel_shell.dart';
+
+import 'support/real_fonts.dart';
 
 class _Store implements LocalKeyValueStore {
   final Map<String, String> v = {};
@@ -70,39 +70,6 @@ class _Api extends GridApiClient {
   }
 }
 
-/// Load a real font.
-///
-/// Widget tests draw with Ahem, whose every glyph is a fixed square — a 24
-/// character label measures 276px where Arial measures ~140. That is not a
-/// small distortion for a panel whose whole job is fitting figures beside
-/// names: with Ahem the node panel overflows by 19px, and without a real font
-/// a golden of it is a picture of a bug that does not exist.
-Future<void> _loadFont() async {
-  Future<ByteData> bytes() async => ByteData.view(
-    Uint8List.fromList(
-      await File('/System/Library/Fonts/Supplemental/Arial.ttf').readAsBytes(),
-    ).buffer,
-  );
-  // Under every family the panels can resolve to: the app's own
-  // `.AppleSystemUIFont`, and Roboto, which is what an unthemed widget falls
-  // back to in a test.
-  for (final family in ['.AppleSystemUIFont', 'Roboto', 'SF Pro Text']) {
-    await (FontLoader(family)..addFont(bytes())).load();
-  }
-  // A model id is set in mono, and an unregistered mono family falls back to
-  // Ahem just as loudly.
-  Future<ByteData> mono() async => ByteData.view(
-    Uint8List.fromList(
-      await File(
-        '/System/Library/Fonts/Supplemental/Courier New.ttf',
-      ).readAsBytes(),
-    ).buffer,
-  );
-  for (final family in ['.AppleSystemUIFontMonospaced', 'SF Mono', 'Menlo']) {
-    await (FontLoader(family)..addFont(mono())).load();
-  }
-}
-
 /// What each panel has to be showing. One line per panel that could only come
 /// from that panel having actually parsed the captured relay answer — a heading
 /// alone would pass on an empty list.
@@ -115,7 +82,7 @@ const _expects = {
 };
 
 void main() {
-  setUpAll(_loadFont);
+  setUpAll(loadRealFonts);
 
   for (final target in ['autonomous.ai', '33', '8', '10', '106M']) {
     testWidgets('panel over $target', (tester) async {
