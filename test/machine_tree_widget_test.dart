@@ -716,7 +716,10 @@ void main() {
           ),
         ),
       );
-      expect(find.text('loading agents…'), findsOneWidget);
+      // Rows-shaped placeholders, not a sentence: the real rows land where
+      // these are, so nothing under the machine moves.
+      expect(find.byKey(const ValueKey('agents-loading')), findsOneWidget);
+      expect(find.text('loading agents…'), findsNothing);
       notifier.dispose();
 
       notifier = notifierWithLoadState(

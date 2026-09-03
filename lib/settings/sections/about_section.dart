@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/section_scaffold.dart';
+import '../../shared/widgets/skeleton.dart';
 import '../../state/app_state.dart';
 import '../../widgets/update_notice.dart';
 
@@ -182,27 +183,48 @@ class _Identity extends StatelessWidget {
 /// any file in this repo (`pubspec.yaml`'s version is a placeholder the release
 /// never touches, see RELEASE.md), and beside it the one piece of state the
 /// pane can answer without being asked.
-class _VersionLine extends StatelessWidget {
+class _VersionLine extends StatefulWidget {
   const _VersionLine({required this.state});
 
   final _PillState state;
 
   @override
+  State<_VersionLine> createState() => _VersionLineState();
+}
+
+class _VersionLineState extends State<_VersionLine> {
+  // Once per mount: the line rebuilds with every pill change, and a future
+  // built in `build` would put the placeholder back for a frame each time.
+  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
+
+  _PillState get state => widget.state;
+
+  @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final style = TextStyle(
+      color: grid.AppPalette.textSecondary,
+      fontSize: 12.5,
+      fontFamily: grid.AppFont.mono,
+      fontFamilyFallback: grid.AppFont.monoFallback,
+    );
     return Row(
       children: [
         FutureBuilder<PackageInfo>(
-          future: PackageInfo.fromPlatform(),
-          builder: (context, snapshot) => Text(
-            snapshot.data?.version ?? '—',
-            style: TextStyle(
-              color: grid.AppPalette.textSecondary,
-              fontSize: 12.5,
-              fontFamily: grid.AppFont.mono,
-              fontFamilyFallback: grid.AppFont.monoFallback,
-            ),
-          ),
+          future: _info,
+          builder: (context, snapshot) {
+            final version = snapshot.data?.version;
+            // A blank the width of a version while it is being read, not an
+            // em dash: a dash is a value ("no version"), and this line is
+            // about to have one. The dash is kept for the case it means —
+            // the bundle answered and had nothing to say.
+            if (version == null) {
+              return snapshot.connectionState == ConnectionState.done
+                  ? Text('—', style: style)
+                  : SkeletonText(style: style, width: 44);
+            }
+            return Text(version, style: style);
+          },
         ),
         const SizedBox(width: 9),
         _StatusPill(state: state),

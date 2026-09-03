@@ -201,6 +201,20 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   right. Appearance and Terminal both use it; a pane that invents its own row shape is the bug.
   Controls come from `shared/widgets/` too (`AppSelectField`, `AppIconButton`) — raw Material
   `DropdownButton`/`IconButton` do not match anything else in the app.
+- **A screen that waits on a call waits in the shape of its answer.** `shared/widgets/skeleton.dart`
+  (`Skeleton`, `SkeletonText`, `SkeletonLine`, `SkeletonList`, `SkeletonBlock`) draws placeholders and
+  `shared/widgets/pulse.dart` owns the app's one loading rhythm — an opacity breath between
+  `AppSurface.recess` and `recessHover`, never a shimmer sweep, frozen at the **peak** under Reduce
+  Motion because a block held at 40% reads as disabled. A spinner is still right where the shape is
+  genuinely unknown (boot, a button mid-action); a list, table, card, row or figure gets a skeleton.
+  Three rules the call sites keep, all guarded by `test/skeleton_test.dart` and
+  `test/skeleton_sites_test.dart`: a placeholder is measured from the real content (`SkeletonText`
+  lays out the style with a `TextPainter` rather than trusting arithmetic — see `AppMenuRowMetrics`
+  for why), it wears the real row's surface and padding, and it is never **taller** than the answer
+  usually is, since a skeleton that shrinks jumps the page upward. **"Loading" and "answered with
+  nothing" must not render the same** — hence `AppNotifier.machinesLoading`, which is set on the
+  first fetch only so a refresh keeps the rows already on screen. Same reason the status rail blanks
+  its figures only before the first reading and `SharePane` blanks only before the first probe.
 - `lib/shortcuts/app_shortcuts.dart` is the one list that feeds both the live bindings and the ⌘/
   sheet. `shortcutRows()` there is that list as the UI prints it — one row per action, so the two
   activators on "focus the next pane" (`⌘]`, `⌃⇥`) fold into one line, and `⌘1`–`⌘9` join as one.

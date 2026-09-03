@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
+import '../../shared/widgets/skeleton.dart';
 import '../catalog_models.dart';
 import '../local_models.dart';
 import '../model_manager_controller.dart';
@@ -51,10 +52,7 @@ class CatalogList extends StatelessWidget {
                       child: TextField(
                         controller: search,
                         onChanged: manager.search,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: SharePalette.ink,
-                        ),
+                        style: TextStyle(fontSize: 13, color: SharePalette.ink),
                         cursorColor: SharePalette.accent,
                         decoration: InputDecoration(
                           isDense: true,
@@ -101,13 +99,7 @@ class CatalogList extends StatelessWidget {
   }
 
   Widget _rows() => switch (manager.state) {
-    CatalogLoading() => const Center(
-      child: SizedBox(
-        width: 18,
-        height: 18,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      ),
-    ),
+    CatalogLoading() => const _CatalogSkeleton(key: Key('catalog-skeleton')),
     CatalogFailed(:final message) => Padding(
       padding: const EdgeInsets.fromLTRB(22, 4, 16, 16),
       child: Column(
@@ -134,8 +126,7 @@ class CatalogList extends StatelessWidget {
       children: [
         // Kept above the shelf and never mixed into it: this is the only list
         // that was ranked against THIS machine's memory and chip.
-        if (manager.recommended.isNotEmpty &&
-            manager.query.trim().isEmpty) ...[
+        if (manager.recommended.isNotEmpty && manager.query.trim().isEmpty) ...[
           const _GroupLabel('PICKED FOR THIS MAC'),
           for (final entry in manager.recommended)
             _EntryRow(entry: entry, manager: manager, busy: busy),
@@ -157,6 +148,126 @@ class CatalogList extends StatelessWidget {
       ],
     ),
   };
+}
+
+/// The shelf while the catalogue answers — and it answers often, because
+/// every settled keystroke in the search field asks again.
+///
+/// A heading bar rather than "THE CATALOGUE" in ink: which group comes first
+/// is part of the answer (the ranked picks only exist for an empty query), so
+/// printing either name would be a claim. The rows under it wear the entry
+/// row's padding at the entry row's two type sizes, fading down the rail.
+class _CatalogSkeleton extends StatelessWidget {
+  const _CatalogSkeleton({super.key});
+
+  static const _rows = 6;
+  static const _names = [0.56, 0.42, 0.64, 0.38, 0.52, 0.46];
+  static const _notes = [0.8, 0.62, 0.72, 0.68, 0.58, 0.76];
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return SkeletonList(
+      rows: _rows + 1,
+      semanticsLabel: 'Loading the catalogue',
+      padding: const EdgeInsets.fromLTRB(14, 0, 10, 16),
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+            child: SkeletonText(style: ShareType.eyebrow, width: 118),
+          );
+        }
+        final row = i - 1;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SkeletonText(
+                  style: ShareType.cardTitle,
+                  widthFactor: _names[row % _names.length],
+                ),
+                const SizedBox(height: 3),
+                SkeletonText(
+                  style: ShareType.note,
+                  widthFactor: _notes[row % _notes.length],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The quantisations of one model, before the catalogue has said what they
+/// are: three [_VersionRow]-shaped plates, each with room for the label, its
+/// size badge, the note and the Download button.
+///
+/// Three, because that is the low end of what a repo lists and the dialog is
+/// capped: a skeleton taller than the answer jumps up when it lands.
+class _VersionsSkeleton extends StatelessWidget {
+  const _VersionsSkeleton({super.key});
+
+  static const _labels = [72.0, 96.0, 84.0];
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final badgeHeight = SkeletonText.lineHeight(context, ShareType.badge) + 6;
+    return SkeletonList(
+      rows: 3,
+      fadeDepth: skeletonFadeLight,
+      semanticsLabel: 'Loading versions',
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      itemBuilder: (context, i) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(13, 11, 11, 11),
+          decoration: BoxDecoration(
+            color: SharePalette.fieldFill,
+            border: Border.all(color: SharePalette.fieldRim),
+            borderRadius: BorderRadius.circular(ShareMetrics.cardRadius),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        SkeletonText(
+                          style: ShareType.cardTitle,
+                          width: _labels[i],
+                        ),
+                        const SizedBox(width: 8),
+                        Skeleton(
+                          width: 44,
+                          height: badgeHeight,
+                          radius: ShareMetrics.badgeRadius,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    SkeletonText(style: ShareType.note, widthFactor: 0.7),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Skeleton(width: 96, height: 32, radius: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _GroupLabel extends StatelessWidget {
@@ -364,13 +475,7 @@ class VersionPanel extends StatelessWidget {
 
   Widget _body(String repoId) {
     if (manager.detailLoading) {
-      return const Center(
-        child: SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
+      return const _VersionsSkeleton(key: Key('versions-skeleton'));
     }
     final error = manager.detailError;
     if (error != null) {
@@ -487,9 +592,7 @@ class _VersionRow extends StatelessWidget {
                   const SizedBox(width: 5),
                   Text(
                     'On this disk',
-                    style: ShareType.note.copyWith(
-                      color: SharePalette.liveInk,
-                    ),
+                    style: ShareType.note.copyWith(color: SharePalette.liveInk),
                   ),
                 ],
               )

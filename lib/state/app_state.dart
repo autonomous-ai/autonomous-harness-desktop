@@ -603,7 +603,8 @@ class AppNotifier extends ChangeNotifier {
   /// fills is the app that was ALREADY authenticated when the session disappeared underneath it,
   /// where nothing re-checked and the daemon supervisor simply respawned `harness start` forever.
   void _signedOutAtRuntime(String message) {
-    if (status == AppStatus.unauthenticated) return; // idempotent: several sources can race here
+    if (status == AppStatus.unauthenticated)
+      return; // idempotent: several sources can race here
     _daemonSupervisionTimer?.cancel();
     _daemonSupervisionTimer = null;
     _cliEndpoint = null;
@@ -826,11 +827,36 @@ class AppNotifier extends ChangeNotifier {
     );
   }
 
+  /// The machine list is being fetched and there is nothing to show meanwhile.
+  ///
+  /// Only the FIRST fetch sets it: a refresh over a list already on screen
+  /// keeps that list up (the rows are still true, just not from a moment ago)
+  /// and reports nothing. The rail reads this to tell "loading" from "no
+  /// machines", which an empty list alone cannot say.
+  bool machinesLoading = false;
+
   Future<void> refreshMachines() async {
     if (localManualFixture != null) {
       notifyListeners();
       return;
     }
+    if (machines.isEmpty && !machinesLoading) {
+      machinesLoading = true;
+      notifyListeners();
+    }
+    try {
+      await _refreshMachines();
+    } finally {
+      // Said out loud: the list's own notify fires before this, so a flag
+      // dropped silently here would leave the rail on its placeholders.
+      if (machinesLoading) {
+        machinesLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _refreshMachines() async {
     final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
     // The CLI computer id is the local identity source of truth. The loopback
     // status endpoint is trusted only when it advertises that same identity.
@@ -1834,16 +1860,18 @@ class AppNotifier extends ChangeNotifier {
   /// confirmed, so this upserts from the reply directly — idempotent on `agent.id`, same as
   /// [createAgent], and safe even if the CLI's own `agent_synced` push for the restart arrives
   /// separately (fire-and-forget on the CLI side, unordered relative to this reply).
-  Future<RestartAgentResult> restartAgent(String machineId, String agentId) async {
+  Future<RestartAgentResult> restartAgent(
+    String machineId,
+    String agentId,
+  ) async {
     final machine = machineStates[machineId];
     if (machine == null) {
       return const RestartAgentResult(error: 'Machine not found');
     }
     Map<String, dynamic> result;
     try {
-      result = await _conn(
-        machineId,
-      ).request('agent_restart', payload: {'agentId': agentId});
+      result = await _conn(machineId)
+          .request('agent_restart', payload: {'agentId': agentId});
     } catch (error) {
       return RestartAgentResult(error: 'Restart failed: $error');
     }

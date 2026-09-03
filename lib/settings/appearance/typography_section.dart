@@ -8,7 +8,50 @@ import '../../shared/theme/appearance_prefs_store.dart';
 import '../../shared/widgets/app_select_field.dart';
 import '../../shared/widgets/section_heading.dart';
 import '../../shared/widgets/setting_row.dart';
+import '../../shared/widgets/skeleton.dart';
 import 'system_fonts.dart';
+
+/// [AppSelectField]'s closed well with a blank where the value goes, at the
+/// row's control width — what the UI font control is while the system's
+/// font list is being read.
+class _SelectSkeleton extends StatelessWidget {
+  const _SelectSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      width: SettingRow.controlWidth,
+      height: grid.AppControl.height,
+      padding: const EdgeInsets.only(left: 10, right: 8),
+      decoration: BoxDecoration(
+        color: grid.AppSurface.recess,
+        borderRadius: BorderRadius.circular(grid.AppControl.radius),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SkeletonText(
+              style: TextStyle(
+                fontFamily: grid.AppFont.sans,
+                fontFamilyFallback: grid.AppFont.sansFallback,
+                fontSize: grid.AppControl.fontSize,
+                fontWeight: grid.AppControl.fontWeight,
+              ),
+              widthFactor: 0.55,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(
+            Icons.expand_more_rounded,
+            size: grid.AppControl.iconSize,
+            color: grid.AppPalette.textSecondary,
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Settings ▸ Appearance ▸ Typography — the face the app is set in, and how big.
 ///
@@ -71,14 +114,11 @@ class _TypographySectionState extends State<TypographySection> {
                 future: _families,
                 builder: (context, snapshot) {
                   final options = snapshot.data;
-                  // Nothing to pick from yet: show the current value in a control
-                  // of the right size rather than collapsing the row, so the
-                  // column does not jump when the list arrives.
+                  // Nothing to pick from yet: a control of the right size with
+                  // a blank where the value goes, rather than collapsing the
+                  // row, so the column does not jump when the list arrives.
                   if (options == null) {
-                    return const SizedBox(
-                      width: SettingRow.controlWidth,
-                      height: grid.AppControl.height,
-                    );
+                    return const _SelectSkeleton(key: Key('ui-font-skeleton'));
                   }
                   return AppSelectField<String?>(
                     width: SettingRow.controlWidth,

@@ -1,0 +1,88 @@
+import 'package:flutter/material.dart';
+
+/// The app's one "still alive" rhythm.
+///
+/// `t` runs 0 → 1 → 0 forever on an ease-in-out curve; [builder] turns it
+/// into whatever the caller is breathing — a skeleton's fill, a dot's alpha.
+/// This widget owns the *timing* and nothing about the *shape*, which is what
+/// lets every long-running thing in the app beat at the same tempo instead of
+/// each pane hand-rolling its own `AnimationController`.
+///
+/// Two decisions live here so no call site has to remember them:
+///
+/// - **Reduce Motion stops the beat at the peak (`t = 1`), not the middle.**
+///   A block frozen at 40% opacity reads as *disabled*, which is the opposite
+///   of what a placeholder means.
+/// - **The [RepaintBoundary] is inside.** Everything built on this is
+///   long-running by definition, and the shell keeps rail, bar and pane in one
+///   layer — without the boundary a breathing skeleton in the sidebar repaints
+///   the terminal beside it sixty times a second.
+class Pulse extends StatefulWidget {
+  const Pulse({
+    super.key,
+    required this.builder,
+    this.duration = const Duration(milliseconds: 1100),
+    this.curve = Curves.easeInOut,
+    this.child,
+  });
+
+  /// Called with `t` in `[0, 1]`. [child] is passed through untouched so a
+  /// subtree that does not depend on `t` is built once.
+  final Widget Function(BuildContext context, double t, Widget? child) builder;
+
+  /// One half of the cycle — rest to peak. The whole breath is twice this.
+  final Duration duration;
+
+  final Curve curve;
+  final Widget? child;
+
+  @override
+  State<Pulse> createState() => _PulseState();
+}
+
+class _PulseState extends State<Pulse> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  );
+  late final Animation<double> _t = CurvedAnimation(
+    parent: _controller,
+    curve: widget.curve,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller
+        ..stop()
+        ..value = 1;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant Pulse oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.duration != widget.duration) {
+      _controller.duration = widget.duration;
+      if (_controller.isAnimating) _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: AnimatedBuilder(
+      animation: _t,
+      child: widget.child,
+      builder: (context, child) => widget.builder(context, _t.value, child),
+    ),
+  );
+}

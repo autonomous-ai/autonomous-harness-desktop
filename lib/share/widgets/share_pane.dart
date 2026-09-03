@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
+import 'share_skeleton.dart';
 import '../grid_cli.dart';
 import '../model_pull.dart';
 import '../share_controller.dart';
@@ -69,8 +70,14 @@ class _SharePaneState extends State<SharePane> {
     final selection = _selection.value;
     if (!selection.hasGrid || selection.networkId == _loadedFor) return;
     _loadedFor = selection.networkId;
+    // A new grid is a new question: blank the page for it.
+    _probed = false;
     await _controller.refresh(selection.networkId!);
+    _probed = true;
   }
+
+  /// Whether this pane has had one full answer for the grid it is showing.
+  bool _probed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -96,14 +103,13 @@ class _SharePaneState extends State<SharePane> {
             'chosen yet. Pick one under Grid and come back.',
       );
     }
-    if (_controller.loading) {
-      return const Center(
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
+    // Only the FIRST probe blanks the page. A later one — the model list
+    // re-read after Manage models closes — keeps the page it already has,
+    // the way the status rail keeps its last reading through a refresh: the
+    // fields on screen are still true, and a form that vanished under the
+    // reader every time they came back from a dialog was the older bug.
+    if (_controller.loading && !_probed) {
+      return const ShareSkeleton(key: Key('share-skeleton'), splitAt: _splitAt);
     }
     if (!_controller.capabilities.cliInstalled) {
       return const _Blocked(
@@ -172,7 +178,11 @@ class _Blocked extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(title, textAlign: TextAlign.center, style: ShareType.paneTitle),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: ShareType.paneTitle,
+            ),
             const SizedBox(height: 9),
             Text(
               message,

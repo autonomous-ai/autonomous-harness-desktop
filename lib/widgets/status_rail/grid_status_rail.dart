@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../grid/grid_overview_controller.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/skeleton.dart';
 import 'memory_ring.dart';
 import 'status_panels.dart';
 
@@ -91,19 +92,23 @@ class _Readout extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           'No grid chosen',
-          style: TextStyle(
-            color: grid.AppPalette.textFaint,
-            fontSize: 11.5,
-          ),
+          style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
         ),
       );
     }
     final power = controller.power;
     final overview = controller.overview;
     final answered = power?.answered;
+    // The first answer for this grid is still on its way. Every figure that
+    // is about to appear is drawn blank at its final size, so the strip does
+    // not assemble itself one number at a time — and only then: once a
+    // reading exists it stays on screen through every refresh (see [stale]).
+    final pending = power == null && controller.loading;
     return Row(
       children: [
         _GridMark(controller: controller),
+        if (pending)
+          const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 58),
         if (power != null && answered != null && answered.freshInput > 0)
           _Figure(
             value: formatTokens(answered.freshInput),
@@ -113,6 +118,11 @@ class _Readout extends StatelessWidget {
           ),
         const Spacer(),
         // WHAT THE GRID IS MADE OF — people, machines, models.
+        if (pending) ...const [
+          _CountSkeleton(icon: LucideIcons.users300),
+          _CountSkeleton(icon: LucideIcons.server300),
+          _CountSkeleton(icon: LucideIcons.boxes),
+        ],
         if (controller.members != null)
           _Count(
             icon: LucideIcons.users300,
@@ -192,6 +202,12 @@ class _GridMark extends StatelessWidget {
               ),
             ),
           ),
+          if (power == null && controller.loading) ...const [
+            SizedBox(width: 9),
+            Skeleton.circle(size: 11),
+            SizedBox(width: 6),
+            SkeletonText(style: TextStyle(fontSize: 11.5), width: 64),
+          ],
           if (share != null) ...[
             const SizedBox(width: 9),
             MemoryRing(share: share),
@@ -259,6 +275,51 @@ class _Figure extends StatelessWidget {
                 fontSize: 11.5,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The value of a [_Figure] before there is one: the same padding the live
+/// figure's hover region takes, so the strip is the same width before and
+/// after.
+class _FigureSkeleton extends StatelessWidget {
+  const _FigureSkeleton({super.key, required this.width});
+
+  final double width;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    child: SkeletonText(
+      style: TextStyle(fontSize: 11.5, fontWeight: grid.AppFont.medium),
+      width: width,
+    ),
+  );
+}
+
+/// A [_Count] whose number has not arrived: the real glyph, because what is
+/// being counted is known, and a blank where the count goes.
+class _CountSkeleton extends StatelessWidget {
+  const _CountSkeleton({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: grid.AppPalette.textFaint),
+          const SizedBox(width: 5),
+          SkeletonText(
+            style: TextStyle(fontSize: 11.5, fontWeight: grid.AppFont.medium),
+            width: 16,
+          ),
         ],
       ),
     );
@@ -414,27 +475,49 @@ class _HoverableState extends State<_Hoverable> {
 ///
 /// The quietest thing here on purpose: it answers a question nobody asks until
 /// something is wrong, and then it is the first thing they are asked for.
-class _VersionMark extends StatelessWidget {
+class _VersionMark extends StatefulWidget {
   const _VersionMark();
+
+  @override
+  State<_VersionMark> createState() => _VersionMarkState();
+}
+
+class _VersionMarkState extends State<_VersionMark> {
+  // Read once per mount, not once per rebuild: the rail rebuilds on every
+  // refresh, and a future built in `build` would put the placeholder back for
+  // a frame each time. Not a static either — a future outlives the zone it
+  // was made in, and its callbacks are delivered to that zone, which is a
+  // problem the moment two tests share a process.
+  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    const style = TextStyle(fontSize: 10.5);
     return FutureBuilder<PackageInfo>(
-      future: PackageInfo.fromPlatform(),
+      future: _info,
       builder: (context, snapshot) {
         final version = snapshot.data?.version;
-        if (version == null) return const SizedBox.shrink();
+        // Answered with nothing (a bundle with no version, a plugin that is
+        // not there): say nothing, as before. A skeleton is a promise that
+        // something is coming, and here nothing is.
+        if (version == null &&
+            snapshot.connectionState == ConnectionState.done) {
+          return const SizedBox.shrink();
+        }
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text(
-            'v$version',
-            style: TextStyle(
-              // Quiet is spent on size and weight, not ink.
-              color: grid.AppPalette.textFaint,
-              fontSize: 10.5,
-            ),
-          ),
+          child: version == null
+              // Blank at the width of a version string, so the figures to
+              // its left do not shift right when it lands.
+              ? const SkeletonText(style: style, width: 34)
+              : Text(
+                  'v$version',
+                  style: style.copyWith(
+                    // Quiet is spent on size and weight, not ink.
+                    color: grid.AppPalette.textFaint,
+                  ),
+                ),
         );
       },
     );

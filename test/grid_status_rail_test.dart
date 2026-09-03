@@ -8,6 +8,7 @@ import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class _MemoryStore implements LocalKeyValueStore {
   final Map<String, String> values = {};
@@ -108,6 +109,18 @@ Future<GridOverviewController> _pump(
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // The rail's far end prints the running version. Unmocked, the plugin call
+  // never answers under flutter_tester, and the version's placeholder would
+  // then breathe forever — which is a `pumpAndSettle` that never settles.
+  PackageInfo.setMockInitialValues(
+    appName: 'Harness',
+    packageName: 'ai.autonomous.harness',
+    version: '1.0.0',
+    buildNumber: '1',
+    buildSignature: '',
+  );
+
   testWidgets('the rail reads the grid from both ends', (tester) async {
     final controller = await _pump(tester);
 

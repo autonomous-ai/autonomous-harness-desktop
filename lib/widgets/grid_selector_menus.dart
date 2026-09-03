@@ -8,6 +8,7 @@ import '../grid/grid_networks_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_menu.dart';
+import '../shared/widgets/skeleton.dart';
 
 /// The two grid pickers' panels.
 ///
@@ -100,7 +101,7 @@ class _GridMenuState extends State<GridMenu> {
     switch (networks.state) {
       case GridNetworksIdle():
       case GridNetworksLoading():
-        panel.note('Loading your grids…');
+        panel.skeleton();
       case GridNetworksFailed(:final message):
         panel.note(message);
       case GridNetworksReady(:final me):
@@ -182,7 +183,7 @@ class _ModelMenuState extends State<ModelMenu> {
     switch (models.state) {
       case GridModelsIdle():
       case GridModelsLoading():
-        panel.note('Loading models…');
+        panel.skeleton();
       case GridModelsFailed(:final message):
         panel.note(message);
       case GridModelsReady(:final models):
@@ -266,10 +267,23 @@ class _Panel {
     _extent += _kDividerExtent;
   }
 
-  /// A line of small print in place of rows — loading, empty, or failed.
+  /// A line of small print in place of rows — empty, or failed.
   void note(String message) {
     children.add(_MenuNote(message));
     _extent += _kNoteExtent;
+  }
+
+  /// Placeholder rows while the list loads, each exactly one row tall.
+  ///
+  /// Three, not a guess at the count: a panel is sized from the rows it adds
+  /// up, and a skeleton taller than a two-grid account's answer would shrink
+  /// under the pointer when it lands. Three is at or under what most lists
+  /// come back with, so the panel only ever grows.
+  void skeleton({int rows = 3}) {
+    for (var i = 0; i < rows; i++) {
+      children.add(_MenuSkeletonRow(index: i, rows: rows));
+      _extent += AppMenuRowMetrics.roomy.extent;
+    }
   }
 
   // 1px rule inside AppMenuDivider's 5px vertical padding.
@@ -278,6 +292,47 @@ class _Panel {
   // Two lines of 12pt with the note's own padding. A failure long enough to run
   // to three gets a scrollbar, which is the right furniture for that case.
   static const double _kNoteExtent = 46;
+}
+
+/// One row of a loading picker: a bar on the labels' column, one row tall.
+///
+/// The height is the row metric, not the bar's: a placeholder row that measured
+/// differently from the row it stands in for would slide the whole list under
+/// the pointer the moment the grids arrived.
+class _MenuSkeletonRow extends StatelessWidget {
+  const _MenuSkeletonRow({required this.index, required this.rows});
+
+  final int index;
+  final int rows;
+
+  static const _widths = [0.56, 0.42, 0.64];
+
+  @override
+  Widget build(BuildContext context) {
+    // Lives in the MenuAnchor's overlay, so it watches for itself.
+    grid.AppTheme.watch(context);
+    return SkeletonBlock(
+      child: Opacity(
+        opacity: skeletonFade(index, rows, depth: skeletonFadeLight),
+        child: SizedBox(
+          width: _kPanelWidth,
+          height: AppMenuRowMetrics.roomy.extent,
+          child: Padding(
+            // Same column the labels and the note start on.
+            padding: const EdgeInsets.symmetric(horizontal: 17),
+            child: SkeletonText(
+              style: TextStyle(
+                fontFamily: grid.AppFont.sans,
+                fontFamilyFallback: grid.AppFont.sansFallback,
+                fontSize: AppMenuRowMetrics.roomy.fontSize,
+              ),
+              widthFactor: _widths[index % _widths.length],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _MenuNote extends StatelessWidget {
