@@ -154,6 +154,9 @@ void main() {
       await pointer.addPointer(location: Offset.zero);
       addTearDown(pointer.removePointer);
       await pointer.moveTo(tester.getCenter(find.text(target).first));
+      // The panel opens on a beat, so a pointer crossing the rail on its way
+      // elsewhere does not flash one open behind it.
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.pumpAndSettle();
 
       expect(find.byType(PillPanelSurface), findsOneWidget);

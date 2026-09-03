@@ -218,6 +218,7 @@ void main() {
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
     final panel = tester.getRect(find.byType(PillPanelSurface));
@@ -232,26 +233,76 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('the panel stays open while the pointer is on it', (
+  testWidgets('the pointer survives the gap between figure and panel', (
     tester,
   ) async {
-    // Otherwise a list of eight machines can be looked at but never scrolled.
+    // The panel hangs 8px above the rail, and a pointer reaching it crosses
+    // that band — which belongs to neither. Without a beat of grace the panel
+    // closed there, so nothing inside it could be clicked.
+    tester.view.physicalSize = const Size(1000, 460);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final controller = await _pump(tester);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
 
-    await gesture.moveTo(tester.getCenter(find.text('SELF-HOST')));
+    // Into the dead band between the two.
+    final rail = tester.getRect(find.byType(GridStatusRail));
+    final panel = tester.getRect(find.byType(PillPanelSurface));
+    await gesture.moveTo(Offset(panel.center.dx, (panel.bottom + rail.top) / 2));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.byType(PillPanelSurface), findsOneWidget);
+
+    // And onto the panel, which claims it before the grace runs out.
+    await gesture.moveTo(panel.center);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    expect(find.byType(PillPanelSurface), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('a pointer that keeps going closes it', (tester) async {
+    // The grace is a beat, not a latch.
+    final controller = await _pump(tester);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
 
     await gesture.moveTo(const Offset(500, 20));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsNothing);
+    controller.dispose();
+  });
+
+  testWidgets('a click pins it, so its links can be reached', (tester) async {
+    final controller = await _pump(tester);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('autonomous.ai').first);
+    await tester.pumpAndSettle();
+
+    // Pointer well away, panel still up.
+    await gesture.moveTo(const Offset(500, 20));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(find.byType(PillPanelSurface), findsOneWidget);
     controller.dispose();
   });
 
@@ -262,6 +313,7 @@ void main() {
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
     // The hardware panel: the grid's name, its uptime, and the memory split.

@@ -5,6 +5,7 @@ import '../../grid/node_display.dart';
 import '../../grid/grid_overview.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/status_dot.dart';
+import 'grid_stat_panels.dart';
 import 'memory_split_bar.dart';
 import 'pill_panel_shell.dart';
 
@@ -18,12 +19,34 @@ import 'pill_panel_shell.dart';
 class GridPowerPanel extends StatelessWidget {
   const GridPowerPanel({
     super.key,
+    required this.link,
+    required this.anchorKey,
+    required this.tapGroupId,
+    required this.onEnter,
+    required this.onExit,
     required this.gridName,
     required this.power,
     required this.nodes,
     this.uptimePct,
     this.onViewDashboard,
   });
+
+  /// The stretch of the rail this panel was opened from — the grid's name at
+  /// one end, the memory ring at the other.
+  final LayerLink link;
+
+  /// The same stretch, as something measurable: [GridStatPanel] needs it to
+  /// work out whether the panel still fits on screen where that stretch puts
+  /// it.
+  final GlobalKey anchorKey;
+
+  /// Shared with the rail, so a click inside the panel is not the "click
+  /// outside" that dismisses a pinned one — the panel lives in an overlay,
+  /// outside the rail's own subtree.
+  final Object tapGroupId;
+
+  final VoidCallback onEnter;
+  final VoidCallback onExit;
 
   final String gridName;
   final GridPower power;
@@ -71,10 +94,14 @@ class GridPowerPanel extends StatelessWidget {
     // Placed by [GridStatPanel] like every other panel this pill opens: under
     // the stretch it belongs to, sliding sideways only when the window's edge
     // would otherwise cut it off.
-    return SizedBox(
+    return GridStatPanel(
+      link: link,
+      anchorKey: anchorKey,
+      tapGroupId: tapGroupId,
+      onEnter: onEnter,
+      onExit: onExit,
       width: _width,
-      child: PillPanelSurface(
-        child: Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -120,8 +147,7 @@ class GridPowerPanel extends StatelessWidget {
           ],
           if (onViewDashboard != null)
             _PanelLink(label: 'View dashboard', onTap: onViewDashboard!),
-          ],
-        ),
+        ],
       ),
     );
   }

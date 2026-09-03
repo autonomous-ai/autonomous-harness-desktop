@@ -12,7 +12,6 @@ import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
 import 'memory_ring.dart';
-import 'pill_panel_shell.dart';
 
 /// The strip along the bottom of the window: what the chosen grid is made of,
 /// and which build of the app is reading it.
@@ -83,99 +82,291 @@ class _GridStatusRailState extends State<GridStatusRail> {
   }
 }
 
+/// Which of the rail's panels is open.
+///
+/// [power] is the whole left cluster — the grid's name, its live dot and its
+/// memory ring — because all three are facts about the grid itself. The other
+/// four name the thing their own figure counts.
+enum _PanelKind { power, tokens, members, nodes, models }
+
+/// What a panel hangs from: the link that places it under its figure, and the
+/// key that says where that figure sits. Both, because the link alone cannot
+/// answer whether the panel it places still fits inside the window — see
+/// [GridStatPanel.anchorKey].
+typedef _FigureAnchor = ({LayerLink link, GlobalKey key});
+
+_FigureAnchor _newFigureAnchor() => (link: LayerLink(), key: GlobalKey());
+
 /// The figures, read from both ends: what this grid *is* on the left, what it
 /// is *made of* on the right.
-class _Readout extends StatelessWidget {
+class _Readout extends StatefulWidget {
   const _Readout({required this.controller});
 
   final GridOverviewController controller;
 
   @override
+  State<_Readout> createState() => _ReadoutState();
+}
+
+class _ReadoutState extends State<_Readout> {
+  /// One anchor per figure, so a panel hangs under the number it explains
+  /// rather than under the row as a whole. A [LayerLink] can only be attached
+  /// to one target, hence one each.
+  final _nameAnchor = _newFigureAnchor();
+  final _tokenAnchor = _newFigureAnchor();
+  final _memberAnchor = _newFigureAnchor();
+  final _nodeAnchor = _newFigureAnchor();
+  final _modelAnchor = _newFigureAnchor();
+  final _portal = OverlayPortalController();
+
+  /// Ties the rail and its panel into one tap region, so a click inside either
+  /// is not the "click outside" that dismisses a pinned panel.
+  final _tapGroup = Object();
+
+  /// What the pointer is over right now, or null when it is over none of it.
+  ///
+  /// Moving between two figures sets this to the new one *before* the old one's
+  /// delayed close runs, which is what lets the panel swap in place instead of
+  /// blinking shut and reopening. It is also what carries the pointer across
+  /// the gap between a figure and the panel above it: the panel sets this to
+  /// the kind it is showing, so leaving the figure finds it already claimed.
+  _PanelKind? _hovered;
+
+  /// What the panel is currently showing.
+  _PanelKind _panel = _PanelKind.power;
+
+  /// Held open by a click, rather than by the pointer resting on the rail.
+  ///
+  /// Hover alone cannot carry an action: reaching for a link in the panel means
+  /// crossing whatever the pointer passes on the way, and a panel that closes
+  /// mid-reach makes its own call to action unpressable. A pinned panel closes
+  /// on a second click, or on a click anywhere outside it.
+  bool _pinned = false;
+
+  void _show() => _portal.show();
+
+  void _hide() {
+    _pinned = false;
+    if (_portal.isShowing) _portal.hide();
+  }
+
+  /// The pointer settled on [kind] — a figure, or the open panel itself.
+  ///
+  /// With a panel already open the swap is immediate: the pointer has crossed
+  /// from one figure to the next inside a surface it never left, and re-serving
+  /// the wait there would make the rail feel like it had to be re-asked. The
+  /// wait is for *opening*, so a pointer crossing the rail on its way elsewhere
+  /// does not flash a panel open behind it.
+  void _onEnter(_PanelKind kind) {
+    _hovered = kind;
+    if (_portal.isShowing) {
+      if (_panel != kind) setState(() => _panel = kind);
+      return;
+    }
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (!mounted || _hovered != kind) return;
+      setState(() => _panel = kind);
+      _show();
+    });
+  }
+
+  /// The pointer left [kind]. Closes only if it has not landed on another part
+  /// of the rail or on the panel — the guard is the *current* hover, not this
+  /// one, so figure-to-figure and figure-to-panel both survive the gap.
+  void _onExit(_PanelKind kind) {
+    if (_hovered == kind) _hovered = null;
+    // A beat of grace so the pointer can cross the gap between the rail and the
+    // panel without the panel closing out from under it.
+    Future<void>.delayed(const Duration(milliseconds: 120), () {
+      if (!mounted || _hovered != null || _pinned) return;
+      _hide();
+    });
+  }
+
+  /// A click pins whatever the pointer is on, so the panel can be read — and
+  /// its links reached — without the pointer having to stay put.
+  void _toggle() {
+    if (_pinned) {
+      _hide();
+      return;
+    }
+    _pinned = true;
+    setState(() => _panel = _hovered ?? _PanelKind.power);
+    _show();
+  }
+
+  @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final controller = widget.controller;
     if (!controller.hasGrid) {
       return Align(
         alignment: Alignment.centerLeft,
         child: Text(
           'No grid chosen',
-          style: TextStyle(
-            color: grid.AppPalette.textFaint,
-            fontSize: 11.5,
-          ),
+          style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
         ),
       );
     }
+    return TapRegion(
+      groupId: _tapGroup,
+      onTapOutside: (_) {
+        if (_pinned) _hide();
+      },
+      child: OverlayPortal(
+        controller: _portal,
+        overlayChildBuilder: (context) => _panelFor(_panel),
+        child: GestureDetector(
+          // Defer, not opaque: opaque would swallow the spacer between the two
+          // clusters, and a click on empty rail would pin the hardware panel.
+          behavior: HitTestBehavior.deferToChild,
+          onTap: _toggle,
+          child: _figures(),
+        ),
+      ),
+    );
+  }
+
+  List<OverviewNode> get _onlineNodes => [
+    for (final node in widget.controller.overview?.nodes ??
+        const <OverviewNode>[])
+      if (node.online) node,
+  ];
+
+  Widget _figures() {
+    final controller = widget.controller;
     final power = controller.power;
-    final overview = controller.overview;
     final answered = power?.answered;
-    // Online only, once, so every panel and the rail's own count read the same
-    // set of machines.
-    final onlineNodes = [
-      for (final node in overview?.nodes ?? const <OverviewNode>[])
-        if (node.online) node,
-    ];
     return Row(
       children: [
-        _GridMark(controller: controller),
+        _GridMark(
+          controller: controller,
+          anchor: _nameAnchor,
+          onEnter: _onEnter,
+          onExit: _onExit,
+        ),
         if (power != null && answered != null && answered.freshInputTokens > 0)
           _Figure(
+            anchor: _tokenAnchor,
+            kind: _PanelKind.tokens,
             value: formatCount(answered.freshInputTokens),
             unit: answeredWindowLabel(answered.windowSeconds),
             semantics: 'work answered',
-            panel: () => _Panel(
-              width: 255,
-              child: GridTokensList(answered: answered),
-            ),
+            onEnter: _onEnter,
+            onExit: _onExit,
           ),
         const Spacer(),
         // WHAT THE GRID IS MADE OF — people, machines, models.
         if (controller.members != null)
           _Count(
+            anchor: _memberAnchor,
+            kind: _PanelKind.members,
             icon: LucideIcons.users300,
             value: '${controller.members}',
             semantics: 'people on this grid',
-            panel: () => _Panel(
-              width: 320,
-              child: GridMembersList(
-                gridName: controller.gridName,
-                roster: controller.roster,
-                usage: controller.memberUsage,
-                usageLoading: controller.memberUsageLoading,
-                rosterLoading: controller.rosterLoading,
-                onInvite: controller.gridUrl == null
-                    ? null
-                    : () => launchUrl(Uri.parse(controller.gridUrl!)),
-              ),
-            ),
+            onEnter: _onEnter,
+            onExit: _onExit,
           ),
         if (power != null)
           _Count(
+            anchor: _nodeAnchor,
+            kind: _PanelKind.nodes,
             icon: LucideIcons.server300,
             value: '${power.onlineNodes}',
             semantics: 'machines hosting',
-            panel: () => _Panel(
-              width: 358,
-              child: GridNodesList(nodes: onlineNodes),
-            ),
+            onEnter: _onEnter,
+            onExit: _onExit,
           ),
         if (power != null)
           _Count(
+            anchor: _modelAnchor,
+            kind: _PanelKind.models,
             icon: LucideIcons.boxes,
             value: '${power.models}',
             semantics: 'models available',
-            panel: () => _Panel(
-              width: 352,
-              child: GridModelsList(
-                models: overview?.models ?? const [],
-                nodes: onlineNodes,
-                gridTotal: power.answered,
-                loading: controller.loading,
-              ),
-            ),
+            onEnter: _onEnter,
+            onExit: _onExit,
           ),
       ],
     );
   }
+
+  /// The panel [kind] asks for, anchored to the figure it belongs to.
+  Widget _panelFor(_PanelKind kind) {
+    final controller = widget.controller;
+    final url = controller.gridUrl;
+    final open = url == null ? null : () => launchUrl(Uri.parse(url));
+    return switch (kind) {
+      _PanelKind.power => GridPowerPanel(
+        link: _nameAnchor.link,
+        anchorKey: _nameAnchor.key,
+        tapGroupId: _tapGroup,
+        onEnter: () => _onEnter(kind),
+        onExit: () => _onExit(kind),
+        gridName: controller.gridName,
+        power: controller.power!,
+        nodes: _onlineNodes,
+        uptimePct: controller.overview?.stats.uptimePct,
+        onViewDashboard: open,
+      ),
+      _PanelKind.tokens => _stat(
+        kind,
+        _tokenAnchor,
+        GridTokensList(answered: controller.power?.answered),
+        width: 255,
+      ),
+      _PanelKind.members => _stat(
+        kind,
+        _memberAnchor,
+        GridMembersList(
+          gridName: controller.gridName,
+          roster: controller.roster,
+          usage: controller.memberUsage,
+          usageLoading: controller.memberUsageLoading,
+          rosterLoading: controller.rosterLoading,
+          onInvite: open,
+        ),
+        width: 320,
+      ),
+      // Wider than the rest: its rows carry a spec line, and at the list width
+      // those ellipsize to nothing worth reading.
+      _PanelKind.nodes => _stat(
+        kind,
+        _nodeAnchor,
+        GridNodesList(nodes: _onlineNodes),
+        width: 358,
+      ),
+      // Each row ends in two figure columns, and at the list width they would
+      // take the width out of the model id — the one string every row is read
+      // for.
+      _PanelKind.models => _stat(
+        kind,
+        _modelAnchor,
+        GridModelsList(
+          models: controller.overview?.models ?? const [],
+          nodes: _onlineNodes,
+          gridTotal: controller.power?.answered,
+          loading: controller.loading,
+        ),
+        width: 352,
+      ),
+    };
+  }
+
+  Widget _stat(
+    _PanelKind kind,
+    _FigureAnchor anchor,
+    Widget child, {
+    required double width,
+  }) => GridStatPanel(
+    link: anchor.link,
+    anchorKey: anchor.key,
+    tapGroupId: _tapGroup,
+    onEnter: () => _onEnter(kind),
+    onExit: () => _onExit(kind),
+    width: width,
+    child: child,
+  );
 }
 
 /// The grid's name, its live dot, and how much of its memory is spoken for.
@@ -184,9 +375,17 @@ class _Readout extends StatelessWidget {
 /// about what is running on it — and the chevron that says there is more sits
 /// with them rather than at the far end of the row.
 class _GridMark extends StatelessWidget {
-  const _GridMark({required this.controller});
+  const _GridMark({
+    required this.controller,
+    required this.anchor,
+    required this.onEnter,
+    required this.onExit,
+  });
 
   final GridOverviewController controller;
+  final _FigureAnchor anchor;
+  final void Function(_PanelKind) onEnter;
+  final void Function(_PanelKind) onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -202,22 +401,13 @@ class _GridMark extends StatelessWidget {
     final share = (vram != null && used != null && vram > 0)
         ? used / vram
         : (power?.gpuUtilPct != null ? power!.gpuUtilPct! / 100 : null);
-    return _Hoverable(
+    return _HoverTarget(
+      kind: _PanelKind.power,
+      anchor: anchor,
+      enabled: power != null,
       semantics: 'grid ${controller.gridName}',
-      panel: power == null
-          ? null
-          : () => GridPowerPanel(
-              gridName: controller.gridName,
-              power: power,
-              nodes: [
-                for (final node in controller.overview?.nodes ?? const [])
-                  if (node.online) node,
-              ],
-              uptimePct: controller.overview?.stats.uptimePct,
-              onViewDashboard: controller.gridUrl == null
-                  ? null
-                  : () => launchUrl(Uri.parse(controller.gridUrl!)),
-            ),
+      onEnter: onEnter,
+      onExit: onExit,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -280,23 +470,32 @@ class _GridMark extends StatelessWidget {
 /// A figure with its unit: `92.4M / 24h`.
 class _Figure extends StatelessWidget {
   const _Figure({
+    required this.anchor,
+    required this.kind,
     required this.value,
     required this.unit,
     required this.semantics,
-    required this.panel,
+    required this.onEnter,
+    required this.onExit,
   });
 
+  final _FigureAnchor anchor;
+  final _PanelKind kind;
   final String value;
   final String unit;
   final String semantics;
-  final Widget Function() panel;
+  final void Function(_PanelKind) onEnter;
+  final void Function(_PanelKind) onExit;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return _Hoverable(
+    return _HoverTarget(
+      kind: kind,
+      anchor: anchor,
       semantics: semantics,
-      panel: panel,
+      onEnter: onEnter,
+      onExit: onExit,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -325,25 +524,32 @@ class _Figure extends StatelessWidget {
 /// A glyph and a count.
 class _Count extends StatelessWidget {
   const _Count({
+    required this.anchor,
+    required this.kind,
     required this.icon,
     required this.value,
     required this.semantics,
-    required this.panel,
+    required this.onEnter,
+    required this.onExit,
   });
 
+  final _FigureAnchor anchor;
+  final _PanelKind kind;
   final IconData icon;
   final String value;
   final String semantics;
-  final Widget Function() panel;
+  final void Function(_PanelKind) onEnter;
+  final void Function(_PanelKind) onExit;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return _Hoverable(
+    return _HoverTarget(
+      kind: kind,
+      anchor: anchor,
       semantics: '$value $semantics',
-      panel: panel,
-      // At the far end of the rail, so it hangs from its right edge.
-      alignEnd: true,
+      onEnter: onEnter,
+      onExit: onExit,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -363,139 +569,58 @@ class _Count extends StatelessWidget {
   }
 }
 
-/// One figure on the rail, with the panel it opens.
+/// One figure on the rail, and the panel it opens.
 ///
-/// Hover opens it and a click holds it, which is the pairing a status strip
-/// wants: reading is a glance, and keeping it open to compare two machines is a
-/// decision. The regions touch — each figure's gap is its own padding rather
-/// than a spacer between them — so the pointer never crosses dead ground that
-/// would close the panel on the way past and reopen it on landing.
-class _Hoverable extends StatefulWidget {
-  const _Hoverable({
-    required this.child,
+/// The regions touch: the gap between figures is each figure's own padding
+/// rather than a spacer between them. A bare `SizedBox` would be dead ground —
+/// the pointer crossing it belongs to nothing, so an open panel would close on
+/// the way past and reopen on landing.
+class _HoverTarget extends StatelessWidget {
+  const _HoverTarget({
+    required this.kind,
+    required this.anchor,
     required this.semantics,
-    required this.panel,
-    this.alignEnd = false,
+    required this.child,
+    required this.onEnter,
+    required this.onExit,
+    this.enabled = true,
   });
 
-  final Widget child;
+  final _PanelKind kind;
+  final _FigureAnchor anchor;
   final String semantics;
+  final Widget child;
+  final void Function(_PanelKind) onEnter;
+  final void Function(_PanelKind) onExit;
 
-  /// Null when there is nothing to open — the figure is then still readable and
-  /// simply inert.
-  final Widget Function()? panel;
+  /// False while there is nothing to open — the figure is then still readable
+  /// and simply inert.
+  final bool enabled;
 
-  /// Hang the panel from the figure's RIGHT edge instead of its left.
-  ///
-  /// The counts sit at the far end of the rail, and a 300px card opening
-  /// rightward from them is a card mostly off the screen.
-  final bool alignEnd;
-
-  @override
-  State<_Hoverable> createState() => _HoverableState();
-}
-
-class _HoverableState extends State<_Hoverable> {
-  final _link = LayerLink();
-  OverlayEntry? _entry;
-  bool _pinned = false;
-  bool _overFigure = false;
-  bool _overPanel = false;
-
-  @override
-  void dispose() {
-    _entry?.remove();
-    _entry = null;
-    super.dispose();
-  }
-
-  void _show() {
-    if (_entry != null || widget.panel == null) return;
-    _entry = OverlayEntry(
-      builder: (context) => Positioned(
-        // ⚠️ `left`/`top` MUST be given, even though the follower does the real
-        // positioning. A `Positioned` with every offset null is a *non*-
-        // positioned child, and the overlay lays those out with TIGHT
-        // constraints — which is a panel stretched over the whole window, with
-        // its own width ignored. That is exactly what this looked like before.
-        left: 0,
-        top: 0,
-        child: CompositedTransformFollower(
-          link: _link,
-          // Anchored to the figure's top edge and hung from the panel's bottom:
-          // it opens UPWARD, because there is nothing below a strip that sits
-          // on the bottom edge of the window.
-          targetAnchor: widget.alignEnd
-              ? Alignment.topRight
-              : Alignment.topLeft,
-          followerAnchor: widget.alignEnd
-              ? Alignment.bottomRight
-              : Alignment.bottomLeft,
-          offset: Offset(widget.alignEnd ? 10 : -10, -6),
-          showWhenUnlinked: false,
-          // The panel keeps itself open. Without this the pointer leaving the
-          // figure to reach the panel closes the thing it was reaching for, so
-          // a list of eight machines could be looked at but never scrolled.
-          child: MouseRegion(
-            onEnter: (_) {
-              _overPanel = true;
-              _sync();
-            },
-            onExit: (_) {
-              _overPanel = false;
-              _sync();
-            },
-            child: widget.panel!(),
-          ),
-        ),
-      ),
-    );
-    Overlay.of(context, rootOverlay: true).insert(_entry!);
-  }
-
-  void _hide() {
-    _entry?.remove();
-    _entry = null;
-  }
-
-  void _sync() {
-    if (!mounted) return;
-    if (_overFigure || _overPanel || _pinned) {
-      _show();
-    } else {
-      _hide();
-    }
-  }
+  /// Half the space between two figures. Each side owns its own half, so the
+  /// two regions meet with nothing between them.
+  static const double _gap = 9;
 
   @override
   Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
     return CompositedTransformTarget(
-      link: _link,
-      child: Semantics(
-        label: widget.semantics,
-        child: MouseRegion(
-          cursor: widget.panel == null
-              ? SystemMouseCursors.basic
-              : SystemMouseCursors.click,
-          onEnter: (_) {
-            _overFigure = true;
-            _sync();
-          },
-          onExit: (_) {
-            _overFigure = false;
-            _sync();
-          },
-          child: GestureDetector(
-            onTap: widget.panel == null
-                ? null
-                : () {
-                    _pinned = !_pinned;
-                    _sync();
-                  },
+      link: anchor.link,
+      child: KeyedSubtree(
+        key: anchor.key,
+        child: Semantics(
+          label: semantics,
+          child: MouseRegion(
+            cursor: enabled
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic,
+            onEnter: enabled ? (_) => onEnter(kind) : null,
+            onExit: enabled ? (_) => onExit(kind) : null,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              child: widget.child,
+              // Full height, so the pointer entering the rail anywhere over a
+              // figure is already on it — a region inset from the strip's own
+              // edges leaves a lane above and below that closes the panel.
+              padding: const EdgeInsets.symmetric(horizontal: _gap),
+              child: Center(child: child),
             ),
           ),
         ),
@@ -533,16 +658,4 @@ class _VersionMark extends StatelessWidget {
       },
     );
   }
-}
-
-/// One panel on the shared surface, at the width its contents were drawn for.
-class _Panel extends StatelessWidget {
-  const _Panel({required this.width, required this.child});
-
-  final double width;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) =>
-      SizedBox(width: width, child: PillPanelSurface(child: child));
 }
