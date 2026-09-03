@@ -140,6 +140,31 @@ const List<AppShortcut> kAppShortcuts = [
     label: 'Focus the next pane',
     group: ShortcutGroup.panes,
   ),
+  // ⌃⇥ / ⇧⌃⇥ — the same pair every tabbed app uses, and the one people reach
+  // for without being told, which is why it is here despite the note at the
+  // top of this file warning that Ctrl belongs to the terminal.
+  //
+  // It is safe now because the terminal is made to let exactly this chord go
+  // past it (see terminal_view.dart): Ctrl+Tab is not a sequence any shell or
+  // tmux binding uses, so nothing downstream loses a key by us taking it.
+  // ⌘[ / ⌘] stay as the macOS-native way to the same two actions.
+  AppShortcut(
+    action: ShortcutAction.focusNextPane,
+    activator: SingleActivator(LogicalKeyboardKey.tab, control: true),
+    label: 'Focus the next pane',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPreviousPane,
+    activator: SingleActivator(
+      LogicalKeyboardKey.tab,
+      control: true,
+      shift: true,
+    ),
+    label: 'Focus the previous pane',
+    group: ShortcutGroup.panes,
+  ),
+
   AppShortcut(
     action: ShortcutAction.movePaneBackward,
     // The keyboard twin of dragging a pane's header. ⌘[ / ⌘] already focus a

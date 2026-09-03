@@ -14,6 +14,7 @@ import '../shared/widgets/app_menu.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
 import 'agent_drag.dart';
+import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
 import 'engine_identity.dart';
 import 'link_machine_dialog.dart';
@@ -694,79 +695,14 @@ class _AgentRowState extends State<_AgentRow> {
   int get depth => widget.depth;
   bool get hasChildren => widget.hasChildren;
 
-  Future<void> _showRenameDialog() async {
-    final controller = TextEditingController(text: agent.name);
-    String? error;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Edit name'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  style: const TextStyle(fontSize: 13.5),
-                  onSubmitted: (_) async {
-                    final result = await notifier.renameAgent(
-                      state.machine.machineId,
-                      agent.id,
-                      controller.text,
-                    );
-                    if (result == null) {
-                      if (dialogContext.mounted) {
-                        Navigator.of(dialogContext).pop();
-                      }
-                    } else {
-                      setDialogState(() => error = result);
-                    }
-                  },
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    error!,
-                    style: TextStyle(
-                      color: grid.AppPalette.dangerFill,
-                      fontFamily: grid.AppFont.sans,
-                      fontSize: 11.2,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final result = await notifier.renameAgent(
-                  state.machine.machineId,
-                  agent.id,
-                  controller.text,
-                );
-                if (result == null) {
-                  if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                } else {
-                  setDialogState(() => error = result);
-                }
-              },
-              child: const Text('Save', style: TextStyle(fontSize: 13.5)),
-            ),
-          ],
-        ),
-      ),
-    );
-    controller.dispose();
-  }
+  /// The row's own way into the shared dialog — see rename_agent_dialog.dart.
+  Future<void> _showRenameDialog() => showAgentRenameDialog(
+    context,
+    notifier,
+    state.machine.machineId,
+    agent.id,
+    agent.name,
+  );
 
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
@@ -866,6 +802,10 @@ class _AgentRowState extends State<_AgentRow> {
           enabled: enabled,
           dimmed: !visuallyEnabled,
           onTap: () => notifier.selectAgent(state.machine.machineId, agent.id),
+          // The same "Edit name" the row's own menu opens — a double click is
+          // just the shorter way to it, and the place a hand reaches first.
+          onDoubleTap: _showRenameDialog,
+
           // No tooltip on a row that works. "Claude engine" only repeated what
           // the mark beside it already says, and it followed the pointer down
           // the whole list. A row that CANNOT be used keeps one, because then

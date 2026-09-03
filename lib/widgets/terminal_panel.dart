@@ -10,6 +10,7 @@ import 'package:xterm/xterm.dart';
 import '../state/app_state.dart';
 
 import 'agent_drag.dart';
+import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
 import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_session.dart';
@@ -450,6 +451,7 @@ class _TerminalPanelState extends State<TerminalPanel>
       child: Column(
         children: [
           _TerminalHeader(
+            notifier: widget.notifier,
             session: session,
             onClose: widget.onClose,
             paneDrag: widget.paneDrag,
@@ -520,6 +522,7 @@ class _TerminalPanelState extends State<TerminalPanel>
 }
 
 class _TerminalHeader extends StatelessWidget {
+  final AppNotifier notifier;
   final TerminalSession session;
   final VoidCallback? onClose;
 
@@ -533,7 +536,12 @@ class _TerminalHeader extends StatelessWidget {
   /// share one drag. The window is moved from HarnessTopBar now.
   final PaneDragHandle? paneDrag;
 
-  const _TerminalHeader({required this.session, this.onClose, this.paneDrag});
+  const _TerminalHeader({
+    required this.notifier,
+    required this.session,
+    this.onClose,
+    this.paneDrag,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -578,17 +586,40 @@ class _TerminalHeader extends StatelessWidget {
             EngineMark(engine: session.engineId, size: 17),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                session.agentName,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontFamily: AppFonts.sans,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+              // Double click the NAME to rename — the same dialog the rail's
+              // row opens, so one name has one way to change wherever it is
+              // shown. Scoped to the text rather than the whole strip: the
+              // strip is the drag handle, and a double click that both renamed
+              // and looked like the start of a drag would be two answers to one
+              // gesture.
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onDoubleTap: () => unawaited(
+                  showAgentRenameDialog(
+                    context,
+                    notifier,
+                    session.machineId,
+                    session.agentId,
+                    session.agentName,
+                  ),
+                ),
+                child: Tooltip(
+                  message: 'Double-click to rename',
+                  waitDuration: const Duration(milliseconds: 700),
+                  child: Text(
+                    session.agentName,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontFamily: AppFonts.sans,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
+
             if (session.status == TerminalSessionStatus.controlling)
               Padding(padding: const EdgeInsets.all(4), child: statusMark)
             else
