@@ -70,10 +70,6 @@ class _SharePaneState extends State<SharePane> {
     if (!selection.hasGrid || selection.networkId == _loadedFor) return;
     _loadedFor = selection.networkId;
     await _controller.refresh(selection.networkId!);
-    if (!mounted) return;
-    await _pull.loadCatalog({
-      for (final model in _controller.capabilities.models) model.file,
-    });
   }
 
   @override

@@ -9,6 +9,7 @@ import '../model_pull.dart';
 import '../node_identity.dart';
 import '../share_controller.dart';
 import '../share_discovery.dart';
+import 'model_manager_dialog.dart';
 import 'share_fields.dart';
 import 'share_form_parts.dart';
 
@@ -50,7 +51,6 @@ class _ServeLocalFormState extends State<ServeLocalForm> {
   int? _maxContext;
   int? _contextSize;
 
-  bool _showDownloads = false;
 
   @override
   void initState() {
@@ -122,12 +122,28 @@ class _ServeLocalFormState extends State<ServeLocalForm> {
     );
   }
 
-  Future<void> _download(String label) async {
-    final ok = await widget.pull.pull(label);
-    if (!ok || !mounted) return;
-    await widget.controller.refresh(widget.controller.gridId ?? '');
+  /// Open the shelf. Everything downloadable lives there, including the models
+  /// this Mac is specifically recommended — the form is for choosing among what
+  /// is already here.
+  Future<void> _manage() async {
+    await showModelManager(
+      context,
+      pull: widget.pull,
+      cli: widget.cli,
+      onChanged: _reloadModels,
+    );
+    if (mounted) await _reloadModels();
+  }
+
+  Future<void> _reloadModels() async {
+    final gridId = widget.controller.gridId;
+    if (gridId == null) return;
+    await widget.controller.refresh(gridId);
     if (!mounted) return;
-    setState(() => _showDownloads = false);
+    // The model that was picked may have just been deleted.
+    if (!_models.any((model) => model.file == _model)) {
+      setState(() => _model = null);
+    }
     _selectDefault();
   }
 
@@ -174,8 +190,7 @@ class _ServeLocalFormState extends State<ServeLocalForm> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
-                onPressed: () =>
-                    setState(() => _showDownloads = !_showDownloads),
+                onPressed: _manage,
                 style: TextButton.styleFrom(
                   foregroundColor: SharePalette.accent,
                   padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -185,15 +200,17 @@ class _ServeLocalFormState extends State<ServeLocalForm> {
                     fontWeight: grid.AppFont.semibold,
                   ),
                 ),
-                child: Text(
-                  _showDownloads
-                      ? 'Hide downloads'
-                      : 'Download or manage models →',
-                ),
+                child: const Text('Download or manage models →'),
               ),
             ),
-            if (_showDownloads || _models.isEmpty)
-              DownloadBlock(pull: widget.pull, onDownload: _download),
+            if (_models.isEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Nothing on this disk yet. Open the catalogue and pick one — '
+                'it lists what this Mac can actually run.',
+                style: ShareType.note,
+              ),
+            ],
           ],
         ),
         if (_models.isNotEmpty) ...[

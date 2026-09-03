@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/share/backend_detector.dart';
+import 'package:harness/share/context_ladder.dart';
 import 'package:harness/share/context_length.dart';
+import 'package:harness/share/pull_spec.dart';
 import 'package:harness/share/engine_run.dart';
 import 'package:harness/share/join_args.dart';
 import 'package:harness/share/local_models.dart';
@@ -322,6 +324,105 @@ void main() {
     test('a missing run directory is a computer that is not sharing', () {
       final missing = Directory('${Directory.systemTemp.path}/no-such-grid-dir');
       expect(readEngineRuns(_grid, runDir: missing), isEmpty);
+    });
+  });
+
+  group('the specs that download one version', () {
+    const repo = 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF';
+
+    test('a split set is every shard, not just the one the catalogue names', () {
+      // The catalogue's pull_spec names the FIRST file only, so pulling that
+      // alone leaves a model the engine cannot load.
+      final specs = versionPullSpecs(
+        urls: [
+          'https://huggingface.co/$repo/resolve/main/UD-IQ3_S/m-00001-of-00003.gguf',
+          'https://huggingface.co/$repo/resolve/main/UD-IQ3_S/m-00002-of-00003.gguf',
+          'https://huggingface.co/$repo/resolve/main/UD-IQ3_S/m-00003-of-00003.gguf',
+        ],
+        pullSpec: '$repo:UD-IQ3_S/m-00001-of-00003.gguf',
+      );
+      expect(specs, hasLength(3));
+      expect(specs.first, '$repo:UD-IQ3_S/m-00001-of-00003.gguf');
+      expect(specs.last, '$repo:UD-IQ3_S/m-00003-of-00003.gguf');
+    });
+
+    test('a shape we do not recognise falls back rather than guessing', () {
+      // Pulling only the URLs we could parse would produce a model with a hole
+      // in it, which looks downloaded and will not load.
+      expect(
+        versionPullSpecs(
+          urls: ['https://example.com/a.gguf', 'https://example.com/b.gguf'],
+          pullSpec: '$repo:one.gguf',
+        ),
+        ['$repo:one.gguf'],
+      );
+      expect(versionPullSpecs(urls: const [], pullSpec: null), isEmpty);
+    });
+
+    test('the filename is the tail, because the CLI stores downloads flat', () {
+      expect(pullSpecFileName('$repo:UD-IQ3_S/m-00001-of-00003.gguf'),
+          'm-00001-of-00003.gguf');
+      expect(pullSpecFileName('$repo:plain.gguf'), 'plain.gguf');
+      expect(pullSpecFileName('no-colon'), isNull);
+    });
+  });
+
+  group('is a catalogue model already here', () {
+    test('an exact file match is the certain answer', () {
+      expect(
+        isCatalogModelInstalled(
+          repoId: 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
+          file: 'Qwen3.6-35B-A3B-UD-IQ3_S.gguf',
+          localFileNames: const ['Qwen3.6-35B-A3B-UD-IQ3_S.gguf'],
+        ),
+        isTrue,
+      );
+    });
+
+    test('a different quant of the same model still counts as having it', () {
+      // Offering it as missing would send somebody to download a second copy.
+      expect(
+        isCatalogModelInstalled(
+          repoId: 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
+          localFileNames: const ['Qwen3.6-35B-A3B-UD-IQ3_S.gguf'],
+        ),
+        isTrue,
+      );
+    });
+
+    test('a short repo stem never matches by accident', () {
+      expect(
+        isCatalogModelInstalled(
+          repoId: 'org/m-GGUF',
+          localFileNames: const ['MiniMax-M3-UD-IQ3_XXS.gguf'],
+        ),
+        isFalse,
+      );
+    });
+
+    test('an empty disk has nothing', () {
+      expect(
+        isCatalogModelInstalled(
+          repoId: 'unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
+          localFileNames: const [],
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('the context ladder', () {
+    test('offers nothing the server cannot serve', () {
+      expect(contextLadder(max: 32768, current: 8192), [4096, 8192, 16384, 32768]);
+    });
+
+    test('keeps a value that is not on the ladder as its own rung', () {
+      // Opening the picker must never quietly round somebody's setting.
+      expect(contextLadder(max: 131072, current: 40960), contains(40960));
+    });
+
+    test('always offers the ceiling, however odd it is', () {
+      expect(contextLadder(max: 40960, current: 4096).last, 40960);
     });
   });
 

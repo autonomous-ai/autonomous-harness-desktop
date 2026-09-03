@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../api/api_client.dart' show ApiException;
+import '../share/catalog_models.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
 
@@ -75,6 +78,59 @@ class GridApiClient {
           model['id'] as String,
     ];
   }
+
+  /// The model catalogue — every GGUF repo the shelf carries, searched and
+  /// ranked by the control plane.
+  ///
+  /// A POST, and the body is the query: `sort` ranks (`trending`, `likes`,
+  /// `created_at`) and `q` searches. Deliberately not the CLI's own
+  /// `grid catalog`, which answers with a handful of picks ranked for this
+  /// exact machine — that is a different question, asked elsewhere, and its
+  /// answer is far too short to browse.
+  Future<List<CatalogEntry>> catalog({
+    String? sort,
+    String? query,
+    int pageSize = 50,
+  }) async {
+    final body = await _post('/v1/grid/catalog', {
+      if (sort != null && sort.isNotEmpty) 'sort': sort,
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+      'page_size': pageSize,
+    });
+    final models = body['models'];
+    if (models is! List) return const [];
+    return [
+      for (final model in models)
+        if (model is Map)
+          CatalogEntry.fromJson(Map<String, dynamic>.from(model)),
+    ];
+  }
+
+  /// One model, with every version it offers.
+  ///
+  /// [device] is this machine's hardware profile from `grid device-info`. With
+  /// it each version comes back judged — runs here, too large, lower quality;
+  /// without it they arrive unjudged, which is worse but not a reason to show
+  /// nothing.
+  Future<ModelDetail> catalogDetail(
+    String repoId, {
+    Map<String, dynamic>? device,
+  }) async {
+    final path = '/v1/grid/catalog/${Uri.encodeComponent(repoId)}';
+    final query = device == null
+        ? path
+        : '$path?device=${Uri.encodeQueryComponent(jsonEncode(device))}';
+    return ModelDetail.fromJson(Map<String, dynamic>.from(await _get(query)));
+  }
+
+  Future<Map<dynamic, dynamic>> _post(String path, Object body) async =>
+      _unwrap(
+        await _dio.post<dynamic>(
+          path,
+          data: body,
+          options: Options(headers: {'Authorization': 'Bearer $_token'}),
+        ),
+      );
 
   /// One authenticated GET against the control plane, unwrapped into a map or
   /// an [ApiException] — the shape every call above shares.

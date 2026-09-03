@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,53 +5,51 @@ import 'package:flutter/foundation.dart';
 
 import 'grid_cli.dart';
 
-/// A model the CLI offers to download for THIS machine.
-///
-/// The catalog is host-filtered — `grid catalog` answers with what this
-/// computer's memory and chip can actually run — so a row here is a model that
-/// will work, not one that merely exists.
-class CatalogModel {
-  const CatalogModel({
-    required this.label,
-    required this.file,
-    required this.minVramGb,
-  });
-
-  /// What `grid pull` takes.
-  final String label;
-
-  /// The GGUF it lands as, which is how "already downloaded" is answered.
-  final String file;
-  final int minVramGb;
-
-  factory CatalogModel.fromJson(Map<String, dynamic> json) => CatalogModel(
-    label: '${json['label'] ?? ''}',
-    file: '${json['file'] ?? ''}',
-    minVramGb: json['min_vram_gb'] is int ? json['min_vram_gb'] as int : 0,
-  );
-}
-
 /// How far a download has got.
 class PullProgress {
-  const PullProgress({required this.doneMb, this.totalMb, this.percent});
+  const PullProgress({
+    required this.doneMb,
+    this.totalMb,
+    this.percent,
+    this.fileIndex = 0,
+    this.fileCount = 1,
+  });
 
   final double doneMb;
   final double? totalMb;
   final double? percent;
+
+  /// Which file of a split set this is, and how many there are. A five-shard
+  /// model reaching 100% four times over is not a bar anybody can read.
+  final int fileIndex;
+  final int fileCount;
 
   /// A download whose total the server never declared. Real, and common enough
   /// that it needs a shape rather than a zero — the bar goes indeterminate
   /// instead of sitting at 0% while megabytes land.
   bool get isIndeterminate => percent == null;
 
-  /// `1.2 GB of 15.0 GB`, or `1.2 GB` when the total is unknown.
+  /// Progress across the whole set, not just the file in flight.
+  double? get overall => percent == null
+      ? null
+      : (fileIndex + percent! / 100) / fileCount;
+
+  /// `1.2 GB of 15.0 GB`, with `· part 2 of 5` when there is more than one.
   String get label {
-    String gb(double mb) => mb >= 1000
-        ? '${(mb / 1000).toStringAsFixed(1)} GB'
-        : '${mb.round()} MB';
+    String size(double mb) =>
+        mb >= 1000 ? '${(mb / 1000).toStringAsFixed(1)} GB' : '${mb.round()} MB';
     final total = totalMb;
-    return total == null ? gb(doneMb) : '${gb(doneMb)} of ${gb(total)}';
+    final head = total == null ? size(doneMb) : '${size(doneMb)} of ${size(total)}';
+    return fileCount > 1 ? '$head · part ${fileIndex + 1} of $fileCount' : head;
   }
+
+  PullProgress inFile(int index, int count) => PullProgress(
+    doneMb: doneMb,
+    totalMb: totalMb,
+    percent: percent,
+    fileIndex: index,
+    fileCount: count,
+  );
 
   /// Parsed from the CLI's hand-rolled bar, which is `\r`-delimited and comes
   /// in two shapes: `123.4 / 456.7 MB ( 27.0%)`, or a bare `123.4 MB` when the
@@ -77,53 +74,59 @@ class PullProgress {
   static final RegExp _mbOnly = RegExp(r'([\d.]+)\s*MB');
 }
 
-/// Downloads one model, and says how it is going.
+/// Downloads a model, and says how it is going.
 ///
-/// Separate from [ShareController] because the two have nothing to say to each
-/// other beyond "the model list changed": a download can be running while
-/// nothing is shared, and a share can be running while nothing downloads.
+/// One model can be several files — a split GGUF is downloaded shard by shard —
+/// so a pull is a *queue*, and it stops at the first failure. Half a split set
+/// is not a partial success: it is a model that will not load, and carrying on
+/// would spend another ten gigabytes proving it.
 class ModelPullController extends ChangeNotifier {
   ModelPullController({GridCli? cli}) : _cli = cli ?? GridCli();
 
   final GridCli _cli;
 
-  List<CatalogModel> catalog = const [];
+  /// What is being downloaded, as the user would name it. Null when nothing is.
   String? pulling;
   PullProgress? progress;
   String? error;
+  bool _cancelled = false;
   bool _disposed = false;
   Process? _process;
 
   bool get isPulling => pulling != null;
 
-  /// What this machine can run, minus what it already has.
-  Future<void> loadCatalog(Set<String> alreadyOnDisk) async {
-    final rows = await _cli.runJson<List<dynamic>>(['catalog']);
-    catalog = [
-      for (final row in rows ?? const [])
-        if (row is Map)
-          CatalogModel.fromJson(Map<String, dynamic>.from(row)),
-    ].where((model) => !alreadyOnDisk.contains(model.file)).toList();
-    _notify();
-  }
-
-  /// Pull [label], returning true when the file landed.
+  /// Download every file of [specs] in order, under the display name [label].
   ///
-  /// The caller re-reads the model list on true rather than being handed one:
-  /// what is on disk is a directory listing, and this controller is not the
-  /// place that owns it.
-  Future<bool> pull(String label) async {
-    if (isPulling) return false;
+  /// Returns true only when all of them landed. The caller re-reads the disk on
+  /// true rather than being handed a list: what is downloaded is a directory
+  /// listing, and this controller is not the place that owns it.
+  Future<bool> pull(List<String> specs, {required String label}) async {
+    if (isPulling || specs.isEmpty) return false;
     pulling = label;
     progress = null;
     error = null;
+    _cancelled = false;
     _notify();
+    for (final (index, spec) in specs.indexed) {
+      final ok = await _pullOne(spec, index, specs.length);
+      if (!ok) {
+        pulling = null;
+        progress = null;
+        _notify();
+        return false;
+      }
+    }
+    pulling = null;
+    progress = null;
+    _notify();
+    return true;
+  }
+
+  Future<bool> _pullOne(String spec, int index, int count) async {
     try {
-      _process = await _cli.start(['pull', label]);
+      _process = await _cli.start(['pull', spec]);
     } on GridCliMissing catch (missing) {
-      pulling = null;
       error = '$missing';
-      _notify();
       return false;
     }
     final process = _process!;
@@ -133,7 +136,7 @@ class ModelPullController extends ChangeNotifier {
       for (final segment in chunk.split('\r').reversed) {
         final parsed = PullProgress.parse(segment);
         if (parsed == null) continue;
-        progress = parsed;
+        progress = parsed.inFile(index, count);
         _notify();
         break;
       }
@@ -147,23 +150,29 @@ class ModelPullController extends ChangeNotifier {
     await bar.cancel();
     await out.cancel();
     _process = null;
-    pulling = null;
-    progress = null;
-    if (exitCode != 0) {
-      error = tail.isEmpty
-          ? 'The download did not finish (exit $exitCode).'
-          : tail.last;
-      _notify();
-      return false;
-    }
-    _notify();
-    return true;
+    if (exitCode == 0) return true;
+    // A cancel is the user's decision, not a failure to report back at them.
+    error = _cancelled
+        ? null
+        : (tail.isEmpty
+              ? 'The download did not finish (exit $exitCode).'
+              : tail.last);
+    return false;
   }
 
-  /// Stop a download in progress. The CLI resumes a partial file on the next
-  /// attempt, so this loses time and not bytes.
+  /// Stop a download in progress.
+  ///
+  /// This loses time, not bytes: the CLI keeps a `.part` file and asks for the
+  /// rest with a Range header next time (`shared/models/download.py`).
   void cancel() {
+    _cancelled = true;
     _process?.kill();
+  }
+
+  void clearError() {
+    if (error == null) return;
+    error = null;
+    _notify();
   }
 
   void _notify() {

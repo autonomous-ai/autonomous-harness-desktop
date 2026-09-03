@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
 import '../api_providers.dart';
-import '../node_identity.dart';
 import '../share_controller.dart';
+import '../stored_keys.dart';
 import 'share_fields.dart';
 import 'share_form_parts.dart';
 
@@ -20,10 +21,14 @@ class ServeKeyForm extends StatefulWidget {
     super.key,
     required this.controller,
     required this.offers,
+    this.storedKinds,
   });
 
   final ShareController controller;
   final List<KeyProviderOffer> offers;
+
+  /// Injected by tests. Null reads `~/.grid/api_keys.toml`.
+  final Set<String>? storedKinds;
 
   @override
   State<ServeKeyForm> createState() => _ServeKeyFormState();
@@ -31,29 +36,58 @@ class ServeKeyForm extends StatefulWidget {
 
 class _ServeKeyFormState extends State<ServeKeyForm> {
   final _key = TextEditingController();
-  final _nodeName = TextEditingController(text: thisComputerName);
 
   late KeyProviderOffer _offer = widget.offers.first;
+  late final Set<String> _stored = widget.storedKinds ?? readStoredApiKinds();
 
-  /// Which models to advertise. Empty means every one the key can see, which is
-  /// the CLI's own default and the right one: a key that can serve five models
-  /// serving one of them is a choice, not a starting point.
-  final Set<String> _models = {};
+  /// The models the reader has switched **off**.
+  ///
+  /// Off rather than on, so "nothing chosen" means everything — which is both
+  /// the sensible default and the CLI's own: a key that can serve five models
+  /// serving one of them is a decision, not a starting point. It also keeps the
+  /// join argument empty in the common case rather than listing five names the
+  /// CLI would have found anyway.
+  final Set<String> _off = {};
+
+  bool _revealed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _key.addListener(_onEdited);
+  }
+
+  void _onEdited() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
+    _key.removeListener(_onEdited);
     _key.dispose();
-    _nodeName.dispose();
     super.dispose();
   }
+
+  bool get _hasStoredKey => _stored.contains(_offer.provider.kind);
+
+  bool get _ready => _key.text.trim().isNotEmpty || _hasStoredKey;
+
+  /// What to advertise: nothing when every model is on, which is the CLI's
+  /// zero-config default, else exactly the ones left on.
+  List<String> get _models => _off.isEmpty
+      ? const []
+      : [
+          for (final model in _offer.models)
+            if (!_off.contains(model.advertised)) model.advertised,
+        ];
 
   Future<void> _share() async {
     await widget.controller.startKey(
       kind: _offer.provider.kind,
       envVar: _offer.provider.envVar,
       apiKey: _key.text.trim(),
-      nodeName: _nodeName.text,
-      models: _models.toList(),
+      nodeName: '',
+      models: _models,
     );
   }
 
@@ -65,6 +99,8 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // One plate, with a rule inside it: the key and what it may serve are
+        // two halves of one decision, and two cards made them read as two.
         SharePlate(
           children: [
             if (widget.offers.length > 1) ...[
@@ -80,7 +116,7 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
                     _offer = widget.offers.firstWhere(
                       (offer) => offer.provider.label == label,
                     );
-                    _models.clear();
+                    _off.clear();
                   }),
                   enabled: !joining,
                 ),
@@ -89,69 +125,98 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
             ],
             ShareField(
               label: '${provider.label} API key',
-              child: ShareTextField(
-                controller: _key,
-                hint: provider.keyHint,
-                // Obscured because it is over somebody's shoulder that a key
-                // usually leaves a machine.
-                obscure: true,
+              child: ShareFieldSkin(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _key,
+                        // Hidden by default: a key usually leaves a machine
+                        // over somebody's shoulder. Revealable, because a
+                        // mistyped one fails minutes later with a vendor error
+                        // nobody can connect back to a typo.
+                        obscureText: !_revealed,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          color: SharePalette.ink,
+                        ),
+                        cursorColor: SharePalette.accent,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          hintText: _hasStoredKey
+                              ? 'Using the key already on this computer'
+                              : provider.keyHint,
+                          hintStyle: TextStyle(
+                            fontSize: 13.5,
+                            color: SharePalette.helper,
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() => _revealed = !_revealed),
+                      icon: Icon(
+                        _revealed ? LucideIcons.eyeOff300 : LucideIcons.eye300,
+                        size: 15,
+                      ),
+                      color: SharePalette.eyebrow,
+                      tooltip: _revealed ? 'Hide' : 'Show',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 26,
+                        height: 26,
+                      ),
+                      splashRadius: 14,
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    // True, and worth saying plainly: the key is handed to the
-                    // CLI in the process environment, never on a command line
-                    // and never to this app's own servers.
-                    'The key goes to the Grid CLI on this computer and stays '
-                    'here. Leave it blank to reuse the one already stored.',
-                    style: ShareType.note,
-                  ),
-                ),
-                if (provider.keyHelpUrl != null)
-                  TextButton(
-                    onPressed: () => launchUrl(Uri.parse(provider.keyHelpUrl!)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: SharePalette.accent,
-                      minimumSize: const Size(0, 26),
-                      textStyle: const TextStyle(fontSize: 12),
+            if (provider.keyHelpUrl != null) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => launchUrl(Uri.parse(provider.keyHelpUrl!)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: SharePalette.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    minimumSize: const Size(0, 26),
+                    textStyle: TextStyle(
+                      fontSize: 12,
+                      fontWeight: grid.AppFont.semibold,
                     ),
-                    child: const Text('Get a key →'),
                   ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            ShareField(
-              label: "This computer's name",
-              child: ShareTextField(controller: _nodeName),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        SharePlate(
-          children: [
-            Text('Models to offer', style: ShareType.fieldLabel),
+                  child: const Text('Where to find your key →'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Divider(height: 1, color: SharePalette.innerRule),
+            const SizedBox(height: 16),
+            Text("Models you're willing to share", style: ShareType.fieldLabel),
             const SizedBox(height: 3),
             Text(
-              _models.isEmpty
-                  ? 'Everything this key can reach.'
-                  : '${_models.length} of ${_offer.models.length} chosen.',
+              'Only the ones left on get offered to the grid.',
               style: ShareType.note,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 11),
             Wrap(
               spacing: 7,
               runSpacing: 7,
               children: [
                 for (final model in _offer.models)
-                  _ModelChip(
+                  _ModelToggle(
+                    // The state is IN the label, not only in the colour: a row
+                    // of chips where the difference is a tint asks the reader
+                    // to compare two greys to find out what they picked.
                     label: model.vendorName,
-                    selected: _models.contains(model.advertised),
+                    on: !_off.contains(model.advertised),
                     onTap: () => setState(() {
-                      if (!_models.remove(model.advertised)) {
-                        _models.add(model.advertised);
+                      if (!_off.remove(model.advertised)) {
+                        _off.add(model.advertised);
                       }
                     }),
                   ),
@@ -161,10 +226,18 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
         ),
         const SizedBox(height: 18),
         StartRow(
-          label: 'Start sharing',
-          note: 'What the grid uses is billed to your ${provider.label} '
-              'account.',
-          onPressed: joining ? null : _share,
+          label: 'Start cloud engine',
+          note: switch ((_ready, _hasStoredKey && _key.text.trim().isEmpty)) {
+            (false, _) =>
+              'Enter a valid API key to start sharing cloud models.',
+            // Honest about which key is about to be used, which Grid's own form
+            // cannot say because it never looks.
+            (_, true) => 'Reusing the ${provider.label} key already on this '
+                'computer.',
+            _ => 'What the grid uses is billed to your ${provider.label} '
+                'account.',
+          },
+          onPressed: _ready && !joining ? _share : null,
           busy: joining,
         ),
       ],
@@ -172,15 +245,16 @@ class _ServeKeyFormState extends State<ServeKeyForm> {
   }
 }
 
-class _ModelChip extends StatelessWidget {
-  const _ModelChip({
+/// One model, and whether it is on offer.
+class _ModelToggle extends StatelessWidget {
+  const _ModelToggle({
     required this.label,
-    required this.selected,
+    required this.on,
     required this.onTap,
   });
 
   final String label;
-  final bool selected;
+  final bool on;
   final VoidCallback onTap;
 
   @override
@@ -190,21 +264,22 @@ class _ModelChip extends StatelessWidget {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
           decoration: BoxDecoration(
-            color: selected ? SharePalette.accentRing : SharePalette.fieldFill,
+            color: on ? SharePalette.accentRing : SharePalette.fieldFill,
             border: Border.all(
-              color: selected ? SharePalette.accent : SharePalette.fieldRim,
+              color: on ? SharePalette.accent : SharePalette.fieldRim,
             ),
             borderRadius: BorderRadius.circular(ShareMetrics.fieldRadius),
           ),
           child: Text(
-            label,
+            '$label · ${on ? 'on' : 'off'}',
             style: TextStyle(
               fontSize: 12,
-              fontWeight: selected ? grid.AppFont.semibold : FontWeight.w400,
-              color: selected ? SharePalette.accent : SharePalette.labelInk,
+              fontWeight: on ? grid.AppFont.semibold : FontWeight.w400,
+              color: on ? SharePalette.accent : SharePalette.helper,
             ),
           ),
         ),

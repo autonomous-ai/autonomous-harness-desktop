@@ -176,6 +176,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   anything this app remembers — and closing Harness does not stop it, which the rail's footnote
   says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
   is the page's own palette, copied value-for-value from Grid — keep the two in step.
+  **Manage models is the one part of this feature that is NOT the Grid CLI**: the shelf is
+  `POST /v1/grid/catalog` on the control plane (`GridApiClient.catalog`/`catalogDetail`, the same
+  bearer as the Grid tab), because `grid catalog` answers with two or three picks ranked for THIS
+  machine and that is far too short to browse. Both are shown, labelled apart. A version's
+  `pull_spec` names only the FIRST file, so a split GGUF is downloaded through every URL in `urls`
+  (`share/pull_spec.dart`) — pulling the named one alone leaves a model that will not load.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
