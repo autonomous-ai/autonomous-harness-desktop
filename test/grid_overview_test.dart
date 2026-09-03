@@ -25,7 +25,7 @@ Map<String, dynamic> _node({
   'max_concurrency': concurrency,
   'plan_type': planType,
   'models': ['gemma-4-31b-it'],
-  if (answered != null) 'answered': answered,
+  'answered': ?answered,
 };
 
 GridOverview _overview({

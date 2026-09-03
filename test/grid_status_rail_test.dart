@@ -8,6 +8,7 @@ import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
+import 'package:harness/widgets/status_rail/status_panels.dart';
 
 class _MemoryStore implements LocalKeyValueStore {
   final Map<String, String> values = {};
@@ -182,6 +183,55 @@ void main() {
 
     expect(find.text('33'), findsNothing);
     expect(find.text('8'), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('the panel is a card, not the window', (tester) async {
+    // The bug this pins: an OverlayEntry whose `Positioned` has no offsets is a
+    // NON-positioned overlay child, and those are laid out with tight
+    // constraints — the panel then covered the whole window and its own width
+    // was ignored.
+    tester.view.physicalSize = const Size(1000, 460);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = await _pump(tester);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pumpAndSettle();
+
+    final panel = tester.getRect(find.byType(StatusPanel));
+    expect(panel.width, 300);
+    expect(panel.height, lessThan(200));
+    // It opens UPWARD: there is nothing below a strip on the window's bottom
+    // edge.
+    final rail = tester.getRect(find.byType(GridStatusRail));
+    expect(panel.bottom, lessThanOrEqualTo(rail.top + 1));
+    controller.dispose();
+  });
+
+  testWidgets('the panel stays open while the pointer is on it', (
+    tester,
+  ) async {
+    // Otherwise a list of eight machines can be looked at but never scrolled.
+    final controller = await _pump(tester);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatusPanel), findsOneWidget);
+
+    await gesture.moveTo(tester.getCenter(find.text('Requests at once')));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatusPanel), findsOneWidget);
+
+    await gesture.moveTo(const Offset(500, 20));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatusPanel), findsNothing);
     controller.dispose();
   });
 

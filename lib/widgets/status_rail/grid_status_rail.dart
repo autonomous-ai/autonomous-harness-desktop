@@ -285,6 +285,8 @@ class _Count extends StatelessWidget {
     return _Hoverable(
       semantics: '$value $semantics',
       panel: panel,
+      // At the far end of the rail, so it hangs from its right edge.
+      alignEnd: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -316,6 +318,7 @@ class _Hoverable extends StatefulWidget {
     required this.child,
     required this.semantics,
     required this.panel,
+    this.alignEnd = false,
   });
 
   final Widget child;
@@ -325,6 +328,12 @@ class _Hoverable extends StatefulWidget {
   /// simply inert.
   final Widget Function()? panel;
 
+  /// Hang the panel from the figure's RIGHT edge instead of its left.
+  ///
+  /// The counts sit at the far end of the rail, and a 300px card opening
+  /// rightward from them is a card mostly off the screen.
+  final bool alignEnd;
+
   @override
   State<_Hoverable> createState() => _HoverableState();
 }
@@ -333,11 +342,13 @@ class _HoverableState extends State<_Hoverable> {
   final _link = LayerLink();
   OverlayEntry? _entry;
   bool _pinned = false;
-  bool _hovering = false;
+  bool _overFigure = false;
+  bool _overPanel = false;
 
   @override
   void dispose() {
     _entry?.remove();
+    _entry = null;
     super.dispose();
   }
 
@@ -345,19 +356,44 @@ class _HoverableState extends State<_Hoverable> {
     if (_entry != null || widget.panel == null) return;
     _entry = OverlayEntry(
       builder: (context) => Positioned(
+        // ⚠️ `left`/`top` MUST be given, even though the follower does the real
+        // positioning. A `Positioned` with every offset null is a *non*-
+        // positioned child, and the overlay lays those out with TIGHT
+        // constraints — which is a panel stretched over the whole window, with
+        // its own width ignored. That is exactly what this looked like before.
+        left: 0,
+        top: 0,
         child: CompositedTransformFollower(
           link: _link,
-          // Anchored to the figure's top-left and lifted by the panel's own
-          // height — it opens UPWARD, because there is nothing below a strip on
-          // the bottom edge of the window.
-          targetAnchor: Alignment.topLeft,
-          followerAnchor: Alignment.bottomLeft,
-          offset: const Offset(-10, -8),
-          child: widget.panel!(),
+          // Anchored to the figure's top edge and hung from the panel's bottom:
+          // it opens UPWARD, because there is nothing below a strip that sits
+          // on the bottom edge of the window.
+          targetAnchor: widget.alignEnd
+              ? Alignment.topRight
+              : Alignment.topLeft,
+          followerAnchor: widget.alignEnd
+              ? Alignment.bottomRight
+              : Alignment.bottomLeft,
+          offset: Offset(widget.alignEnd ? 10 : -10, -6),
+          showWhenUnlinked: false,
+          // The panel keeps itself open. Without this the pointer leaving the
+          // figure to reach the panel closes the thing it was reaching for, so
+          // a list of eight machines could be looked at but never scrolled.
+          child: MouseRegion(
+            onEnter: (_) {
+              _overPanel = true;
+              _sync();
+            },
+            onExit: (_) {
+              _overPanel = false;
+              _sync();
+            },
+            child: widget.panel!(),
+          ),
         ),
       ),
     );
-    Overlay.of(context).insert(_entry!);
+    Overlay.of(context, rootOverlay: true).insert(_entry!);
   }
 
   void _hide() {
@@ -366,7 +402,8 @@ class _HoverableState extends State<_Hoverable> {
   }
 
   void _sync() {
-    if (_hovering || _pinned) {
+    if (!mounted) return;
+    if (_overFigure || _overPanel || _pinned) {
       _show();
     } else {
       _hide();
@@ -385,20 +422,20 @@ class _HoverableState extends State<_Hoverable> {
               ? SystemMouseCursors.basic
               : SystemMouseCursors.click,
           onEnter: (_) {
-            _hovering = true;
+            _overFigure = true;
             _sync();
           },
           onExit: (_) {
-            _hovering = false;
+            _overFigure = false;
             _sync();
           },
           child: GestureDetector(
             onTap: widget.panel == null
                 ? null
-                : () => setState(() {
+                : () {
                     _pinned = !_pinned;
                     _sync();
-                  }),
+                  },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               child: widget.child,
