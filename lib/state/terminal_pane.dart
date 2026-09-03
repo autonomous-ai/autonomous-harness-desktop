@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart';
+
 import '../terminal/terminal_session.dart';
 
 /// One tile in the terminal grid.
@@ -29,6 +31,22 @@ class TerminalPane {
   String? agentId;
 
   TerminalSession? session;
+
+  /// The grid cell's widget key — a GlobalKey, and measured to be necessary.
+  ///
+  /// The layout puts cells in DIFFERENT parents depending on how many there
+  /// are: with four, two live in the top Row and two in the bottom one. A
+  /// ValueKey only preserves an element within one parent, so any move across
+  /// that boundary rebuilds the cell — remounting TerminalPanel, taking a fresh
+  /// layout pass, and paying a resize round trip to tmux.
+  ///
+  /// Probed on the real arrangement before this existed: swapping two cells
+  /// across the Rows remounted 2 of them, and simply GROWING from two panes to
+  /// three remounted all 3 — so the flash was already there, on every add,
+  /// before reordering was a feature. With a GlobalKey the same swap remounts 0.
+  ///
+  /// Lives on the pane so its lifetime is the tile's, exactly like [id].
+  final GlobalKey cellKey = GlobalKey();
 
   /// Whether this tile shows the composer textbox under its terminal.
   ///

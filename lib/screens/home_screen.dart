@@ -165,6 +165,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ShortcutAction.previousAgent: () => _stepAgent(-1),
               ShortcutAction.focusNextPane: () => _stepPane(1),
               ShortcutAction.focusPreviousPane: () => _stepPane(-1),
+              ShortcutAction.movePaneForward: () => notifier.movePaneBy(1),
+              ShortcutAction.movePaneBackward: () => notifier.movePaneBy(-1),
+
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
@@ -183,84 +186,95 @@ class _HomeScreenState extends State<HomeScreen> {
               // Not the theme's: that one is still the old terminal palette, and it
               // is what showed through the seam above.
               backgroundColor: grid.AppPalette.windowBg,
-              body: Stack(
+              body: Column(
                 children: [
-                  Positioned.fill(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final defaultWidth = (constraints.maxWidth * 0.18)
-                            .clamp(252.0, 300.0)
-                            .toDouble();
-                        final minWidth = 220.0;
-                        final maxWidth = (constraints.maxWidth * 0.5)
-                            .clamp(minWidth, 520.0)
-                            .toDouble();
-                        final railWidth = (_railWidth ?? defaultWidth).clamp(
-                          minWidth,
-                          maxWidth,
-                        );
-                        return Row(
-                          children: [
-                            _RailFold(
-                              notifier: notifier,
-                              railKey: _railKey,
-                              collapsed: _collapsed,
-                              wideWidth: railWidth,
-                              onCollapse: () =>
-                                  setState(() => _collapsed = true),
-                              onExpand: () =>
-                                  setState(() => _collapsed = false),
+                  // The window's own strip, above the rail AND the grid. It
+                  // exists so the content below it starts clear of the
+                  // transparent title bar — see HarnessTopBar, which explains
+                  // why anything drawn up there cannot be dragged by Flutter.
+                  const HarnessTopBar(),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final defaultWidth = (constraints.maxWidth * 0.18)
+                                  .clamp(252.0, 300.0)
+                                  .toDouble();
+                              final minWidth = 220.0;
+                              final maxWidth = (constraints.maxWidth * 0.5)
+                                  .clamp(minWidth, 520.0)
+                                  .toDouble();
+                              final railWidth = (_railWidth ?? defaultWidth)
+                                  .clamp(minWidth, maxWidth);
+                              return Row(
+                                children: [
+                                  _RailFold(
+                                    notifier: notifier,
+                                    railKey: _railKey,
+                                    collapsed: _collapsed,
+                                    wideWidth: railWidth,
+                                    onCollapse: () =>
+                                        setState(() => _collapsed = true),
+                                    onExpand: () =>
+                                        setState(() => _collapsed = false),
+                                  ),
+                                  // Only the full rail can be dragged wider. Folded, the
+                                  // width is the fold's to decide, and a handle there
+                                  // would offer a resize that snaps back.
+                                  if (_collapsed)
+                                    const _RailSeam()
+                                  else
+                                    _ResizeHandle(
+                                      onDrag: (dx) => setState(() {
+                                        // Accumulate against the STATE field, not the
+                                        // `railWidth` local above: that local is a
+                                        // snapshot from the last completed rebuild, and
+                                        // several drag-update events can fire before
+                                        // Flutter gets around to rebuilding (routine
+                                        // under fast mouse movement). Basing each step
+                                        // on the same stale snapshot silently drops all
+                                        // but the last delta in that batch, which is
+                                        // exactly the lag/drift this fixes.
+                                        final current =
+                                            _railWidth ?? defaultWidth;
+                                        _railWidth = (current + dx).clamp(
+                                          minWidth,
+                                          maxWidth,
+                                        );
+                                      }),
+                                    ),
+                                  Expanded(child: PaneGrid(notifier: notifier)),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                        if (notifier.lastError != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            child: _ErrorStrip(
+                              message: notifier.lastError!,
+                              onRetry: notifier.retryMachines,
                             ),
-                            // Only the full rail can be dragged wider. Folded, the
-                            // width is the fold's to decide, and a handle there
-                            // would offer a resize that snaps back.
-                            if (_collapsed)
-                              const _RailSeam()
-                            else
-                              _ResizeHandle(
-                                onDrag: (dx) => setState(() {
-                                  // Accumulate against the STATE field, not the
-                                  // `railWidth` local above: that local is a
-                                  // snapshot from the last completed rebuild, and
-                                  // several drag-update events can fire before
-                                  // Flutter gets around to rebuilding (routine
-                                  // under fast mouse movement). Basing each step
-                                  // on the same stale snapshot silently drops all
-                                  // but the last delta in that batch, which is
-                                  // exactly the lag/drift this fixes.
-                                  final current = _railWidth ?? defaultWidth;
-                                  _railWidth = (current + dx).clamp(
-                                    minWidth,
-                                    maxWidth,
-                                  );
-                                }),
-                              ),
-                            Expanded(child: PaneGrid(notifier: notifier)),
-                          ],
-                        );
-                      },
+                          )
+                        // One banner at a time, and a machine this app cannot
+                        // reach outranks a grid choice that has not been applied
+                        // yet — the second is not actionable while the first is
+                        // true.
+                        else
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            child: GridRetargetBanner(notifier: notifier),
+                          ),
+                      ],
                     ),
                   ),
-                  if (notifier.lastError != null)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 0,
-                      child: _ErrorStrip(
-                        message: notifier.lastError!,
-                        onRetry: notifier.retryMachines,
-                      ),
-                    )
-                  // One banner at a time, and a machine this app cannot reach
-                  // outranks a grid choice that has not been applied yet — the
-                  // second is not actionable while the first is true.
-                  else
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 0,
-                      child: GridRetargetBanner(notifier: notifier),
-                    ),
                 ],
               ),
             ),

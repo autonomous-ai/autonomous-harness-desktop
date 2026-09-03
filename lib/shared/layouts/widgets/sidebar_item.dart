@@ -34,6 +34,8 @@ class SidebarItem extends StatefulWidget {
     super.key,
     required this.label,
     required this.onTap,
+    this.onDoubleTap,
+
     this.icon,
     this.leading,
     this.dimmed = false,
@@ -50,6 +52,11 @@ class SidebarItem extends StatefulWidget {
 
   final String label;
   final VoidCallback onTap;
+
+  /// A second way in, for rows that have something to open on a double click —
+  /// renaming, in the rail's case. Null leaves the row single-click only.
+  final VoidCallback? onDoubleTap;
+
   final IconData? icon;
 
   /// A mark drawn INSTEAD of [icon] — a vendor's logo, a status-coloured glyph,
@@ -264,7 +271,9 @@ class _SidebarRow extends StatelessWidget {
               child: InkWell(
                 borderRadius: radius,
                 onTap: item.enabled ? item.onTap : null,
+                onDoubleTap: item.enabled ? item.onDoubleTap : null,
                 onTapDown: onTapDown,
+
                 onTapUp: onTapUp,
                 onTapCancel: onTapCancel,
                 child: SizedBox(

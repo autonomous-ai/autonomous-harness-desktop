@@ -39,7 +39,8 @@ class PaneGrid extends StatelessWidget {
         final cells = <Widget>[
           for (final pane in panes)
             _PaneCell(
-              key: ValueKey(pane.id),
+              key: pane.cellKey,
+
               notifier: notifier,
               pane: pane,
               dragging: dragging,
@@ -167,11 +168,33 @@ class _PaneCell extends StatelessWidget {
             width: 1,
           ),
         ),
-        child: _DropZone(
-          notifier: notifier,
-          paneId: pane.id,
-          dragging: dragging,
-          child: _PaneContent(notifier: notifier, pane: pane, single: _single),
+        // Keeps a terminal's constant repainting inside its own layer instead
+        // of dirtying the whole grid. No key: nothing reads this boundary, it
+        // only has to exist.
+        child: RepaintBoundary(
+          child: _SwapZone(
+            notifier: notifier,
+            paneId: pane.id,
+            child: _DropZone(
+              notifier: notifier,
+              paneId: pane.id,
+              dragging: dragging,
+              child: ValueListenableBuilder<PaneDragRef?>(
+                valueListenable: paneDragging,
+                // The tile being carried fades where it sits, so the grid shows
+                // where it came FROM while the ghost shows where it is going.
+                builder: (context, inFlight, child) => Opacity(
+                  opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                  child: child,
+                ),
+                child: _PaneContent(
+                  notifier: notifier,
+                  pane: pane,
+                  single: _single,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -288,19 +311,107 @@ class _PaneContent extends StatelessWidget {
       );
     }
 
-    return TerminalPanel(
-      notifier: notifier,
-      session: session,
-      focused: notifier.isPaneFocused(pane.id),
-      composerVisible: pane.composerVisible,
-      onToggleComposer: () => notifier.toggleComposer(pane.id),
-      onClose: single ? null : close,
-      onRendererFocus: () => notifier.focusPane(pane.id),
+    // LayoutBuilder ONLY to learn this tile's size, for the drag ghost to be
+    // cut to. Asking the render object instead — `key.currentContext.size` —
+    // is what Flutter refuses outright during build: "the size getter should
+    // only be called from paint callbacks or interaction event handlers", and
+    // it does not warn, it throws, so every pane became a red error box.
+    return LayoutBuilder(
+      builder: (context, constraints) => TerminalPanel(
+        notifier: notifier,
+        session: session,
+        focused: notifier.isPaneFocused(pane.id),
+        composerVisible: pane.composerVisible,
+        onToggleComposer: () => notifier.toggleComposer(pane.id),
+        onClose: single ? null : close,
+        onRendererFocus: () => notifier.focusPane(pane.id),
+        // Nothing to trade places with while it is the only tile.
+        paneDrag: single
+            ? null
+            : PaneDragHandle(
+                ref: PaneDragRef(paneId: pane.id),
+                size: constraints.biggest,
+              ),
+      ),
+    );
+  }
+}
+
+/// Where a dragged pane may be dropped to trade places with this one.
+///
+/// A sibling of [_DropZone] rather than a branch inside it: they are live at
+/// different times and mean different things at the same pixel — a rail row
+/// landing here REPLACES what this tile shows, a pane landing here SWAPS the
+/// two. `DragTarget<T>` keeps them apart by generic, so neither has to ask what
+/// kind of drag is in flight.
+class _SwapZone extends StatelessWidget {
+  const _SwapZone({
+    required this.notifier,
+    required this.paneId,
+    required this.child,
+  });
+
+  final AppNotifier notifier;
+  final int paneId;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return ValueListenableBuilder<PaneDragRef?>(
+      valueListenable: paneDragging,
+      builder: (context, dragging, _) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            Positioned.fill(
+              child: IgnorePointer(
+                // Off entirely unless a pane is in flight, so the terminal
+                // underneath keeps every click the rest of the time.
+                ignoring: dragging == null || dragging.paneId == paneId,
+                child: DragTarget<PaneDragRef>(
+                  onAcceptWithDetails: (details) =>
+                      notifier.reorderPane(details.data.paneId, paneId),
+                  builder: (context, candidate, _) => candidate.isEmpty
+                      ? const SizedBox.expand()
+                      : Container(
+                          color: AppColors.accent.withValues(alpha: 0.16),
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: grid.AppPalette.panelBg,
+                                border: Border.all(color: AppColors.accent),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Swap with this pane',
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontFamily: AppFonts.sans,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
 /// A full-screen guide, but only where one fits.
+
 ///
 /// The link and join screens are fixed-width cards written for the whole
 /// window. In a quarter tile they would overflow rather than shrink, so a tile

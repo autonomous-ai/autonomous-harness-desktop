@@ -49,6 +49,9 @@ enum ShortcutAction {
   previousAgent,
   focusPreviousPane,
   focusNextPane,
+  movePaneBackward,
+  movePaneForward,
+
   closePane,
   newAgent,
   reload,
@@ -137,8 +140,58 @@ const List<AppShortcut> kAppShortcuts = [
     label: 'Focus the next pane',
     group: ShortcutGroup.panes,
   ),
+  // ⌃⇥ / ⇧⌃⇥ — the same pair every tabbed app uses, and the one people reach
+  // for without being told, which is why it is here despite the note at the
+  // top of this file warning that Ctrl belongs to the terminal.
+  //
+  // It is safe now because the terminal is made to let exactly this chord go
+  // past it (see terminal_view.dart): Ctrl+Tab is not a sequence any shell or
+  // tmux binding uses, so nothing downstream loses a key by us taking it.
+  // ⌘[ / ⌘] stay as the macOS-native way to the same two actions.
+  AppShortcut(
+    action: ShortcutAction.focusNextPane,
+    activator: SingleActivator(LogicalKeyboardKey.tab, control: true),
+    label: 'Focus the next pane',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPreviousPane,
+    activator: SingleActivator(
+      LogicalKeyboardKey.tab,
+      control: true,
+      shift: true,
+    ),
+    label: 'Focus the previous pane',
+    group: ShortcutGroup.panes,
+  ),
+
+  AppShortcut(
+    action: ShortcutAction.movePaneBackward,
+    // The keyboard twin of dragging a pane's header. ⌘[ / ⌘] already focus a
+    // pane and ⇧⌘[ / ⇧⌘] already change agent, so this is the third member of
+    // the same family — and ⌘⌥ is the one modifier pair still free (see the
+    // note at the top of this file about why ⌥ alone is not).
+    activator: SingleActivator(
+      LogicalKeyboardKey.bracketLeft,
+      meta: true,
+      alt: true,
+    ),
+    label: 'Move pane earlier',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneForward,
+    activator: SingleActivator(
+      LogicalKeyboardKey.bracketRight,
+      meta: true,
+      alt: true,
+    ),
+    label: 'Move pane later',
+    group: ShortcutGroup.panes,
+  ),
   AppShortcut(
     action: ShortcutAction.closePane,
+
     // Close the pane, and — when the last one is gone — the window, which is
     // what ⌘W means everywhere else on this OS.
     activator: SingleActivator(LogicalKeyboardKey.keyW, meta: true),

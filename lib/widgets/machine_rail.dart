@@ -14,12 +14,12 @@ import '../shared/widgets/app_menu.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
 import 'agent_drag.dart';
+import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
 import 'engine_identity.dart';
 import 'grid_selector.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
-import 'window_chrome.dart';
 
 class MachineRail extends StatefulWidget {
   final AppNotifier notifier;
@@ -103,76 +103,77 @@ class MachineRailState extends State<MachineRail> {
             // capitals over a permanently-bordered search box — a dev-tool
             // caption and a control nobody asked for, costing 80px before the
             // first row.
-            // The head is also the window's drag handle — the title bar is
-            // hidden (see configureDesktopWindow) — and on macOS it leaves
-            // room above the wordmark for the traffic lights, as Grid's
-            // sidebar does. No rule under it: Grid draws none, and a rule here
-            // would sit 32px below the pane header's and read as a mistake.
+            // The head is also a window drag handle — the title bar is hidden
+            // (see configureDesktopWindow). No rule under it: Grid draws none,
+            // and a rule here would sit below the pane header's and read as a
+            // mistake.
+            //
+            // No top inset for the traffic lights any more: HarnessTopBar sits
+            // above the whole window and holds that row now, so keeping one
+            // here pushed the wordmark down twice.
+
             DragToMoveArea(
-              child: Padding(
-                padding: EdgeInsets.only(top: railTopInset),
-                child: SizedBox(
-                  // The same 46px strip the terminal panes draw, so the wordmark
-                  // and a pane's title sit on one baseline.
-                  height: _headerHeight,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Harness',
-                            style: TextStyle(
-                              color: grid.AppPalette.textPrimary,
-                              fontSize: 17,
-                              // Semibold, not bold. A wordmark at 17pt already
-                              // out-ranks everything below it by size alone.
-                              fontWeight: grid.AppFont.semibold,
-                              letterSpacing: 0.1,
-                            ),
+              child: SizedBox(
+                // The same 46px strip the terminal panes draw, so the wordmark
+                // and a pane's title sit on one baseline.
+                height: _headerHeight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Harness',
+                          style: TextStyle(
+                            color: grid.AppPalette.textPrimary,
+                            fontSize: 17,
+                            // Semibold, not bold. A wordmark at 17pt already
+                            // out-ranks everything below it by size alone.
+                            fontWeight: grid.AppFont.semibold,
+                            letterSpacing: 0.1,
                           ),
                         ),
-                        AppIconButton(
-                          icon: _searching
-                              ? LucideIcons.searchX300
-                              : LucideIcons.search300,
-                          size: 18,
-                          tooltip: withShortcutHint(
-                            'Filter machines and agents',
-                            ShortcutAction.filterAgents,
-                          ),
-                          color: _searching
-                              ? grid.AppPalette.accentOnSurface
-                              : null,
-                          onPressed: () => setState(() {
-                            _searching = !_searching;
-                            if (!_searching) _query = '';
-                          }),
+                      ),
+                      AppIconButton(
+                        icon: _searching
+                            ? LucideIcons.searchX300
+                            : LucideIcons.search300,
+                        size: 18,
+                        tooltip: withShortcutHint(
+                          'Filter machines and agents',
+                          ShortcutAction.filterAgents,
                         ),
+                        color: _searching
+                            ? grid.AppPalette.accentOnSurface
+                            : null,
+                        onPressed: () => setState(() {
+                          _searching = !_searching;
+                          if (!_searching) _query = '';
+                        }),
+                      ),
+                      const SizedBox(width: 2),
+                      AppIconButton(
+                        icon: LucideIcons.refreshCw300,
+                        size: 18,
+                        tooltip: withShortcutHint(
+                          'Reload machines',
+                          ShortcutAction.reload,
+                        ),
+                        onPressed: widget.notifier.retryMachines,
+                      ),
+                      if (widget.onCollapse != null) ...[
                         const SizedBox(width: 2),
                         AppIconButton(
-                          icon: LucideIcons.refreshCw300,
+                          icon: LucideIcons.panelLeft300,
                           size: 18,
                           tooltip: withShortcutHint(
-                            'Reload machines',
-                            ShortcutAction.reload,
+                            'Collapse sidebar',
+                            ShortcutAction.toggleRail,
                           ),
-                          onPressed: widget.notifier.retryMachines,
+                          onPressed: widget.onCollapse!,
                         ),
-                        if (widget.onCollapse != null) ...[
-                          const SizedBox(width: 2),
-                          AppIconButton(
-                            icon: LucideIcons.panelLeft300,
-                            size: 18,
-                            tooltip: withShortcutHint(
-                              'Collapse sidebar',
-                              ShortcutAction.toggleRail,
-                            ),
-                            onPressed: widget.onCollapse!,
-                          ),
-                        ],
                       ],
-                    ),
+                    ],
                   ),
                 ),
               ),
@@ -377,9 +378,8 @@ class _MachineNodeState extends State<_MachineNode> {
     if (confirmed != true || !mounted) return;
     final error = await notifier.deleteMachine(machine.machineId);
     if (error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
     }
   }
 
@@ -697,79 +697,14 @@ class _AgentRowState extends State<_AgentRow> {
   int get depth => widget.depth;
   bool get hasChildren => widget.hasChildren;
 
-  Future<void> _showRenameDialog() async {
-    final controller = TextEditingController(text: agent.name);
-    String? error;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Edit name'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  style: const TextStyle(fontSize: 13.5),
-                  onSubmitted: (_) async {
-                    final result = await notifier.renameAgent(
-                      state.machine.machineId,
-                      agent.id,
-                      controller.text,
-                    );
-                    if (result == null) {
-                      if (dialogContext.mounted) {
-                        Navigator.of(dialogContext).pop();
-                      }
-                    } else {
-                      setDialogState(() => error = result);
-                    }
-                  },
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    error!,
-                    style: TextStyle(
-                      color: grid.AppPalette.dangerFill,
-                      fontFamily: grid.AppFont.sans,
-                      fontSize: 11.2,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel', style: TextStyle(fontSize: 13.5)),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final result = await notifier.renameAgent(
-                  state.machine.machineId,
-                  agent.id,
-                  controller.text,
-                );
-                if (result == null) {
-                  if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                } else {
-                  setDialogState(() => error = result);
-                }
-              },
-              child: const Text('Save', style: TextStyle(fontSize: 13.5)),
-            ),
-          ],
-        ),
-      ),
-    );
-    controller.dispose();
-  }
+  /// The row's own way into the shared dialog — see rename_agent_dialog.dart.
+  Future<void> _showRenameDialog() => showAgentRenameDialog(
+    context,
+    notifier,
+    state.machine.machineId,
+    agent.id,
+    agent.name,
+  );
 
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
@@ -801,9 +736,8 @@ class _AgentRowState extends State<_AgentRow> {
     if (confirmed != true || !mounted) return;
     final error = await notifier.deleteAgent(state.machine.machineId, agent.id);
     if (error != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
     }
   }
 
@@ -870,6 +804,10 @@ class _AgentRowState extends State<_AgentRow> {
           enabled: enabled,
           dimmed: !visuallyEnabled,
           onTap: () => notifier.selectAgent(state.machine.machineId, agent.id),
+          // The same "Edit name" the row's own menu opens — a double click is
+          // just the shorter way to it, and the place a hand reaches first.
+          onDoubleTap: _showRenameDialog,
+
           // No tooltip on a row that works. "Claude engine" only repeated what
           // the mark beside it already says, and it followed the pointer down
           // the whole list. A row that CANNOT be used keeps one, because then

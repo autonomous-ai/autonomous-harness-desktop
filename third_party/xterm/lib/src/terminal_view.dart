@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -504,6 +505,34 @@ class TerminalViewState extends State<TerminalView> {
     }
 
     if (key == null) {
+      return KeyEventResult.ignored;
+    }
+
+    // ⌘ IS THE APP'S MODIFIER, NEVER THE TERMINAL'S. No terminal emulator sends
+    // a Command chord to the pty — Terminal.app and iTerm both reserve it for
+    // themselves — but this fell through to keyInput() below, which is not even
+    // given `meta`, so ⌘] arrived as a bare bracketRight: it typed "]" into the
+    // shell AND returned handled, which stopped the chord from ever reaching
+    // the app's own Shortcuts above. That is one bug wearing two faces, and it
+    // ate every app shortcut whose base key has a terminal mapping — moving
+    // between panes, closing one, opening an agent, reloading.
+    //
+    // Returning `ignored` (not skipRemainingHandlers) is the point: the event
+    // keeps travelling UP the focus chain to those Shortcuts. xterm's own
+    // ⌘C/⌘V/⌘A are matched earlier, by the shortcut map, so they still work.
+    if ((defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS) &&
+        HardwareKeyboard.instance.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+
+    // ⌃⇥ IS THE APP'S, EVERYWHERE. Ctrl generally belongs to the terminal — it
+    // is how a shell gets ^C, ^D, ^Z — so this is a single named exception
+    // rather than a rule about Ctrl: no shell or tmux binding uses Ctrl+Tab,
+    // and it is the chord every tabbed app moves between views with, so the
+    // hand reaches for it here too. Without this the terminal answered it and
+    // the app's Shortcuts never saw the key.
+    if (key == TerminalKey.tab && HardwareKeyboard.instance.isControlPressed) {
       return KeyEventResult.ignored;
     }
 
