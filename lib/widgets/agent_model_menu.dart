@@ -22,6 +22,7 @@ import '../grid/grid_agent_override.dart';
 import '../grid/grid_models_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_menu.dart';
 import '../state/app_state.dart';
 
 /// The three states an agent can be in, as the header prints them.
@@ -98,33 +99,22 @@ List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
   return options;
 }
 
-/// The popup's rows for [state]: a standing note that picking restarts the agent, then
-/// [agentModelMenuOptions] turned into entries.
-///
-/// Split out of the widget's `State` so the two responsibilities stay apart: this is a pure
-/// "state in, entries out" function, while the `State` class only ever calls it and reacts to what
-/// comes back.
-List<PopupMenuEntry<String?>> _menuItems(GridModelsState state) {
-  return [
-    const PopupMenuItem<String?>(
-      enabled: false,
-      child: Text(
-        'Changing the model restarts the agent',
-        style: TextStyle(fontSize: 11),
-      ),
-    ),
-    const PopupMenuDivider(),
-    for (final option in agentModelMenuOptions(state))
-      PopupMenuItem<String?>(
-        value: option.value,
-        enabled: option.enabled,
-        child: Text(option.label),
-      ),
-  ];
-}
-
 /// The header's per-agent model control. Looks its own value up at build time — see the library doc
 /// for why it takes no `grid` parameter.
+///
+/// Built on [MenuAnchor], not a `PopupMenuButton`: a `PopupMenuButton`'s `itemBuilder` is a
+/// one-shot snapshot handed to `showMenu()` before `onOpened` even fires, so a menu opened on a
+/// network not yet loaded this session showed only "Own login"/"Auto" until closed and reopened —
+/// and right after switching grids could show the PREVIOUS grid's models under the new grid's name,
+/// since `gridModelsController` is a single global keyed by one network id. Wrapping the anchor in a
+/// `ListenableBuilder` on [gridModelsController] instead means the open panel's rows recompute on
+/// every `Idle → Loading → Ready/Failed` step — the same fix `ModelMenu` in
+/// `grid_selector_menus.dart` already applies for the sidebar's own model picker. That widget itself
+/// was not reusable here: it writes a pick straight to `gridSelectionStore` and has no "Own login"
+/// row (that choice lives on `GridMenu`, a NETWORK picker, one level up) — this control instead
+/// calls `AppNotifier.moveAgentToGrid` for one already-running agent and offers own login as a peer
+/// of Auto and every model. Reusing its rows ([AppMenuItem], [AppMenuDivider]) rather than its
+/// `ModelMenu` class keeps the same look without forcing an unrelated callback shape onto it.
 class AgentModelMenu extends StatefulWidget {
   const AgentModelMenu({
     super.key,
@@ -144,6 +134,8 @@ class AgentModelMenu extends StatefulWidget {
 }
 
 class _AgentModelMenuState extends State<AgentModelMenu> {
+  final _controller = MenuController();
+
   // True while a pick is in flight, so a second tap cannot fire a second restart on top of the
   // first one before the CLI has answered.
   bool _pending = false;
@@ -154,9 +146,6 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
     return ValueListenableBuilder<GridSelection>(
       valueListenable: gridSelectionStore,
       builder: (context, selection, _) {
-        final label = agentModelLabel(
-          agentGridOf(widget.notifier, widget.machineId, widget.agentId),
-        );
         final capable = kGridCapableEngines.contains(widget.engine);
         final enabled = capable && selection.hasGrid && !_pending;
         final tooltip = !capable
@@ -164,34 +153,79 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
             : !selection.hasGrid
             ? 'Pick a grid to change this agent\'s model'
             : 'Changing the model restarts the agent';
-        return Tooltip(
-          message: tooltip,
-          child: PopupMenuButton<String?>(
-            enabled: enabled,
-            tooltip: '',
-            padding: EdgeInsets.zero,
-            onOpened: () {
-              final networkId = selection.networkId;
-              if (networkId != null) {
-                gridModelsController.ensureLoadedFor(networkId);
-              }
-            },
-            itemBuilder: (context) => _menuItems(gridModelsController.state),
-            onSelected: (value) => unawaited(_apply(value)),
-            child: Opacity(
-              opacity: enabled ? 1 : 0.55,
-              child: _pending
-                  ? const SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(strokeWidth: 1.6),
-                    )
-                  : Text(label, style: grid.AppFont.codeStyle(color: grid.AppPalette.textFaint)),
-            ),
-          ),
+        // See the class doc: this is what keeps an ALREADY-OPEN menu's rows current as
+        // gridModelsController moves through its states, rather than freezing them at open time.
+        return ListenableBuilder(
+          listenable: gridModelsController,
+          builder: (context, _) {
+            final currentGrid = agentGridOf(
+              widget.notifier,
+              widget.machineId,
+              widget.agentId,
+            );
+            final label = agentModelLabel(currentGrid);
+            final currentValue = currentGrid == null
+                ? kOwnLoginModelOption
+                : currentGrid.model;
+            return Tooltip(
+              message: tooltip,
+              child: MenuAnchor(
+                controller: _controller,
+                onOpen: () {
+                  final networkId = selection.networkId;
+                  if (networkId != null) {
+                    gridModelsController.ensureLoadedFor(networkId);
+                  }
+                },
+                menuChildren: _rows(currentValue),
+                builder: (context, controller, _) => GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: enabled
+                      ? () => controller.isOpen ? controller.close() : controller.open()
+                      : null,
+                  child: Opacity(
+                    opacity: enabled ? 1 : 0.55,
+                    child: _pending
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.6),
+                          )
+                        : Text(
+                            label,
+                            style: grid.AppFont.codeStyle(color: grid.AppPalette.textFaint),
+                          ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
+  }
+
+  /// The panel's rows: a standing note that picking restarts the agent, then
+  /// [agentModelMenuOptions] turned into entries — a real, tappable [AppMenuItem] for each choice,
+  /// and a plain [_MenuNoteRow] in their place for the loading/failed placeholder, which exists to
+  /// be read rather than picked.
+  List<Widget> _rows(String? currentValue) {
+    return [
+      const _MenuNoteRow('Changing the model restarts the agent'),
+      const AppMenuDivider(),
+      for (final option in agentModelMenuOptions(gridModelsController.state))
+        if (option.enabled)
+          AppMenuItem(
+            label: option.label,
+            selected: option.value == currentValue,
+            onPressed: () {
+              _controller.close();
+              unawaited(_apply(option.value));
+            },
+          )
+        else
+          _MenuNoteRow(option.label),
+    ];
   }
 
   Future<void> _apply(String? value) async {
@@ -220,5 +254,47 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
     if (message != null && message != AppNotifier.agentVanished) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
+  }
+}
+
+/// A non-interactive row, laid out on the same column an [AppMenuItem]'s label starts on (its icon
+/// slot, empty, plus the gap that follows it) so it reads as part of the same list rather than an
+/// aside bolted onto it. Used for the standing "this restarts the agent" note and for the
+/// loading/failed placeholder [agentModelMenuOptions] returns in place of a pick.
+class _MenuNoteRow extends StatelessWidget {
+  const _MenuNoteRow(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    const metrics = AppMenuRowMetrics.compact;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      child: Padding(
+        padding: metrics.padding,
+        child: Row(
+          children: [
+            SizedBox(width: metrics.iconSize),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: grid.AppPalette.textFaint,
+                  fontFamily: grid.AppFont.sans,
+                  fontFamilyFallback: grid.AppFont.sansFallback,
+                  fontSize: metrics.noteSize,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

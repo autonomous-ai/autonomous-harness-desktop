@@ -84,6 +84,18 @@ class GridModelsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Test-only: sets [state] for [networkId] directly, without a real round trip through [refresh].
+  ///
+  /// A menu that watches this controller has to rebuild an ALREADY-OPEN panel as a real `refresh`
+  /// moves the state Idle → Loading → Ready/Failed — that live transition is exactly the thing a
+  /// widget test needs to drive deterministically, and faking a whole HTTP round trip is the wrong
+  /// tool for it.
+  @visibleForTesting
+  void debugSetState(String networkId, GridModelsState state) {
+    _networkId = networkId;
+    _set(state);
+  }
+
   @override
   void dispose() {
     _disposed = true;

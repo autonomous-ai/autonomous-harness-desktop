@@ -642,7 +642,10 @@ class _TerminalHeader extends StatelessWidget {
               notifier: notifier,
               machineId: session.machineId,
               agentId: session.agentId,
-              engine: session.engineId ?? '',
+              // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
+              // this ("$engine cannot use a grid"), and an empty string there reads with a leading
+              // space.
+              engine: session.engineId ?? 'this engine',
             ),
             const SizedBox(width: 6),
             if (session.status == TerminalSessionStatus.controlling)
