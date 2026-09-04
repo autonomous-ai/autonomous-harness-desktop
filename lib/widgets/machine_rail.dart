@@ -16,6 +16,7 @@ import '../state/app_state.dart';
 import 'agent_drag.dart';
 import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
+import 'grid_target_pill.dart';
 import 'engine_identity.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
@@ -336,6 +337,12 @@ class MachineRailState extends State<MachineRail> {
                         isFirst: index == 0,
                       ),
                     ),
+            ),
+            // Above the account pill, and only on the WIDE rail: a grid's name does not fit in
+            // 72px any more than a machine's does — see MachineRailMini for that judgement.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+              child: GridTargetPill(notifier: widget.notifier),
             ),
             AccountFooter(notifier: widget.notifier),
           ],

@@ -189,6 +189,8 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
                           )
                         : Text(
                             label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: grid.AppFont.codeStyle(color: grid.AppPalette.textFaint),
                           ),
                   ),
@@ -203,11 +205,11 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
 
   /// The panel's rows: a standing note that picking restarts the agent, then
   /// [agentModelMenuOptions] turned into entries — a real, tappable [AppMenuItem] for each choice,
-  /// and a plain [_MenuNoteRow] in their place for the loading/failed placeholder, which exists to
+  /// and a plain [AppMenuNote] in their place for the loading/failed placeholder, which exists to
   /// be read rather than picked.
   List<Widget> _rows(String? currentValue) {
     return [
-      const _MenuNoteRow('Changing the model restarts the agent'),
+      const AppMenuNote('Changing the model restarts this agent and resumes the conversation'),
       const AppMenuDivider(),
       for (final option in agentModelMenuOptions(gridModelsController.state))
         if (option.enabled)
@@ -220,7 +222,7 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
             },
           )
         else
-          _MenuNoteRow(option.label),
+          AppMenuNote(option.label),
     ];
   }
 
@@ -250,47 +252,5 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
     if (message != null && message != AppNotifier.agentVanished) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
-  }
-}
-
-/// A non-interactive row, laid out on the same column an [AppMenuItem]'s label starts on (its icon
-/// slot, empty, plus the gap that follows it) so it reads as part of the same list rather than an
-/// aside bolted onto it. Used for the standing "this restarts the agent" note and for the
-/// loading/failed placeholder [agentModelMenuOptions] returns in place of a pick.
-class _MenuNoteRow extends StatelessWidget {
-  const _MenuNoteRow(this.message);
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    const metrics = AppMenuRowMetrics.compact;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      child: Padding(
-        padding: metrics.padding,
-        child: Row(
-          children: [
-            SizedBox(width: metrics.iconSize),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: grid.AppPalette.textFaint,
-                  fontFamily: grid.AppFont.sans,
-                  fontFamilyFallback: grid.AppFont.sansFallback,
-                  fontSize: metrics.noteSize,
-                  height: 1.3,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

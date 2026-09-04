@@ -305,6 +305,62 @@ class _AppMenuItemState extends State<AppMenuItem> {
   }
 }
 
+/// A row in a menu that is there to be READ, not picked.
+///
+/// The standing "changing the model restarts the agent" note over a picker's
+/// list, and the placeholder that stands in for the choices while they load or
+/// after they failed to.
+///
+/// Laid out on the column an [AppMenuItem]'s label starts on — its icon slot,
+/// empty, plus the gap after it — so it reads as part of the same list rather
+/// than as an aside bolted onto it. That alignment is the whole reason this is
+/// a widget and not a `Text` at the call site: two menus eyeballing the same
+/// gutter is how the gutter stops matching.
+class AppMenuNote extends StatelessWidget {
+  const AppMenuNote(
+    this.message, {
+    super.key,
+    this.metrics = AppMenuRowMetrics.compact,
+  });
+
+  final String message;
+
+  /// The size of the rows this note sits AMONG — a note a size apart from its
+  /// list is the drift [AppMenuRowMetrics] exists to end.
+  final AppMenuRowMetrics metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    AppTheme.watch(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      child: Padding(
+        padding: metrics.padding,
+        child: Row(
+          children: [
+            SizedBox(width: metrics.iconSize),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppPalette.textFaint,
+                  fontFamily: AppFont.sans,
+                  fontFamilyFallback: AppFont.sansFallback,
+                  fontSize: metrics.noteSize,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// The rule that sets a destructive row apart from the ordinary ones.
 class AppMenuDivider extends StatelessWidget {
   const AppMenuDivider({super.key});

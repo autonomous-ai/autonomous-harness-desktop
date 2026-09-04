@@ -103,5 +103,6 @@ class GridModelsController extends ChangeNotifier {
   }
 }
 
-/// Shared by the sidebar's model menu and anything else that needs the list.
+/// Shared by the agent header's model menu (`widgets/agent_model_menu.dart`) and the New agent
+/// dialog's own model field — the two places that read the list.
 final gridModelsController = GridModelsController();

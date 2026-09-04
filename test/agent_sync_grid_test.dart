@@ -78,8 +78,9 @@ void main() {
     // The regression this file exists for. `_agentsEqual` listed the Agent fields by hand and never
     // grew `grid`, so a refreshed list that differed ONLY by which grid an agent runs on compared
     // equal and was thrown away. An agent moved by anything other than this app's own foreground
-    // path then kept its old grid in the UI for as long as the app ran — and the retarget banner
-    // went on offering to move an agent that was already exactly where the user had put it.
+    // path then kept its old grid in the UI for as long as the app ran — and every control that
+    // reads `agent.grid`, the header's model menu included, went on describing it as still where
+    // it started.
     test('notices an agent that changed grid and nothing else', () {
       expect(
         AppNotifier.agentsEqual([agentWith(onDeepSeek)], [agentWith(onGlm)]),

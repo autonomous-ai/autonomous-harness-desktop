@@ -1696,14 +1696,15 @@ class AppNotifier extends ChangeNotifier {
         },
         timeout: const Duration(seconds: 20),
       );
+    } on WsRequestFailure catch (failure) {
+      // A refusal the CLI MEANT arrives as a thrown WsRequestFailure, never as an `error` key on a
+      // reply that was returned — see that class. This used to be a branch on `result['error']`
+      // below, which could not run, so the user got the wire code in place of the sentence.
+      return failure.code == 'UNSUPPORTED_ON_REMOTE' || failure.code == 'UNSUPPORTED'
+          ? 'Update the harness CLI on this machine to use New Agent'
+          : 'Create agent failed: ${failure.detail ?? failure.code}';
     } catch (error) {
       return 'Create agent failed: $error';
-    }
-    final error = result['error'];
-    if (error is String) {
-      return error == 'UNSUPPORTED_ON_REMOTE'
-          ? 'Update the harness CLI on this machine to use New Agent'
-          : 'Create agent failed: $error';
     }
     final raw = result['agent'];
     if (raw is! Map) return 'Create agent failed: malformed response';
@@ -1733,18 +1734,18 @@ class AppNotifier extends ChangeNotifier {
   ) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
-    Map<String, dynamic> result;
     try {
-      result = await _conn(machineId).request(
+      // The reply's body says only `{retargeted: true}`; a refusal throws. Nothing here reads it.
+      await _conn(machineId).request(
         'agent_retarget',
         payload: retargetPayload(agentId, grid),
         timeout: const Duration(seconds: 20),
       );
+    } on WsRequestFailure catch (failure) {
+      return retargetMessage(failure.code, failure.detail);
     } catch (error) {
       return 'Move failed: $error';
     }
-    final error = result['error'];
-    if (error is String) return _retargetMessage(error, result['detail']);
     // The pane now runs a different process, and its grid is re-read by the CLI's next discovery
     // pass. Ask for the list rather than guessing here: this method must not be the second place
     // that has an opinion about which grid an agent is on.
@@ -1779,13 +1780,26 @@ class AppNotifier extends ChangeNotifier {
   /// Every one of these is a deliberate refusal in the CLI, not a crash, so each has a way out worth
   /// naming. `detail`, when present, already reads as a sentence and is preferred to anything
   /// rewritten here.
-  static String _retargetMessage(String error, Object? detail) {
+  @visibleForTesting
+  static String retargetMessage(String error, Object? detail) {
     if (error == 'AGENT_NOT_FOUND') return agentVanished;
     if (error == 'AGENT_BUSY') {
       return 'It is running a turn. Move it when the turn finishes.';
     }
-    if (error == 'UNSUPPORTED_ON_REMOTE') {
-      return 'Update the harness CLI on this machine to move running agents.';
+    const update = 'Update the harness CLI on this machine to move running agents.';
+    // UNSUPPORTED_ON_REMOTE is the handler being unwired; a bare UNSUPPORTED is the CLI not knowing
+    // the frame AT ALL — a build that predates agent_retarget, which is what a stock release still is.
+    // Same sentence: the way out of both is the same update.
+    if (error == 'UNSUPPORTED_ON_REMOTE' || error == 'UNSUPPORTED') {
+      return update;
+    }
+    // A CLI old enough to know agent_retarget but not `clearGrid` reads "own login" (no `grid` field
+    // on the wire) as a forgotten one and answers this exact sentence — see backendSocket.ts's
+    // `!clear && target.state !== 'ok'` branch on the CLI side. The app and the CLI ship separately,
+    // so this is the one user-visible shape a mixed deployment takes; any other INVALID_GRID detail
+    // is a real refusal and falls through to the generic case below.
+    if (error == 'INVALID_GRID' && detail == 'grid is required') {
+      return update;
     }
     if (detail is String && detail.isNotEmpty) return detail;
     return 'Move failed: $error';

@@ -638,14 +638,20 @@ class _TerminalHeader extends StatelessWidget {
               ),
             ),
 
-            AgentModelMenu(
-              notifier: notifier,
-              machineId: session.machineId,
-              agentId: session.agentId,
-              // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
-              // this ("$engine cannot use a grid"), and an empty string there reads with a leading
-              // space.
-              engine: session.engineId ?? 'this engine',
+            // Flexible, not a bare child: the live grid serves model ids like
+            // `grid/claude-3-5-sonnet`, four panes can sit side by side, and the label
+            // (`agent_model_menu.dart`) ellipsizes once this bounds its width — without a bound it
+            // is an unconstrained Row child that overflows on a long id in a narrow pane.
+            Flexible(
+              child: AgentModelMenu(
+                notifier: notifier,
+                machineId: session.machineId,
+                agentId: session.agentId,
+                // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
+                // this ("$engine cannot use a grid"), and an empty string there reads with a leading
+                // space.
+                engine: session.engineId ?? 'this engine',
+              ),
             ),
             const SizedBox(width: 6),
             if (session.status == TerminalSessionStatus.controlling)

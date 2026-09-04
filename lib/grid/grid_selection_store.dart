@@ -5,6 +5,13 @@ import 'package:flutter/foundation.dart';
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 
+/// What "no grid at all" is called on screen.
+///
+/// Stated once because four places print it — the sidebar pill, its menu row,
+/// Settings ▸ Grid's strip and that pane's table — and two of them wording the
+/// same state differently is how a user comes to believe they are two states.
+const String kOwnLoginTargetLabel = "Each engine's own login";
+
 /// The grid new agents are launched against, if any.
 ///
 /// [networkName] is stored beside the id so a reader — Settings ▸ Grid, the
@@ -26,6 +33,11 @@ class GridSelection {
   String get label => networkName?.trim().isNotEmpty ?? false
       ? networkName!.trim()
       : (networkId ?? '');
+
+  /// What to print for this selection WHATEVER it is — a grid's name, or the
+  /// sentence that stands for having picked none. [label] answers only half of
+  /// that, and every caller was completing it with the same ternary.
+  String get targetLabel => hasGrid ? label : kOwnLoginTargetLabel;
 
   @override
   bool operator ==(Object other) =>
@@ -61,6 +73,11 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
   static const _networkIdKey = 'grid_selected_network_id';
   static const _networkNameKey = 'grid_selected_network_name';
 
+  /// Left behind by a build before the model became per-agent. Never read (see [load]) — swept out
+  /// in [_write] so it does not sit in `state.json` forever, waiting to resurrect the old global
+  /// setting under a downgraded build.
+  static const _legacyModelKey = 'grid_selected_model';
+
   final LocalKeyValueStore _storage;
 
   /// Read the saved choice, if there is one.
@@ -70,7 +87,9 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
   /// existed. An unreadable state file is not a reason to refuse to start.
   ///
   /// A `grid_selected_model` key left by an older build is never read here —
-  /// it named no particular agent, so there is nothing to carry forward.
+  /// it named no particular agent, so there is nothing to carry forward. It is
+  /// deleted the next time [_write] runs, not here — reading is not the place
+  /// to also mutate the store.
   Future<void> load() async {
     try {
       final id = await _storage.read(_networkIdKey);
@@ -106,6 +125,8 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
     try {
       await _put(_networkIdKey, next.networkId);
       await _put(_networkNameKey, next.networkName);
+      // Cheap even when the key is already gone — see [_legacyModelKey].
+      await _storage.delete(_legacyModelKey);
     } catch (_) {
       // Kept in memory for this run; see above.
     }

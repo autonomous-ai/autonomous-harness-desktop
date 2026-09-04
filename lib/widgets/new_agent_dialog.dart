@@ -217,8 +217,13 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         // quietly running it on its own login, so the dialog already knows this
         // launch will fail. Gating the button here is what stops a round trip
         // that only ever ends in an error the user was already warned about.
+        //
+        // Own login is the escape hatch for exactly this case — picking it sends `gridOverride:
+        // null`, the same frame the CLI accepts for ANY engine — so it must not itself be refused.
         final refused =
-            chosen.hasGrid && !kGridCapableEngines.contains(_engine);
+            chosen.hasGrid &&
+            _model != kOwnLoginModelOption &&
+            !kGridCapableEngines.contains(_engine);
         final canCreate = _folder != null && !refused && !_submitting;
 
         return AlertDialog(
@@ -876,7 +881,8 @@ class _NewAgentSummary extends StatelessWidget {
               child: Text(
                 '${engineIdentity(engine).label} cannot be pointed at a grid — '
                 'it offers no way to change where it sends inference. Choose '
-                'another engine, or clear the grid in the sidebar.',
+                "another engine, or set the sidebar's grid picker to each "
+                "engine's own login.",
                 style: theme.textTheme.bodySmall?.copyWith(color: warn),
               ),
             ),

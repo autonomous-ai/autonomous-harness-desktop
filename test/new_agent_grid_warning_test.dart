@@ -147,7 +147,9 @@ void main() {
       find.textContaining(RegExp('choose another engine', caseSensitive: false)),
       findsOneWidget,
     );
-    expect(find.textContaining('clear the grid'), findsOneWidget);
+    // Names the sidebar's grid picker specifically, not a vague "the sidebar" — see
+    // grid_target_pill.dart, whose own "Own login" row is what this sentence points at.
+    expect(find.textContaining("sidebar's grid picker"), findsOneWidget);
   });
 
   testWidgets('a refused engine cannot be launched at all', (tester) async {
@@ -400,6 +402,76 @@ void main() {
       reason: 'Auto means the key is left off the wire entirely, not sent as null',
     );
   });
+
+  testWidgets(
+    'own login re-enables Create for an engine that cannot reach a grid, and sends no grid',
+    (tester) async {
+      // The gap this closes: `refused` only checked hasGrid + kGridCapableEngines, so Cursor
+      // stayed refused even after the user picked Own login in the Model field — the exact choice
+      // that makes the launch frame `gridOverride: null`, the one every engine already accepts.
+      // The button and the warning must both clear, and the frame that goes out must carry no grid.
+      gridSelectionStore.value = const GridSelection(
+        networkId: 'grid-abc',
+        networkName: 'autonomous.ai',
+      );
+      final notifier = RecordingCreateAgentNotifier();
+      addTearDown(notifier.dispose);
+      notifier.machineStates['machine-1'] = MachineState(machine);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showNewAgentDialog(
+                  context,
+                  notifier,
+                  'machine-1',
+                  gridApiClient: FakeGridApi(),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      // The folder has to be picked regardless of the grid question — without it Create stays
+      // disabled for a reason unrelated to what this test is checking.
+      await tester.tap(find.text('Browse…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Select this folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('new-agent-engine-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cursor').last);
+      await tester.pumpAndSettle();
+
+      expect(warning, findsOneWidget);
+      expect(tester.widget<FilledButton>(createButton()).onPressed, isNull);
+
+      await tester.tap(find.byKey(const Key('new-agent-model-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Own login').last);
+      await tester.pumpAndSettle();
+
+      expect(warning, findsNothing);
+      expect(tester.widget<FilledButton>(createButton()).onPressed, isNotNull);
+
+      await tester.tap(createButton());
+      await tester.pumpAndSettle();
+
+      expect(notifier.createAgentCalled, isTrue);
+      expect(
+        notifier.lastGrid,
+        isNull,
+        reason: 'own login sends no grid override, for any engine',
+      );
+    },
+  );
 
   test('the grid-capable list matches what the CLI will accept', () {
     // Mirrors GRID_ENGINE_CONTRACTS in autonomous-harness/cli/src/lib/gridLaunch.ts, which has the

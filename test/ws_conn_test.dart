@@ -58,6 +58,19 @@ class FakeHub {
               'payload': {'machineId': machineId},
             }),
           );
+        } else if (frame['type'] == 'agent_retarget') {
+          // A REFUSAL — the shape every CLI-side "no" arrives in: a `<type>_result` frame carrying
+          // an error code, never a returned map with an `error` key. See WsRequestFailure.
+          ws.add(
+            jsonEncode({
+              'type': 'agent_retarget_result',
+              'payload': {
+                'requestId': (frame['payload'] as Map)['requestId'],
+                'error': 'AGENT_BUSY',
+                'detail': 'the agent is mid-turn',
+              },
+            }),
+          );
         } else if (frame['type'] == 'agents_list') {
           ws.add(
             jsonEncode({
@@ -109,6 +122,38 @@ void main() {
       expect((result['agents'] as List).first['id'], 'a1');
     },
   );
+
+  // The regression this guards: `AppNotifier.moveAgentToGrid` and `createAgent` both used to map the
+  // CLI's refusal codes to sentences in a branch reading `result['error']` — on a reply that had
+  // already thrown, so the branch could never run and the user got the wire code in a snackbar
+  // ("Move failed: Exception: agent_retarget_result: UNSUPPORTED"). The code has to survive the
+  // throw for those call sites to have anything to map.
+  test('a refusal reply throws WsRequestFailure carrying the code', () async {
+    hub = await FakeHub.start();
+    conn = WsConn(
+      wsBaseUrl: 'ws://127.0.0.1:${hub.port}',
+      autonomousEnv: 'prod',
+      machineId: 'm1',
+      accessTokenProvider: (_, _) async => 'access-token',
+      onAuthFailure: (_) {},
+      onEvent: (_) {},
+      onStatus: (_) {},
+    );
+    await conn!.connect();
+    await expectLater(
+      conn!.request('agent_retarget', payload: {'agentId': 'a1'}),
+      throwsA(
+        isA<WsRequestFailure>()
+            .having((f) => f.code, 'code', 'AGENT_BUSY')
+            .having((f) => f.detail, 'detail', 'the agent is mid-turn')
+            .having(
+              (f) => f.responseType,
+              'responseType',
+              'agent_retarget_result',
+            ),
+      ),
+    );
+  });
 
   test(
     'local transport sends no credential and skips SSO environment',

@@ -24,6 +24,40 @@ class WsRequestTimeout implements Exception {
   String toString() => 'WS request timed out: $type';
 }
 
+/// The peer ANSWERED a `request()` with an explicit `{error: ...}` — a refusal it meant, as opposed
+/// to [WsRequestTimeout]'s silence.
+///
+/// The code travels as a field rather than only inside the message because that is what callers act
+/// on: `AGENT_BUSY` becomes "move it when the turn finishes", `UNSUPPORTED` becomes "update the CLI
+/// on this machine". Before this existed every refusal arrived as a bare `Exception` whose only
+/// content was its own `toString()`, so the mapping in `AppNotifier` sat behind an `if` on a reply
+/// that had already thrown and could never run — the user got the wire code.
+///
+/// [toString] is the sentence this used to be thrown with, so a call site that only prints it is
+/// unchanged.
+class WsRequestFailure implements Exception {
+  const WsRequestFailure({
+    required this.responseType,
+    required this.code,
+    this.detail,
+  });
+
+  /// The frame that carried the refusal — `agent_retarget_result`, say.
+  final String responseType;
+
+  /// The peer's own error code.
+  final String code;
+
+  /// The underlying cause behind the code, when the peer sends one — the tmux message behind
+  /// SPAWN_FAILED. Already reads as a sentence; prefer it to anything rewritten from [code].
+  final String? detail;
+
+  @override
+  String toString() => detail == null || detail!.isEmpty
+      ? '$responseType: $code'
+      : '$responseType: $code — $detail';
+}
+
 /// One SSO-authenticated, machine-scoped connection to `/api/web-ws`.
 class WsConn {
   final String wsBaseUrl;
@@ -207,16 +241,15 @@ class WsConn {
       final pending = _pending.remove(requestId)!;
       pending.timer.cancel();
       if (payload['error'] != null) {
-        final responseType = message['type'] as String? ?? 'unknown_result';
         // `detail`, when the peer sends one, is the underlying cause behind the code — the tmux
         // message behind SPAWN_FAILED, say. Without it an error code alone sends the user to a log file
         // on a machine that is not the one in front of them.
         final detail = payload['detail'];
         pending.completer.completeError(
-          Exception(
-            detail is String && detail.isNotEmpty
-                ? '$responseType: ${payload['error']} — $detail'
-                : '$responseType: ${payload['error']}',
+          WsRequestFailure(
+            responseType: message['type'] as String? ?? 'unknown_result',
+            code: '${payload['error']}',
+            detail: detail is String && detail.isNotEmpty ? detail : null,
           ),
         );
       } else {

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../grid/grid_network.dart';
+import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/skeleton.dart';
 
@@ -249,7 +250,7 @@ class _NoGridRow extends StatelessWidget {
     return _RowSurface(
       selected: selected,
       onTap: onTap,
-      semanticsLabel: "Each engine's own login",
+      semanticsLabel: kOwnLoginTargetLabel,
       child: Row(
         children: [
           SizedBox(
@@ -264,7 +265,7 @@ class _NoGridRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    "Each engine's own login",
+                    kOwnLoginTargetLabel,
                     style: TextStyle(
                       color: grid.AppPalette.textPrimary,
                       fontSize: 13,

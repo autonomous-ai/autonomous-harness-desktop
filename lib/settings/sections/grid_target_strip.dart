@@ -44,7 +44,7 @@ class GridTargetStrip extends StatelessWidget {
           Expanded(
             child: _Readout(
               label: 'New agents use',
-              value: on ? chosen.label : "Each engine's own login",
+              value: chosen.targetLabel,
               muted: !on,
             ),
           ),
