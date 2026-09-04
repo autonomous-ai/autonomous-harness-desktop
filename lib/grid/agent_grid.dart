@@ -26,6 +26,19 @@ class AgentGrid {
     );
   }
 
+  /// Value equality, because this is compared rather than held.
+  ///
+  /// Two parses of the same answer describe the same assignment and must say so: the background
+  /// agent poll decides whether a refreshed list differs from the one on screen, and under identity
+  /// equality every tick would look like a change. The absence of this was the other half of a bug
+  /// where a grid change made outside this app never reached the UI — see `AppNotifier.agentsEqual`.
+  @override
+  bool operator ==(Object other) =>
+      other is AgentGrid && other.baseUrl == baseUrl && other.model == model;
+
+  @override
+  int get hashCode => Object.hash(baseUrl, model);
+
   /// Is this agent already on [networkId], running [model]?
   ///
   /// Mirrors `assignmentMatches` in the CLI, and gets the unknown case the same way round on purpose:

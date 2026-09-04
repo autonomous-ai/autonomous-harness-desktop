@@ -1010,7 +1010,7 @@ class AppNotifier extends ChangeNotifier {
       final agents = (response['agents'] as List<dynamic>? ?? [])
           .map((item) => Agent.fromJson(item as Map<String, dynamic>))
           .toList();
-      if (_agentsEqual(machine.agents, agents)) return;
+      if (agentsEqual(machine.agents, agents)) return;
       _replaceAgents(machine, agents);
       notifyListeners();
     } catch (_) {
@@ -1020,7 +1020,16 @@ class AppNotifier extends ChangeNotifier {
 
   /// Order-insensitive value equality for [Agent] lists — [Agent] has no operator== override, and a
   /// backend that returns the same agents in a different order must not register as "changed".
-  bool _agentsEqual(List<Agent> a, List<Agent> b) {
+  ///
+  /// ⚠️ Every field of [Agent] that the UI reads belongs here. This list is hand-maintained, and the
+  /// cost of forgetting one is silent: the poll fetches the truth, compares it, decides nothing
+  /// happened, and throws it away — so the field stays frozen at whatever it was for as long as the
+  /// app runs. That is exactly what `grid` did. An agent moved onto another grid by anything other
+  /// than this app's own foreground path kept its old assignment on screen, and the retarget banner
+  /// went on offering to move an agent that was already where the user had put it. Add the field
+  /// here in the same commit you add it to [Agent].
+  @visibleForTesting
+  static bool agentsEqual(List<Agent> a, List<Agent> b) {
     if (a.length != b.length) return false;
     final byId = {for (final agent in a) agent.id: agent};
     for (final agent in b) {
@@ -1034,7 +1043,8 @@ class AppNotifier extends ChangeNotifier {
           prev.parentAgentId != agent.parentAgentId ||
           prev.status != agent.status ||
           prev.terminalAvailable != agent.terminalAvailable ||
-          prev.terminalUnavailableReason != agent.terminalUnavailableReason) {
+          prev.terminalUnavailableReason != agent.terminalUnavailableReason ||
+          prev.grid != agent.grid) {
         return false;
       }
     }
