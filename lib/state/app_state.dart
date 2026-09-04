@@ -22,6 +22,7 @@ import '../update/manual_update_check.dart';
 import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
+import 'pane_splits.dart';
 import 'pending_question.dart';
 
 enum AppStatus {
@@ -203,6 +204,27 @@ class AppNotifier extends ChangeNotifier {
   /// no pointer behind it: the dial's scroll and focus frames, and which agent
   /// the rail draws as current.
   int? focusedPaneId;
+
+  /// Divider positions, keyed by how many panes are on the grid. Empty means
+  /// every divider is centred, which is also what a first run looks like.
+  final Map<int, PaneSplits> paneSplits = {};
+
+  PaneSplits splitsFor(int paneCount) =>
+      paneSplits[paneCount] ?? const PaneSplits();
+
+  /// Move one divider and remember it.
+  ///
+  /// Keyed by pane count so the 3-pane and 4-pane grids keep their own
+  /// dividers: they are different shapes, and reusing a fraction across them
+  /// would move a boundary the user never dragged.
+  void setSplits(int paneCount, PaneSplits next) {
+    if (paneCount < 2 || paneCount > maxPanes) return;
+    if (splitsFor(paneCount) == next) return;
+    paneSplits[paneCount] = next;
+    notifyListeners();
+    final store = _paneLayout;
+    if (store != null) unawaited(store.saveSplits(paneSplits));
+  }
 
   int _nextPaneId = 1;
 
@@ -2221,11 +2243,18 @@ class AppNotifier extends ChangeNotifier {
   /// side does not decide, a restored grid commonly spans two of them, and one
   /// being slow or offline must not hold the others blank.
   Future<void> _restorePaneLayout() async {
-    if (panes.isNotEmpty) return;
     final store = _paneLayout;
     if (store == null) return;
+    // Read before the guards below: the dividers are remembered even for a
+    // grid this run has not restored any agents into, so a window that opens
+    // empty and is then filled by hand still comes up the shape it was left.
+    paneSplits.addAll(await store.loadSplits());
+    if (panes.isNotEmpty) return;
     final entries = await store.load();
-    if (entries.isEmpty) return;
+    if (entries.isEmpty) {
+      if (paneSplits.isNotEmpty) notifyListeners();
+      return;
+    }
     for (final entry in entries) {
       panes.add(
         TerminalPane(
