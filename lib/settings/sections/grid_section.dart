@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
@@ -27,19 +26,13 @@ import 'grid_target_strip.dart';
 /// have to scroll to find the one it means. Picking here retargets nothing that
 /// is already running — the strip's own wording is what says so.
 class GridSection extends StatefulWidget {
-  const GridSection({
-    super.key,
-    required this.controller,
-    this.selection,
-    this.models,
-  });
+  const GridSection({super.key, required this.controller, this.selection});
 
   final GridNetworksController controller;
 
-  /// Injected by tests. The app uses the shared singletons, which is what lets
-  /// this pane and the sidebar's [GridSelector] change the same choice.
+  /// Injected by tests. The app uses the shared singleton, which is what lets
+  /// this pane and the New agent dialog change the same choice.
   final GridSelectionStore? selection;
-  final GridModelsController? models;
 
   @override
   State<GridSection> createState() => _GridSectionState();
@@ -122,11 +115,7 @@ class _GridSectionState extends State<GridSection> {
       builder: (context, chosen, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GridTargetStrip(
-            selection: _selection,
-            chosen: chosen,
-            models: widget.models,
-          ),
+          GridTargetStrip(chosen: chosen),
           const SizedBox(height: 16),
           _FilterBar(
             query: _query,
@@ -162,8 +151,8 @@ class _GridSectionState extends State<GridSection> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Switching grids clears the model — a model id only means '
-            'something on the grid that serves it.',
+            'The grid is where new agents get their credentials. Each agent '
+            'picks its own model from its header.',
             style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
           ),
         ],

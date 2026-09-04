@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 
-/// The grid and model new agents are launched against, if any.
+/// The grid new agents are launched against, if any.
 ///
 /// [networkName] is stored beside the id so the sidebar can name the grid on
 /// the first frame, before anything has been fetched — the id alone would put
@@ -13,16 +13,12 @@ import '../core/local_key_value_store.dart';
 /// answered.
 @immutable
 class GridSelection {
-  const GridSelection({this.networkId, this.networkName, this.model});
+  const GridSelection({this.networkId, this.networkName});
 
   static const none = GridSelection();
 
   final String? networkId;
   final String? networkName;
-
-  /// A model id as the relay lists it (`Auto`, `GLM-4.7-Flash`, …). Null means
-  /// "whatever the grid picks" — the relay's own default.
-  final String? model;
 
   bool get hasGrid => networkId != null && networkId!.isNotEmpty;
 
@@ -35,19 +31,23 @@ class GridSelection {
   bool operator ==(Object other) =>
       other is GridSelection &&
       other.networkId == networkId &&
-      other.networkName == networkName &&
-      other.model == model;
+      other.networkName == networkName;
 
   @override
-  int get hashCode => Object.hash(networkId, networkName, model);
+  int get hashCode => Object.hash(networkId, networkName);
 }
 
-/// Remembers which grid and model new agents should run against.
+/// Remembers which grid new agents should run against.
 ///
 /// A persisted [ValueNotifier] singleton, like `themeModeStore`: the sidebar
 /// shows it, Settings changes it, and the New agent dialog reads it — three
 /// places with no common ancestor short of `MaterialApp`, and it has to survive
 /// a relaunch or the choice would have to be made again every morning.
+///
+/// The model is no longer part of this: it is chosen per agent, in the agent
+/// view's header — see `widgets/agent_model_menu.dart`. A model id is only
+/// meaningful for the one agent it was picked for, not for "new agents" as a
+/// class.
 ///
 /// ⚠️ Choosing a grid does NOT retarget agents that are already running. It is
 /// read when an agent is created, and that is what the sidebar's caption says.
@@ -58,7 +58,6 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
 
   static const _networkIdKey = 'grid_selected_network_id';
   static const _networkNameKey = 'grid_selected_network_name';
-  static const _modelKey = 'grid_selected_model';
 
   final LocalKeyValueStore _storage;
 
@@ -67,6 +66,9 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
   /// Failure is silent and lands on [GridSelection.none], which is the same as
   /// never having chosen: agents launch the way they did before this feature
   /// existed. An unreadable state file is not a reason to refuse to start.
+  ///
+  /// A `grid_selected_model` key left by an older build is never read here —
+  /// it named no particular agent, so there is nothing to carry forward.
   Future<void> load() async {
     try {
       final id = await _storage.read(_networkIdKey);
@@ -77,33 +79,17 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
       value = GridSelection(
         networkId: id,
         networkName: await _storage.read(_networkNameKey),
-        model: await _storage.read(_modelKey),
       );
     } catch (_) {
       value = GridSelection.none;
     }
   }
 
-  /// Choose a grid. Clears the model, because a model id is only meaningful on
-  /// the grid that serves it — carrying one across would name a model the new
-  /// grid may not have.
+  /// Choose a grid.
   Future<void> selectNetwork({
     required String networkId,
     required String networkName,
   }) => _write(GridSelection(networkId: networkId, networkName: networkName));
-
-  /// Choose a model on the grid already selected. A no-op with no grid: there
-  /// is nothing for a model id to be relative to.
-  Future<void> selectModel(String? model) {
-    if (!value.hasGrid) return Future<void>.value();
-    return _write(
-      GridSelection(
-        networkId: value.networkId,
-        networkName: value.networkName,
-        model: model,
-      ),
-    );
-  }
 
   /// Back to launching agents the way the app did before a grid was ever
   /// picked — the engine's own login, whatever that is.
@@ -118,7 +104,6 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
     try {
       await _put(_networkIdKey, next.networkId);
       await _put(_networkNameKey, next.networkName);
-      await _put(_modelKey, next.model);
     } catch (_) {
       // Kept in memory for this run; see above.
     }

@@ -108,13 +108,9 @@ List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
 /// and right after switching grids could show the PREVIOUS grid's models under the new grid's name,
 /// since `gridModelsController` is a single global keyed by one network id. Wrapping the anchor in a
 /// `ListenableBuilder` on [gridModelsController] instead means the open panel's rows recompute on
-/// every `Idle → Loading → Ready/Failed` step — the same fix `ModelMenu` in
-/// `grid_selector_menus.dart` already applies for the sidebar's own model picker. That widget itself
-/// was not reusable here: it writes a pick straight to `gridSelectionStore` and has no "Own login"
-/// row (that choice lives on `GridMenu`, a NETWORK picker, one level up) — this control instead
-/// calls `AppNotifier.moveAgentToGrid` for one already-running agent and offers own login as a peer
-/// of Auto and every model. Reusing its rows ([AppMenuItem], [AppMenuDivider]) rather than its
-/// `ModelMenu` class keeps the same look without forcing an unrelated callback shape onto it.
+/// every `Idle → Loading → Ready/Failed` step. This control calls `AppNotifier.moveAgentToGrid` for
+/// one already-running agent and offers own login as a peer of Auto and every model — built on the
+/// app's own row primitives ([AppMenuItem], [AppMenuDivider]) rather than a bespoke shape.
 class AgentModelMenu extends StatefulWidget {
   const AgentModelMenu({
     super.key,

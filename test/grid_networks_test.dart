@@ -186,21 +186,18 @@ void main() {
       expect(selection.value.hasGrid, isFalse);
     });
 
-    testWidgets('the strip says what new agents use, and offers the model', (
-      tester,
-    ) async {
+    testWidgets('the strip says what new agents use', (tester) async {
       await ready(tester);
-      // No grid, no model control — there is nothing for a model id to be
-      // relative to.
+      // No model control at all — a model is chosen per agent, in the agent
+      // view's header, not for the grid as a whole.
       expect(find.byKey(const Key('grid-model-trigger')), findsNothing);
 
       await tester.tap(find.text('Water Grid'));
       await tester.pumpAndSettle();
 
       expect(find.text('NEW AGENTS USE'), findsOneWidget);
-      expect(find.byKey(const Key('grid-model-trigger')), findsOneWidget);
-      // "Auto" until the grid is asked what it serves.
-      expect(find.text('Auto'), findsWidgets);
+      expect(find.text('Water Grid'), findsWidgets);
+      expect(find.byKey(const Key('grid-model-trigger')), findsNothing);
     });
 
     testWidgets('details open without changing which grid is used', (

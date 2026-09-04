@@ -38,17 +38,4 @@ class AgentGrid {
 
   @override
   int get hashCode => Object.hash(baseUrl, model);
-
-  /// Is this agent already on [networkId], running [model]?
-  ///
-  /// Mirrors `assignmentMatches` in the CLI, and gets the unknown case the same way round on purpose:
-  /// a null assignment is "not there", never "close enough". Being wrong in this direction offers a
-  /// move that turns out to be unnecessary; being wrong the other way would leave an agent quietly
-  /// spending the wrong account while the app said it was fine.
-  bool matches(String networkId, String? model) =>
-      baseUrl.contains(networkId) && this.model == model;
 }
-
-/// Does [grid] need moving to reach [networkId] on [model]?
-bool needsRetarget(AgentGrid? grid, String networkId, String? model) =>
-    grid == null || !grid.matches(networkId, model);

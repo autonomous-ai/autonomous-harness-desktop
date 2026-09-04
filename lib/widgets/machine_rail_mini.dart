@@ -6,7 +6,6 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_icon_button.dart';
 import '../state/app_state.dart';
 import 'account_footer.dart';
-import 'grid_selector.dart';
 
 /// The rail, folded.
 ///
@@ -57,7 +56,6 @@ class MachineRailMini extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          const GridSelector(compact: true),
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: AccountFooter(notifier: notifier, compact: true),
