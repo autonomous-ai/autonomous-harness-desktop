@@ -225,11 +225,6 @@ class MachineRailState extends State<MachineRail> {
                       setState(() => _query = value.trim().toLowerCase()),
                 ),
               ),
-            // The rail's primary action, not a `+` hiding on a hover state.
-            // Opening a new agent is the thing this window exists for, and it
-            // used to be reachable only by pointing at the right machine row
-            // and finding a 16px glyph that appeared under the pointer.
-            _NewAgentButton(notifier: widget.notifier),
             Expanded(
               child: machines.isEmpty
                   // Two kinds of empty, and they must not look the same: the
@@ -267,125 +262,84 @@ class MachineRailState extends State<MachineRail> {
   }
 }
 
-/// The rail's primary action.
+/// A machine's actions, revealed on hover: `⋯` first, then `+` to its right.
 ///
-/// A filled button, at the top, always visible — because opening an agent is
-/// what this window is for. It used to be a 16px `+` that appeared on the
-/// machine row under the pointer, which made the app's main verb the hardest
-/// thing in the rail to find and tied it to picking the right row first.
+/// Both hide at rest, so a rail full of machines is a list of hostnames rather
+/// than a column of buttons — and the hostname, which is the part you read, has
+/// the whole row until you reach for something.
 ///
-/// It still has to launch *somewhere*, and the machine it picks is the same one
-/// ⌘N picks (see `_newAgent` in home_screen.dart): the machine whose terminal
-/// you are typing in, else the one you last selected. Where neither is set — a
-/// cold window with nothing open — it falls back to THIS computer rather than
-/// going dead, because a primary action that does nothing on a fresh launch is
-/// worse than one that guesses the only machine you certainly have.
-class _NewAgentButton extends StatefulWidget {
-  const _NewAgentButton({required this.notifier});
+/// The `+` sits at the far right, nearest the rail's edge and furthest from the
+/// name: it is the one you press, so it gets the end of the row where the hand
+/// is already travelling, with the housekeeping menu tucked behind it.
+///
+/// Two things move at once, deliberately on one curve. The pair FADES up and
+/// slides in a few pixels from the right, so it reads as arriving from off the
+/// row's edge rather than blinking into place. And the row makes room as it
+/// comes: [Align.widthFactor] runs 0 → 1, so the hostname shortens under the
+/// buttons instead of the buttons landing on a name that never moved.
+///
+/// A slot held permanently open would avoid that reflow, but it costs every row
+/// in the rail ~50px of nothing for the sake of the one row under the pointer —
+/// and the hostname is exactly the thing that was running out of width.
+class _CaptionActions extends StatelessWidget {
+  const _CaptionActions({
+    required this.shown,
+    required this.onNewAgent,
+    required this.menu,
+  });
 
-  final AppNotifier notifier;
+  /// Whether the pointer is on the row — or the menu it opened is still up,
+  /// which is the case a plain hover test gets wrong: the pointer has left the
+  /// row for the panel, and the button the panel hangs off must not vanish
+  /// under it.
+  final bool shown;
+
+  final VoidCallback onNewAgent;
+
+  /// The ⋯ and its panel, built by the caller because the menu's controller and
+  /// its open/close state belong to the row, not to this animation.
+  final Widget menu;
+
+  /// How far the pair drifts in from the right. A hint, not a journey: enough
+  /// to read as movement, short enough that the two buttons never separate.
+  static const double _drift = 10;
 
   @override
-  State<_NewAgentButton> createState() => _NewAgentButtonState();
-}
-
-class _NewAgentButtonState extends State<_NewAgentButton> {
-  bool _hovered = false;
-
-  AppNotifier get notifier => widget.notifier;
-
-  String? get _targetMachineId {
-    final focused = notifier.focusedPane?.machineId;
-    if (focused != null) return focused;
-    final selected = notifier.selectedMachineId;
-    if (selected != null) return selected;
-    for (final machine in notifier.machines) {
-      if (notifier.stateOf(machine.machineId)?.isLocalMachine == true) {
-        return machine.machineId;
-      }
-    }
-    return notifier.machines.isEmpty
-        ? null
-        : notifier.machines.first.machineId;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    final machineId = _targetMachineId;
-    final enabled = machineId != null;
-    final hint = shortcutHintFor(ShortcutAction.newAgent);
-    // Not `withShortcutHint`: the chord is printed ON the button, so repeating
-    // it in the tooltip would say the same thing twice in one hover.
-    final label = Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(LucideIcons.plus300, size: 15, color: Colors.white),
-        const SizedBox(width: 7),
-        Text(
-          'New agent',
-          style: TextStyle(
-            color: Colors.white,
-            fontFamily: grid.AppFont.sans,
-            fontSize: 13,
-            fontWeight: grid.AppFont.semibold,
-          ),
-        ),
-        if (hint != null) ...[
-          const SizedBox(width: 8),
-          Text(
-            hint,
-            style: TextStyle(
-              // The chord rides the button rather than sitting beside it, so it
-              // takes the label's ink held back — loud enough to read, quiet
-              // enough not to compete with the verb it belongs to.
-              color: Colors.white.withValues(alpha: 0.62),
-              fontFamily: grid.AppFont.sans,
-              fontSize: 11.5,
-              fontWeight: grid.AppFont.medium,
-            ),
-          ),
-        ],
-      ],
-    );
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        cursor: enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
-        child: GestureDetector(
-          key: const Key('rail-new-agent-button'),
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled
-              ? () => showNewAgentDialog(context, notifier, machineId)
-              : null,
-          child: AnimatedContainer(
-            duration: grid.AppMotion.hover,
-            curve: grid.AppMotion.curve,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: !enabled
-                  // Greyed, not hidden. A rail with no machines still has to
-                  // show what it will let you do once one arrives.
-                  ? grid.AppSurface.recess
-                  : _hovered
-                  ? grid.AppPalette.accentHover
-                  : grid.AppPalette.accent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: enabled
-                ? label
-                : Opacity(opacity: 0.45, child: label),
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    // No `begin`: a row built already hovered is settled, not animating in.
+    tween: Tween(end: shown ? 1.0 : 0.0),
+    duration: grid.AppMotion.hover,
+    curve: grid.AppMotion.curve,
+    builder: (context, t, child) => ClipRect(
+      child: Align(
+        // Pinned right, so the pair grows out of the row's edge rather than
+        // sliding along it — and clipped, so nothing is clickable while it is
+        // still folded away.
+        alignment: Alignment.centerRight,
+        widthFactor: t,
+        child: Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset((1 - t) * _drift, 0),
+            child: child,
           ),
         ),
       ),
-    );
-  }
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        menu,
+        const SizedBox(width: 2),
+        AppIconButton(
+          icon: LucideIcons.plus300,
+          size: 16,
+          tooltip: 'New agent here…',
+          onPressed: onNewAgent,
+        ),
+      ],
+    ),
+  );
 }
 
 class _MachineNode extends StatefulWidget {
@@ -686,88 +640,76 @@ class _MachineNodeState extends State<_MachineNode> {
                             ),
                           ),
                         ),
-                      // One hover control, not two. "New agent" moved INTO this
-                      // menu rather than sitting beside it as a second glyph:
-                      // the button at the top of the rail already covers the
-                      // common case, and this menu is where you go when you
-                      // mean THIS machine specifically.
-                      SizedBox(
-                        width: 22,
-                        child: AnimatedOpacity(
-                          duration: grid.AppMotion.hover,
-                          opacity: _hovered || _menuOpen ? 1 : 0,
-                          child: MenuAnchor(
-                            controller: _machineMenu,
-                            onOpen: () => setState(() => _menuOpen = true),
-                            onClose: () => setState(() => _menuOpen = false),
-                            menuChildren: [
+                      // Both of this machine's actions, on this machine's own
+                      // row. The `+` is what the rail's big New agent button
+                      // used to be: that button had to guess which machine you
+                      // meant, and this one cannot be wrong about it.
+                      _CaptionActions(
+                        shown: _hovered || _menuOpen,
+                        onNewAgent: () => showNewAgentDialog(
+                          context,
+                          notifier,
+                          machine.machineId,
+                        ),
+                        menu: MenuAnchor(
+                          controller: _machineMenu,
+                          onOpen: () => setState(() => _menuOpen = true),
+                          onClose: () => setState(() => _menuOpen = false),
+                          menuChildren: [
+                            AppMenuItem(
+                              icon: LucideIcons.pencil300,
+                              label: 'Edit name',
+                              onPressed: () {
+                                _machineMenu.close();
+                                _showRenameDialog();
+                              },
+                            ),
+                            if (state.isLocalMachine) ...[
+                              const AppMenuDivider(),
                               AppMenuItem(
-                                icon: LucideIcons.plus300,
-                                label: 'New agent here…',
+                                icon: LucideIcons.keyRound300,
+                                label: 'Set remote password',
                                 onPressed: () {
                                   _machineMenu.close();
-                                  showNewAgentDialog(
-                                    context,
-                                    notifier,
+                                  unawaited(
+                                    showLinkMachineDialog(context, notifier),
+                                  );
+                                },
+                              ),
+                            ],
+                            if (!state.isLocalMachine) ...[
+                              const AppMenuDivider(),
+                              AppMenuItem(
+                                icon: LucideIcons.link2300,
+                                label: 'Remote into this machine…',
+                                onPressed: () {
+                                  _machineMenu.close();
+                                  notifier.selectMachineForSetup(
                                     machine.machineId,
                                   );
                                 },
                               ),
                               const AppMenuDivider(),
                               AppMenuItem(
-                                icon: LucideIcons.pencil300,
-                                label: 'Edit name',
+                                icon: LucideIcons.trash2300,
+                                label: 'Delete machine',
+                                danger: true,
                                 onPressed: () {
                                   _machineMenu.close();
-                                  _showRenameDialog();
+                                  _confirmDeleteMachine();
                                 },
                               ),
-                              if (state.isLocalMachine) ...[
-                                const AppMenuDivider(),
-                                AppMenuItem(
-                                  icon: LucideIcons.keyRound300,
-                                  label: 'Set remote password',
-                                  onPressed: () {
-                                    _machineMenu.close();
-                                    unawaited(
-                                      showLinkMachineDialog(context, notifier),
-                                    );
-                                  },
-                                ),
-                              ],
-                              if (!state.isLocalMachine) ...[
-                                const AppMenuDivider(),
-                                AppMenuItem(
-                                  icon: LucideIcons.link2300,
-                                  label: 'Remote into this machine…',
-                                  onPressed: () {
-                                    _machineMenu.close();
-                                    notifier.selectMachineForSetup(
-                                      machine.machineId,
-                                    );
-                                  },
-                                ),
-                                const AppMenuDivider(),
-                                AppMenuItem(
-                                  icon: LucideIcons.trash2300,
-                                  label: 'Delete machine',
-                                  danger: true,
-                                  onPressed: () {
-                                    _machineMenu.close();
-                                    _confirmDeleteMachine();
-                                  },
-                                ),
-                              ],
                             ],
-                            builder: (context, controller, child) =>
-                                AppIconButton(
-                                  icon: LucideIcons.ellipsis300,
-                                  size: 16,
-                                  onPressed: () => controller.isOpen
-                                      ? controller.close()
-                                      : controller.open(),
-                                ),
-                          ),
+                          ],
+                          builder: (context, controller, child) =>
+                              AppIconButton(
+                                icon: LucideIcons.ellipsis300,
+                                size: 16,
+                                tooltip: 'Machine options',
+                                onPressed: () => controller.isOpen
+                                    ? controller.close()
+                                    : controller.open(),
+                              ),
                         ),
                       ),
                     ],

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
@@ -7,12 +8,12 @@ import 'package:harness/shared/layouts/widgets/sidebar_item.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/machine_rail.dart';
 
-/// The rail leads with the agents, and with the button that makes one.
+/// The rail leads with the agents; a machine is the caption over them.
 ///
-/// These guard what that redesign turned on: the primary action is always
-/// drawn, a machine reads as a caption rather than as a row among its agents,
-/// and the two numbers the guide line is built from — the trunk at 19 and the
-/// rows at 28 — stay in step with each other.
+/// These guard what that redesign turned on: every action on a machine sits on
+/// that machine's own row and stays out of the way until you point at it, and
+/// the two numbers the guide line is built from — the trunk at 19 and the rows
+/// at 28 — stay in step with each other.
 void main() {
   const machine = Machine(
     machineId: 'machine-1',
@@ -72,7 +73,7 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('the rail leads with New agent, at every width it can be dragged to', (
+  testWidgets('the rail lays out at every width it can be dragged to', (
     tester,
   ) async {
     // 220 is the rail's floor and 520 its ceiling (see home_screen.dart). A
@@ -83,29 +84,48 @@ void main() {
       await pumpRail(tester, notifier, width: width);
 
       expect(
-        find.byKey(const Key('rail-new-agent-button')),
+        find.text('prod-mac'),
         findsOneWidget,
-        reason: 'the rail\'s primary action is missing at ${width}px',
+        reason: 'the rail did not render at ${width}px',
       );
-      expect(find.text('New agent'), findsOneWidget);
+      expect(find.text('Ban làm được gì'), findsOneWidget);
       notifier.dispose();
     }
   });
 
-  testWidgets('New agent is drawn even with no machines to launch on', (
+  testWidgets('a machine hides ⋯ and + until you point at its row', (
     tester,
   ) async {
-    // Disabled, not absent. A rail that shows nothing at all cannot be told
-    // from a rail that failed to build.
-    final notifier = AppNotifier(
-      config: AppConfig.dev,
-      authSession: AuthSession(),
-      configStore: null,
-    );
+    final notifier = railNotifier();
     await pumpRail(tester, notifier);
 
-    expect(find.byKey(const Key('rail-new-agent-button')), findsOneWidget);
-    expect(find.text('no remote machines'), findsOneWidget);
+    // Folded, not merely faded: the pair is clipped to zero width, so the
+    // hostname has the whole row and nothing invisible sits there to be clicked
+    // by accident. Measured on the clip box, not on a button — each button
+    // keeps its own 24px inside it either way.
+    final menu = find.byTooltip('Machine options');
+    final plus = find.byTooltip('New agent here…');
+    expect(menu, findsOneWidget);
+    expect(plus, findsOneWidget);
+    Size actionsBox() => tester.getSize(
+      find.ancestor(of: plus, matching: find.byType(ClipRect)).first,
+    );
+    expect(actionsBox().width, 0);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.text('prod-mac')));
+    await tester.pumpAndSettle();
+
+    // Opened out, both on the machine's own row, with + at the far end —
+    // nearest the rail's edge, where the hand is already going.
+    expect(actionsBox().width, greaterThan(40));
+    expect(
+      tester.getCenter(plus).dx,
+      greaterThan(tester.getCenter(menu).dx),
+      reason: 'the + sits to the right of the ⋯',
+    );
     notifier.dispose();
   });
 
