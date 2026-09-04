@@ -15,6 +15,39 @@ import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
 
+import 'support/fake_grid_api.dart';
+
+/// Stands in for the CLI round trip `createAgent` normally makes, so a test can drive a real
+/// Create click and inspect exactly what payload it built — the same shape
+/// `ReloadTrackingNotifier` (machine_tree_widget_test.dart) uses for its own notifier calls.
+/// `listRemoteFolder` is faked too, so the in-app folder browser this dialog opens for a remote
+/// machine never reaches `fs_list_dir` for real.
+class RecordingCreateAgentNotifier extends AppNotifier {
+  RecordingCreateAgentNotifier()
+    : super(config: AppConfig.dev, authSession: AuthSession(), configStore: null);
+
+  bool createAgentCalled = false;
+  GridAgentOverride? lastGrid;
+
+  @override
+  Future<Map<String, dynamic>> listRemoteFolder(String machineId, String? path) async {
+    return {'path': '/tmp/agent-folder', 'entries': <dynamic>[]};
+  }
+
+  @override
+  Future<String?> createAgent(
+    String machineId, {
+    required String engine,
+    required String folder,
+    bool bypassPermission = false,
+    GridAgentOverride? grid,
+  }) async {
+    createAgentCalled = true;
+    lastGrid = grid;
+    return null;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -84,13 +117,16 @@ void main() {
   });
 
   testWidgets('names the grid for an engine that can reach it', (tester) async {
+    // GridSelection.model is a leftover from the single global setting this
+    // dialog's own MODEL field replaces (see new_agent_dialog.dart) — the
+    // summary reads the dialog's state, never the store's, so the model the
+    // summary names here is the dialog's own default: Auto.
     gridSelectionStore.value = const GridSelection(
       networkId: 'grid-3378218621364f16',
       networkName: 'autonomous.ai',
-      model: 'GLM-4.7-Flash',
     );
     await openDialog(tester, engine: 'claude');
-    expect(find.text('autonomous.ai · GLM-4.7-Flash'), findsOneWidget);
+    expect(find.text('autonomous.ai · Auto'), findsOneWidget);
     expect(warning, findsNothing);
   });
 
@@ -307,6 +343,62 @@ void main() {
     await openDialog(tester, engine: 'claude');
     expect(find.byType(Checkbox), findsNothing);
     expect(find.byType(AppCheckbox), findsOneWidget);
+  });
+
+  testWidgets('creates the agent with the model the user picked', (tester) async {
+    // Auto is the default, and Auto means "no model on the wire" — the grid's own choice, which is
+    // not the same as pinning a model named Auto.
+    gridSelectionStore.value = const GridSelection(
+      networkId: 'grid-abc',
+      networkName: 'autonomous.ai',
+    );
+    final notifier = RecordingCreateAgentNotifier();
+    addTearDown(notifier.dispose);
+    notifier.machineStates['machine-1'] = MachineState(machine);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showNewAgentDialog(
+                context,
+                notifier,
+                'machine-1',
+                // A fake client, so the relay key this default (Auto) path still mints goes
+                // nowhere near the network — see resolveGridAgentOverride and FakeGridApi.
+                gridApiClient: FakeGridApi(),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // This machine is not `thisComputer`, so Browse… opens the in-app remote picker rather than
+    // reaching for a native panel this test harness has no plugin for.
+    await tester.tap(find.text('Browse…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Select this folder'));
+    await tester.pumpAndSettle();
+
+    // The model field defaults to Auto — nothing tapped here — so Create should carry that
+    // straight through.
+    await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
+    await tester.pumpAndSettle();
+
+    expect(notifier.createAgentCalled, isTrue);
+    final grid = notifier.lastGrid;
+    expect(grid, isNotNull);
+    expect(grid!.model, isNull, reason: 'Auto pins no model');
+    expect(
+      grid.toJson().containsKey('model'),
+      isFalse,
+      reason: 'Auto means the key is left off the wire entirely, not sent as null',
+    );
   });
 
   test('the grid-capable list matches what the CLI will accept', () {

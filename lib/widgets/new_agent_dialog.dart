@@ -2,12 +2,15 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../grid/grid_agent_override.dart';
+import '../grid/grid_api_client.dart';
+import '../grid/grid_models_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_checkbox.dart';
 import '../shared/widgets/app_select_field.dart';
 import '../shared/widgets/labeled_field.dart';
 import '../state/app_state.dart';
+import 'agent_model_menu.dart';
 import 'engine_identity.dart';
 import 'remote_folder_picker.dart';
 
@@ -25,20 +28,32 @@ const Map<String, String> kEngineBypassPermissionFlag = {
 Future<void> showNewAgentDialog(
   BuildContext context,
   AppNotifier notifier,
-  String machineId,
-) {
+  String machineId, {
+  // Injectable only so a test can drive a real Create click without a network call — the same seam
+  // GridNetworksController/GridModelsController already expose. Production never passes one, so
+  // _submit's resolveGridAgentOverride falls back to its own default (real) client.
+  @visibleForTesting GridApiClient? gridApiClient,
+}) {
   return showDialog<void>(
     context: context,
-    builder: (context) =>
-        _NewAgentDialog(notifier: notifier, machineId: machineId),
+    builder: (context) => _NewAgentDialog(
+      notifier: notifier,
+      machineId: machineId,
+      gridApiClient: gridApiClient,
+    ),
   );
 }
 
 class _NewAgentDialog extends StatefulWidget {
   final AppNotifier notifier;
   final String machineId;
+  final GridApiClient? gridApiClient;
 
-  const _NewAgentDialog({required this.notifier, required this.machineId});
+  const _NewAgentDialog({
+    required this.notifier,
+    required this.machineId,
+    this.gridApiClient,
+  });
 
   @override
   State<_NewAgentDialog> createState() => _NewAgentDialogState();
@@ -49,6 +64,27 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   String? _folder;
   bool _bypassPermission = false;
   bool _submitting = false;
+
+  /// The model this NEW agent launches on. Null = Auto (the grid decides —
+  /// no model on the wire), [kOwnLoginModelOption] = the engine's own login
+  /// even though a grid is picked. Only meaningful once a grid is picked;
+  /// dialog default is Auto either way.
+  String? _model;
+
+  @override
+  void initState() {
+    super.initState();
+    // Lazy, like every other model picker in the app: nothing is fetched unless a grid is already
+    // picked. Deferred a frame so the load's synchronous first `notifyListeners()` (see
+    // GridModelsController.refresh) lands after this dialog — and everything else — has finished
+    // building, rather than mid-build.
+    final networkId = gridSelectionStore.value.networkId;
+    if (networkId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        gridModelsController.ensureLoadedFor(networkId);
+      });
+    }
+  }
 
   /// The system panel is modal and slow enough to notice. Without this the
   /// button stays live and a second click stacks a second panel behind the
@@ -124,10 +160,17 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     });
     // A relay key is minted per launch, so it is fetched here rather than held
     // in the store. Null when no grid is picked, which leaves the frame exactly
-    // as it was before this feature existed.
+    // as it was before this feature existed — and null too when this agent is
+    // pinned to its own login despite a grid being picked, which mints no key
+    // at all rather than one that would go unused.
     final GridAgentOverride? gridOverride;
     try {
-      gridOverride = await resolveGridAgentOverride();
+      gridOverride = _model == kOwnLoginModelOption
+          ? null
+          : await resolveGridAgentOverride(
+              client: widget.gridApiClient,
+              model: _model,
+            );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -193,7 +236,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 children: [
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final choices = _choices(bypassFlag);
+                      final choices = _choices(bypassFlag, chosen);
                       final summary = _NewAgentSummary(
                         engine: _engine,
                         folder: _folder,
@@ -201,6 +244,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                         machineIsThisComputer: _machineIsThisComputer,
                         bypassFlag: _bypassPermission ? bypassFlag : null,
                         selection: chosen,
+                        model: _model,
                         refused: refused,
                       );
                       // Below this the two columns would each be too narrow to
@@ -261,7 +305,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   }
 
   /// The left column: what the user actually decides.
-  Widget _choices(String? bypassFlag) {
+  Widget _choices(String? bypassFlag, GridSelection selection) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,6 +344,36 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             }
           }),
         ),
+        // Only meaningful once a grid is picked — an unselected build behaves exactly as it did
+        // before this field existed, per the summary's own "own login" branch below.
+        if (selection.hasGrid) ...[
+          const SizedBox(height: _gapField),
+          const FieldLabel('Model'),
+          // Wrapped in ListenableBuilder, not built bare: AppSelectField is a MenuAnchor underneath
+          // (see its own doc), so an ALREADY-OPEN panel picks up gridModelsController's rows as they
+          // move Idle -> Loading -> Ready/Failed rather than freezing at whatever they were when this
+          // field first opened — the same fix AgentModelMenu and ModelMenu apply for exactly this
+          // control's other two call sites. Options that carry no real value (the "Loading…"/error
+          // placeholder) are dropped rather than shown disabled: AppSelectField has no disabled row.
+          ListenableBuilder(
+            listenable: gridModelsController,
+            builder: (context, _) => AppSelectField<String?>(
+              key: const Key('new-agent-model-field'),
+              value: _model,
+              options: [
+                for (final option in agentModelMenuOptions(
+                  gridModelsController.state,
+                ))
+                  if (option.enabled)
+                    SelectOption<String?>(
+                      value: option.value,
+                      label: option.label,
+                    ),
+              ],
+              onChanged: (value) => setState(() => _model = value),
+            ),
+          ),
+        ],
         const SizedBox(height: _gapField),
         const FieldLabel('Working folder'),
         _FolderControl(
@@ -641,6 +715,7 @@ class _NewAgentSummary extends StatelessWidget {
     required this.machineIsThisComputer,
     required this.bypassFlag,
     required this.selection,
+    required this.model,
     required this.refused,
   });
 
@@ -653,6 +728,11 @@ class _NewAgentSummary extends StatelessWidget {
   /// not what could.
   final String? bypassFlag;
   final GridSelection selection;
+
+  /// The dialog's own model choice for THIS agent — null (Auto) or
+  /// [kOwnLoginModelOption], never read off [selection]. `GridSelection.model`
+  /// is a leftover from the single global setting this field replaces.
+  final String? model;
   final bool refused;
 
   @override
@@ -780,9 +860,9 @@ class _NewAgentSummary extends StatelessWidget {
           _fact(
             context,
             'Inference',
-            refused || !selection.hasGrid
+            refused || !selection.hasGrid || model == kOwnLoginModelOption
                 ? "${engineIdentity(engine).label}'s own login"
-                : '${selection.label} · ${selection.model ?? 'Auto'}',
+                : '${selection.label} · ${model ?? 'Auto'}',
           ),
           if (refused) ...[
             const SizedBox(height: _gapBlock),
