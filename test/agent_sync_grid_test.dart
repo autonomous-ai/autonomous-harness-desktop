@@ -27,6 +27,39 @@ const onGlm = AgentGrid(
 );
 
 void main() {
+  group('AgentGrid.fromJson', () {
+    // Re-homed from the deleted test/grid_retarget_test.dart (grid_retarget.dart itself is gone,
+    // but this is the wire parser for the field the whole per-agent-model feature reads off the
+    // live process, and it had no other coverage).
+    const relay = 'https://grid.autonomous.ai/grid-abc/relay';
+
+    test('reads what the CLI reports, and refuses anything else', () {
+      final parsed = AgentGrid.fromJson({
+        'baseUrl': relay,
+        'model': 'GLM-4.7-Flash',
+      });
+      expect(parsed?.baseUrl, relay);
+      expect(parsed?.model, 'GLM-4.7-Flash');
+      expect(AgentGrid.fromJson({'baseUrl': relay})?.model, isNull);
+      expect(AgentGrid.fromJson(null), isNull);
+      expect(AgentGrid.fromJson({'baseUrl': ''}), isNull);
+      expect(AgentGrid.fromJson('nope'), isNull);
+    });
+
+    test('an agent parsed from a CLI payload carries its grid', () {
+      final parsed = Agent.fromJson({
+        'id': 'a1',
+        'name': 'Claude Code',
+        'engine': 'claude',
+        'terminal': {'available': true},
+        'grid': {'baseUrl': relay, 'model': 'GLM-4.7-Flash'},
+      });
+      expect(parsed.grid?.baseUrl, relay);
+      // An older CLI sends no such field, and that must not read as "on a grid".
+      expect(Agent.fromJson({'id': 'a2', 'name': 'Old'}).grid, isNull);
+    });
+  });
+
   group('AgentGrid value equality', () {
     // Without this, every comparison is identity, so two parses of the SAME answer look different —
     // which would make the poll below report "changed" on every single tick.

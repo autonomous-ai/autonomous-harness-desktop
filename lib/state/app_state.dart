@@ -1025,9 +1025,9 @@ class AppNotifier extends ChangeNotifier {
   /// cost of forgetting one is silent: the poll fetches the truth, compares it, decides nothing
   /// happened, and throws it away — so the field stays frozen at whatever it was for as long as the
   /// app runs. That is exactly what `grid` did. An agent moved onto another grid by anything other
-  /// than this app's own foreground path kept its old assignment on screen, and the retarget banner
-  /// went on offering to move an agent that was already where the user had put it. Add the field
-  /// here in the same commit you add it to [Agent].
+  /// than this app's own foreground path kept its old assignment on screen, and every control that
+  /// reads `agent.grid` — the header's model menu included — went on describing an agent as still
+  /// where it started. Add the field here in the same commit you add it to [Agent].
   @visibleForTesting
   static bool agentsEqual(List<Agent> a, List<Agent> b) {
     if (a.length != b.length) return false;

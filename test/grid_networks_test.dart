@@ -9,6 +9,7 @@ import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
+import 'package:harness/settings/sections/grid_target_strip.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
@@ -196,7 +197,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('NEW AGENTS USE'), findsOneWidget);
-      expect(find.text('Water Grid'), findsWidgets);
+      // Scoped to the strip itself: the network table below also has a row
+      // named "Water Grid", so an unscoped match would pass even if the strip
+      // rendered nothing.
+      expect(
+        find.descendant(
+          of: find.byType(GridTargetStrip),
+          matching: find.text('Water Grid'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('grid-model-trigger')), findsNothing);
     });
 

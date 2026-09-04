@@ -352,9 +352,9 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           // Wrapped in ListenableBuilder, not built bare: AppSelectField is a MenuAnchor underneath
           // (see its own doc), so an ALREADY-OPEN panel picks up gridModelsController's rows as they
           // move Idle -> Loading -> Ready/Failed rather than freezing at whatever they were when this
-          // field first opened — the same fix AgentModelMenu and ModelMenu apply for exactly this
-          // control's other two call sites. Options that carry no real value (the "Loading…"/error
-          // placeholder) are dropped rather than shown disabled: AppSelectField has no disabled row.
+          // field first opened — the same fix AgentModelMenu applies for its own model control.
+          // Options that carry no real value (the "Loading…"/error placeholder) are dropped rather
+          // than shown disabled: AppSelectField has no disabled row.
           ListenableBuilder(
             listenable: gridModelsController,
             builder: (context, _) => AppSelectField<String?>(

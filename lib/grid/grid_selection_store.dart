@@ -7,10 +7,10 @@ import '../core/local_key_value_store.dart';
 
 /// The grid new agents are launched against, if any.
 ///
-/// [networkName] is stored beside the id so the sidebar can name the grid on
-/// the first frame, before anything has been fetched — the id alone would put
-/// `grid-3378218621364f16` in front of the user until the control plane
-/// answered.
+/// [networkName] is stored beside the id so a reader — Settings ▸ Grid, the
+/// New agent dialog — can name the grid on the first frame, before anything
+/// has been fetched — the id alone would put `grid-3378218621364f16` in front
+/// of the user until the control plane answered.
 @immutable
 class GridSelection {
   const GridSelection({this.networkId, this.networkName});
@@ -39,10 +39,12 @@ class GridSelection {
 
 /// Remembers which grid new agents should run against.
 ///
-/// A persisted [ValueNotifier] singleton, like `themeModeStore`: the sidebar
-/// shows it, Settings changes it, and the New agent dialog reads it — three
-/// places with no common ancestor short of `MaterialApp`, and it has to survive
-/// a relaunch or the choice would have to be made again every morning.
+/// A persisted [ValueNotifier] singleton, like `themeModeStore`: Settings ▸
+/// Grid writes it, and it is read by the New agent dialog, the agent view's
+/// header menu (`widgets/agent_model_menu.dart`), the share pane, and the
+/// status rail — with no common ancestor short of `MaterialApp` between them —
+/// so it has to survive a relaunch or the choice would have to be made again
+/// every morning.
 ///
 /// The model is no longer part of this: it is chosen per agent, in the agent
 /// view's header — see `widgets/agent_model_menu.dart`. A model id is only
@@ -50,7 +52,7 @@ class GridSelection {
 /// class.
 ///
 /// ⚠️ Choosing a grid does NOT retarget agents that are already running. It is
-/// read when an agent is created, and that is what the sidebar's caption says.
+/// only read when an agent is created.
 class GridSelectionStore extends ValueNotifier<GridSelection> {
   GridSelectionStore({LocalKeyValueStore? storage})
     : _storage = storage ?? HarnessFileStore.shared,

@@ -153,15 +153,17 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   with `--dart-define=GRID_API_TOKEN=…`. Response fields were read off the live API, not the OpenAPI
   spec, whose `/v1/grid/me` response schema is empty.
 - **Picking a grid retargets NEW agents only.** `gridSelectionStore` (`lib/grid/`, persisted like
-  `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid + model; the sidebar's
-  `GridSelector` and Settings ▸ Grid both write it. At create time the New agent dialog calls
-  `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it as
-  `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it always
-  did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field and
-  gives the new tmux session `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` via
+  `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid, and only the grid —
+  Settings ▸ Grid is the one place that writes it. The model is chosen per agent, not globally: the
+  agent view's header menu (`widgets/agent_model_menu.dart`) picks it for an already-running agent,
+  and the New agent dialog has its own model field for a new one. At create time the New agent
+  dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
+  as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
+  always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
+  and gives the new tmux session `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` via
   `new-session -e`, so the key never lands in the engine's argv. **Claude Code is the only
   grid-capable engine**; the CLI refuses the rest with `GRID_ENGINE_UNSUPPORTED` rather than running
-  them on their own login, and `kGridCapableEngines` in `widgets/new_agent_dialog.dart` mirrors that
+  them on their own login, and `kGridCapableEngines` in `grid/grid_agent_override.dart` mirrors that
   list to warn before the click. Keep the two in sync.
 - **Share Intelligence is the one place this app drives a SECOND CLI.** `lib/share/` runs the *Grid*
   CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
