@@ -1716,7 +1716,8 @@ class AppNotifier extends ChangeNotifier {
     return null;
   }
 
-  /// Moves an already-running agent onto [grid].
+  /// Moves an already-running agent onto [grid], or — when [grid] is null — back onto the engine's
+  /// own login.
   ///
   /// This RESTARTS the agent. A process's environment is fixed when it is exec'd, so a live engine
   /// cannot be re-pointed — the CLI respawns the pane in place (same pane, same agent id, same
@@ -1728,7 +1729,7 @@ class AppNotifier extends ChangeNotifier {
   Future<String?> moveAgentToGrid(
     String machineId,
     String agentId,
-    GridAgentOverride grid,
+    GridAgentOverride? grid,
   ) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
@@ -1736,7 +1737,12 @@ class AppNotifier extends ChangeNotifier {
     try {
       result = await _conn(machineId).request(
         'agent_retarget',
-        payload: {'agentId': agentId, 'grid': grid.toJson()},
+        payload: {
+          'agentId': agentId,
+          // Exactly one of the two, and never `grid: null` — the CLI's parser reads an absent grid
+          // and a null grid the same way, so own login has to say so in its own field.
+          if (grid != null) 'grid': grid.toJson() else 'clearGrid': true,
+        },
         timeout: const Duration(seconds: 20),
       );
     } catch (error) {

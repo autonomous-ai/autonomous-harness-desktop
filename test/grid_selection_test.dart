@@ -121,8 +121,8 @@ void main() {
         selection: const GridSelection(
           networkId: 'grid-1',
           networkName: 'Office',
-          model: 'GLM-4.7-Flash',
         ),
+        model: 'GLM-4.7-Flash',
       );
 
       expect(api.credentialCalls, 1);
@@ -167,6 +167,30 @@ void main() {
         );
       },
     );
+
+    test('the model comes from the caller, not the store', () async {
+      final override = await resolveGridAgentOverride(
+        client: FakeGridApi(),
+        selection: const GridSelection(
+          networkId: 'grid-abc',
+          networkName: 'autonomous.ai',
+        ),
+        model: 'GLM-4.7-Flash',
+      );
+      expect(override!.model, 'GLM-4.7-Flash');
+    });
+
+    test('no model means the grid chooses', () async {
+      final override = await resolveGridAgentOverride(
+        client: FakeGridApi(),
+        selection: const GridSelection(
+          networkId: 'grid-abc',
+          networkName: 'autonomous.ai',
+        ),
+      );
+      expect(override!.model, isNull);
+      expect(override.toJson().containsKey('model'), isFalse);
+    });
   });
 
   group('GridSelector', () {

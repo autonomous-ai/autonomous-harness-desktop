@@ -78,6 +78,7 @@ class GridAgentOverride {
 Future<GridAgentOverride?> resolveGridAgentOverride({
   GridApiClient? client,
   GridSelection? selection,
+  String? model,
 }) async {
   final chosen = selection ?? gridSelectionStore.value;
   final networkId = chosen.networkId;
@@ -88,6 +89,8 @@ Future<GridAgentOverride?> resolveGridAgentOverride({
     networkName: chosen.label,
     baseUrl: credentials.baseUrl,
     apiKey: credentials.apiKey,
-    model: chosen.model,
+    // The caller's, because the store no longer holds one: a model is chosen for an agent, and this
+    // function is called once per agent.
+    model: model,
   );
 }
