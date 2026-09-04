@@ -381,6 +381,35 @@ class AppNotifier extends ChangeNotifier {
     );
   }
 
+  /// Tell the daemon which agents have a tile on the grid, so the dial can stay
+  /// quiet about a turn that finished in front of the person.
+  ///
+  /// An OPEN tile counts as seen. Not a focused one: with four tiles all four
+  /// are on screen, and the window has no honest way to say which the eye is
+  /// on. Nor is the window's own focus consulted — a decision, not an
+  /// oversight: it means a turn that lands while the app is behind a browser
+  /// stays silent, and the alternative is a dial that beeps about tiles you are
+  /// looking straight at.
+  ///
+  /// Sent to EVERY connected daemon, with the full list across all machines.
+  /// The dial belongs to whichever daemon owns the cable, and only a complete
+  /// roster lets that one judge; the others store a list they never use, which
+  /// costs nothing and saves the window from having to know which is which.
+  void _announceOpenPanesToDial() {
+    final pool = _pool;
+    if (pool == null) return;
+    final agentIds = <String>[for (final pane in panes) ?pane.agentId];
+    for (final machineId in machineStates.keys) {
+      final connection = pool[machineId];
+      if (connection == null) continue;
+      unawaited(
+        connection
+            .sendTerminalFrame('app_panes', {'agentIds': agentIds})
+            .catchError((_) => false),
+      );
+    }
+  }
+
   /// Machines whose link prompt the user has waved away.
   ///
   /// Dismissing cannot mean "deselect": [activeMachineState] falls back to the
@@ -819,6 +848,11 @@ class AppNotifier extends ChangeNotifier {
         if (nextStatus == ConnectionStatus.connected) {
           machine.needsLink = false;
           _stopLinkRetry(machineId);
+          // A daemon that just came up — first connect, or a reconnect after it
+          // restarted — has never been told what is on the grid. Without this
+          // the dial goes back to beeping about tiles in plain sight until the
+          // next time a pane happens to change.
+          _announceOpenPanesToDial();
           // The local CLI never hands back `connected` until it has terminated E2EE (or confirmed
           // none is needed, for its own machine) — every machine's data is ready to load right away,
           // with no separate app-side readiness gate to wait on anymore.
@@ -2217,6 +2251,11 @@ class AppNotifier extends ChangeNotifier {
   }
 
   void _persistLayout() {
+    // The roster and the saved layout describe the same fact — which agents are
+    // on the grid — so they are announced and written from the same place.
+    // Before the early return below: a window with no layout store still has
+    // tiles, and the dial still has to know about them.
+    _announceOpenPanesToDial();
     final store = _paneLayout;
     if (store == null) return;
     unawaited(
