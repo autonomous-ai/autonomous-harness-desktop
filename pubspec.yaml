@@ -47,6 +47,10 @@ dependencies:
     path: third_party/xterm
   package_info_plus: ^10.2.1
   window_manager: ^0.5.2
+  # The system folder panel: NSOpenPanel on macOS, IFileDialog on Windows, the
+  # XDG portal on Linux. Used ONLY for a machine that is this computer — see
+  # `widgets/new_agent_dialog.dart`.
+  file_selector: ^1.0.3
 
 dev_dependencies:
   flutter_test:
