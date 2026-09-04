@@ -94,6 +94,11 @@ class _AccountFooterState extends State<AccountFooter> {
           key: const Key('sign-out-menu-item'),
           icon: LucideIcons.logOut300,
           label: isLocal ? 'Disconnect local session' : 'Sign out',
+          // The one row here that ENDS something. It sat in a group of its own
+          // already, which said "this is different" — but drew in the same ink
+          // as Settings, which said the opposite louder. [AppMenuItem] has
+          // carried the treatment all along; this row simply never asked.
+          danger: true,
           onPressed: () {
             _menu.close();
             widget.notifier.logout();
@@ -279,11 +284,21 @@ class _AccountSummary extends StatelessWidget {
                   // shout at the rows it is introducing.
                   style: TextStyle(
                     color: grid.AppPalette.textPrimary,
+                    fontFamily: grid.AppFont.sans,
+                    fontFamilyFallback: grid.AppFont.sansFallback,
                     fontSize: 13.5,
+                    // 1.25, not the 1.2 a row uses: this line has a second line
+                    // under it, and a name and its address set solid read as one
+                    // block of text rather than as a heading and its subtitle.
+                    height: 1.25,
+                    // From the ladder, like the address under it — not a hand
+                    // -picked value. Two lines this close with tracking set on
+                    // only one of them drift apart at the right edge.
+                    letterSpacing: grid.AppFont.trackingFor(13.5),
                     fontWeight: grid.AppFont.semibold,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   profile?.email ??
                       (isLocal ? 'loopback backend' : 'profile unavailable'),
@@ -291,7 +306,10 @@ class _AccountSummary extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: grid.AppPalette.textSecondary,
+                    fontFamily: grid.AppFont.sans,
+                    fontFamilyFallback: grid.AppFont.sansFallback,
                     fontSize: 12,
+                    height: 1.25,
                     letterSpacing: grid.AppFont.trackingFor(12),
                   ),
                 ),
