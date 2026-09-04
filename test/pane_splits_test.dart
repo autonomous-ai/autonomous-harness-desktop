@@ -30,17 +30,32 @@ void main() {
     test('a fresh grid is centred everywhere', () {
       const splits = PaneSplits();
       expect(splits.row, 0.5);
-      expect(splits.colTop, 0.5);
-      expect(splits.colBottom, 0.5);
+      expect(splits.col, 0.5);
       expect(splits.isDefault, isTrue);
+    });
+
+    test('one column line, shared by every row', () {
+      // Per-row columns were tried and reverted: moving one boundary left the
+      // tile under it behind, so the grid came apart into a staircase.
+      const splits = PaneSplits(col: 0.7);
+      expect(splits.col, 0.7);
+      expect(splits.toJson().containsKey('colBottom'), isFalse);
+    });
+
+    test('a grid saved by the per-row build still opens where it was left', () {
+      // That shape shipped in exactly one release. `colTop` is taken as the
+      // column; `colBottom` has nowhere to go.
+      final back = PaneSplits.fromJson({'row': 0.3, 'colTop': 0.7, 'colBottom': 0.2});
+      expect(back.row, 0.3);
+      expect(back.col, 0.7);
     });
 
     test('a divider cannot be pushed onto the edge', () {
       // The pixel floor (40 columns) is applied where the width is known; this
       // is the backstop that keeps a stored file from asking for a zero-width
       // tile before anything has been measured.
-      expect(const PaneSplits().copyWith(colTop: 0.99).colTop, 0.85);
-      expect(const PaneSplits().copyWith(colTop: 0.001).colTop, 0.15);
+      expect(const PaneSplits().copyWith(col: 0.99).col, 0.85);
+      expect(const PaneSplits().copyWith(col: 0.001).col, 0.15);
       expect(const PaneSplits().copyWith(row: -5).row, 0.15);
     });
 
@@ -52,7 +67,7 @@ void main() {
     });
 
     test('round trips through json', () {
-      const splits = PaneSplits(row: 0.7, colTop: 0.3, colBottom: 0.62);
+      const splits = PaneSplits(row: 0.7, col: 0.3);
       expect(PaneSplits.fromJson(splits.toJson()), splits);
     });
   });
@@ -69,12 +84,13 @@ void main() {
     test('moved dividers survive the round trip, per pane count', () async {
       final store = PaneLayoutStore(storage: _MemoryStore());
       await store.saveSplits({
-        2: const PaneSplits(colTop: 0.7),
-        4: const PaneSplits(row: 0.3, colTop: 0.4, colBottom: 0.8),
+        2: const PaneSplits(col: 0.7),
+        4: const PaneSplits(row: 0.3, col: 0.4),
       });
       final back = await store.loadSplits();
-      expect(back[2]!.colTop, 0.7);
-      expect(back[4]!.colBottom, 0.8);
+      expect(back[2]!.col, 0.7);
+      expect(back[4]!.row, 0.3);
+      expect(back[4]!.col, 0.4);
       expect(back.containsKey(3), isFalse);
     });
 
@@ -122,17 +138,17 @@ void main() {
     test('moving a divider is written straight through', () async {
       final storage = _MemoryStore();
       final n = notifier(PaneLayoutStore(storage: storage));
-      n.setSplits(2, const PaneSplits(colTop: 0.62));
+      n.setSplits(2, const PaneSplits(col: 0.62));
       await Future<void>.delayed(Duration.zero);
       expect(storage.values['terminal_pane_splits'], contains('0.62'));
     });
 
     test('setting the same position again does not notify', () async {
       final n = notifier(PaneLayoutStore(storage: _MemoryStore()));
-      n.setSplits(2, const PaneSplits(colTop: 0.62));
+      n.setSplits(2, const PaneSplits(col: 0.62));
       var notified = 0;
       n.addListener(() => notified++);
-      n.setSplits(2, const PaneSplits(colTop: 0.62));
+      n.setSplits(2, const PaneSplits(col: 0.62));
       expect(notified, 0);
     });
   });

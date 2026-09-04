@@ -93,9 +93,9 @@ class PaneGrid extends StatelessWidget {
                 : Axis.vertical;
             return _Split(
               axis: side,
-              fraction: splits.colTop,
+              fraction: splits.col,
               onFraction: interactive
-                  ? (v) => put(splits.copyWith(colTop: v))
+                  ? (v) => put(splits.copyWith(col: v))
                   : null,
               first: cells[0],
               second: cells[1],
@@ -109,9 +109,9 @@ class PaneGrid extends StatelessWidget {
           onFraction: interactive ? (v) => put(splits.copyWith(row: v)) : null,
           first: _Split(
             axis: Axis.horizontal,
-            fraction: splits.colTop,
+            fraction: splits.col,
             onFraction: interactive
-                ? (v) => put(splits.copyWith(colTop: v))
+                ? (v) => put(splits.copyWith(col: v))
                 : null,
             first: cells[0],
             second: cells[1],
@@ -123,22 +123,26 @@ class PaneGrid extends StatelessWidget {
           axis: Axis.vertical,
           fraction: splits.row,
           onFraction: interactive ? (v) => put(splits.copyWith(row: v)) : null,
+          // BOTH rows read and write the same fraction, so the column is one
+          // line down the whole grid and dragging it anywhere moves all of it —
+          // the same way the row divider already spans the full width. Per-row
+          // columns were tried first and read as a staircase: moving one
+          // boundary left the tile under it behind, and the second drag existed
+          // only to undo the damage of the first.
           first: _Split(
             axis: Axis.horizontal,
-            fraction: splits.colTop,
+            fraction: splits.col,
             onFraction: interactive
-                ? (v) => put(splits.copyWith(colTop: v))
+                ? (v) => put(splits.copyWith(col: v))
                 : null,
             first: cells[0],
             second: cells[1],
           ),
-          // Its own number, not a shared column line: two rows forced onto one
-          // boundary make the wider tile in each row fight over it.
           second: _Split(
             axis: Axis.horizontal,
-            fraction: splits.colBottom,
+            fraction: splits.col,
             onFraction: interactive
-                ? (v) => put(splits.copyWith(colBottom: v))
+                ? (v) => put(splits.copyWith(col: v))
                 : null,
             first: cells[2],
             second: cells[3],

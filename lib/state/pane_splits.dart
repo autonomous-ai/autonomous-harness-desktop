@@ -10,19 +10,19 @@
 /// in the 3-pane layout is not the same divider as in the 4-pane one, and
 /// carrying a fraction across would move a boundary the user never touched.
 class PaneSplits {
-  const PaneSplits({this.row = 0.5, this.colTop = 0.5, this.colBottom = 0.5});
+  const PaneSplits({this.row = 0.5, this.col = 0.5});
 
   /// The top row's share of the height. Used by the 3- and 4-pane layouts.
   final double row;
 
-  /// The first row's vertical divider. This is the only one a 2-pane layout
-  /// has, whichever way it happens to be split.
-  final double colTop;
-
-  /// The second row's vertical divider — 4 panes only. Independent of
-  /// [colTop] by choice: two rows that must share one column line make the
-  /// wider tile in each row fight over the same number.
-  final double colBottom;
+  /// The vertical divider, shared by every row.
+  ///
+  /// ONE line down the whole grid, not one per row. The rows were briefly
+  /// independent and it was wrong in the hand: dragging the boundary between
+  /// two tiles left the one directly below it behind, so the grid came apart
+  /// into a staircase and the second drag existed only to repair the first.
+  /// A column is a column.
+  final double col;
 
   /// Never let a divider be dragged onto the edge. The real floor is a
   /// terminal's 40-column minimum and is applied in pixels where the width is
@@ -34,20 +34,14 @@ class PaneSplits {
   static double _clamp(double v) =>
       v.isFinite ? v.clamp(minFraction, maxFraction) : 0.5;
 
-  PaneSplits copyWith({double? row, double? colTop, double? colBottom}) =>
-      PaneSplits(
-        row: _clamp(row ?? this.row),
-        colTop: _clamp(colTop ?? this.colTop),
-        colBottom: _clamp(colBottom ?? this.colBottom),
-      );
+  PaneSplits copyWith({double? row, double? col}) => PaneSplits(
+    row: _clamp(row ?? this.row),
+    col: _clamp(col ?? this.col),
+  );
 
-  bool get isDefault => row == 0.5 && colTop == 0.5 && colBottom == 0.5;
+  bool get isDefault => row == 0.5 && col == 0.5;
 
-  Map<String, dynamic> toJson() => {
-    'row': row,
-    'colTop': colTop,
-    'colBottom': colBottom,
-  };
+  Map<String, dynamic> toJson() => {'row': row, 'col': col};
 
   /// Anything unreadable falls back to centred. A hand-edited or
   /// future-written file is a reason to open the grid the way a new user sees
@@ -61,18 +55,18 @@ class PaneSplits {
 
     return PaneSplits(
       row: read('row'),
-      colTop: read('colTop'),
-      colBottom: read('colBottom'),
+      // `colTop` is what the one release with per-row columns wrote. Read it so
+      // a grid saved by that build opens where it was left rather than jumping
+      // back to centre; `colBottom` is dropped, since there is nowhere left to
+      // put a second column.
+      col: raw.containsKey('col') ? read('col') : read('colTop'),
     );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is PaneSplits &&
-      other.row == row &&
-      other.colTop == colTop &&
-      other.colBottom == colBottom;
+      other is PaneSplits && other.row == row && other.col == col;
 
   @override
-  int get hashCode => Object.hash(row, colTop, colBottom);
+  int get hashCode => Object.hash(row, col);
 }
