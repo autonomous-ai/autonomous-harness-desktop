@@ -58,23 +58,40 @@ class MachineRail extends StatefulWidget {
 /// Public so ⌘F can reach the filter it already draws — the field lives in the
 /// rail's head, but the key that opens it has to be bound above the terminal.
 class MachineRailState extends State<MachineRail> {
+  /// The wordmark strip. The same 46px the terminal panes draw, so the
+  /// wordmark and a pane's title sit on one baseline.
   static const _headerHeight = 46.0;
-  String _query = '';
-  bool _searching = false;
-  final FocusNode _filterFocus = FocusNode();
 
-  /// Opens the filter and puts the caret in it. Already open: just re-focus,
-  /// so pressing the key twice never closes what the user just asked for.
-  void openFilter() {
-    setState(() => _searching = true);
-    _filterFocus.requestFocus();
-  }
+  /// The filter box. Shorter than [grid.AppControl.heightField]'s 36 on
+  /// purpose: this one is chrome inside a toolbar, not a field in a form, and
+  /// at 36 it made the header taller than the first two rows of the list it is
+  /// meant to introduce.
+  static const _filterHeight = 30.0;
+
+  String _query = '';
+  final FocusNode _filterFocus = FocusNode();
+  final TextEditingController _filter = TextEditingController();
+
+  /// Puts the caret in the filter. There is nothing to open any more — the box
+  /// is always drawn — so ⌘F is now purely "type here", and pressing it twice
+  /// never takes away what the user just asked for.
+  void openFilter() => _filterFocus.requestFocus();
 
   @override
   void dispose() {
     _filterFocus.dispose();
+    _filter.dispose();
     super.dispose();
   }
+
+  /// The filter's rim. 8px, one step tighter than a form field's, because this
+  /// box is 30 tall rather than 36 and the same radius on a shorter box reads
+  /// as rounder than its neighbours.
+  static OutlineInputBorder _filterBorder(Color color, {double width = 1}) =>
+      OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: color, width: width),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -119,112 +136,180 @@ class MachineRailState extends State<MachineRail> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // The rail opens with the product's name and the two things you
-            // do to the whole list. It used to open with MACHINES in tracked
-            // capitals over a permanently-bordered search box — a dev-tool
-            // caption and a control nobody asked for, costing 80px before the
-            // first row.
-            // The head is also a window drag handle — the title bar is hidden
-            // (see configureDesktopWindow). No rule under it: Grid draws none,
-            // and a rule here would sit below the pane header's and read as a
-            // mistake.
+            // The rail's head is a TOOLBAR, and it is built to look like one:
+            // its own surface, its own bottom edge, and the filter box living
+            // inside it rather than floating under it.
             //
-            // No top inset for the traffic lights any more: HarnessTopBar sits
-            // above the whole window and holds that row now, so keeping one
-            // here pushed the wordmark down twice.
-
-            DragToMoveArea(
-              child: SizedBox(
-                // The same 46px strip the terminal panes draw, so the wordmark
-                // and a pane's title sit on one baseline.
-                height: _headerHeight,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Harness',
-                          style: TextStyle(
-                            color: grid.AppPalette.textPrimary,
-                            fontSize: 17,
-                            // Semibold, not bold. A wordmark at 17pt already
-                            // out-ranks everything below it by size alone.
-                            fontWeight: grid.AppFont.semibold,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                      ),
-                      AppIconButton(
-                        icon: _searching
-                            ? LucideIcons.searchX300
-                            : LucideIcons.search300,
-                        size: 18,
-                        tooltip: withShortcutHint(
-                          'Filter machines and agents',
-                          ShortcutAction.filterAgents,
-                        ),
-                        color: _searching
-                            ? grid.AppPalette.accentOnSurface
-                            : null,
-                        onPressed: () => setState(() {
-                          _searching = !_searching;
-                          if (!_searching) _query = '';
-                        }),
-                      ),
-                      const SizedBox(width: 2),
-                      AppIconButton(
-                        icon: LucideIcons.refreshCw300,
-                        size: 18,
-                        tooltip: withShortcutHint(
-                          'Reload machines',
-                          ShortcutAction.reload,
-                        ),
-                        onPressed: widget.notifier.retryMachines,
-                      ),
-                      if (widget.onCollapse != null) ...[
-                        const SizedBox(width: 2),
-                        AppIconButton(
-                          icon: LucideIcons.panelLeft300,
-                          size: 18,
-                          tooltip: withShortcutHint(
-                            'Collapse sidebar',
-                            ShortcutAction.toggleRail,
-                          ),
-                          onPressed: widget.onCollapse!,
-                        ),
-                      ],
-                    ],
-                  ),
+            // It used to be a wordmark and three glyphs on the same fill as the
+            // list, with no edge under them — so "Harness" read as the first
+            // entry in the rail rather than as the thing above the entries, and
+            // the three buttons bunched into the right corner 2px apart.
+            //
+            // The filter is no longer behind a toggle. A magnifier that swaps a
+            // box in and out changed the rail's height on a click and spent a
+            // button on hiding a control that costs 30px; drawn always, it also
+            // tells the user the rail can be filtered without them guessing.
+            //
+            // [grid.AppSurface.recess] over the rail's own fill, not a colour
+            // of its own: it is an overlay, so it separates in BOTH themes —
+            // lighter than the charcoal rail in dark, a touch greyer than the
+            // near-white one in light, the way a Finder toolbar sits over its
+            // list.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: grid.AppSurface.recess,
+                border: Border(
+                  bottom: BorderSide(color: grid.AppPalette.divider),
                 ),
               ),
-            ),
-            if (_searching)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                // No SizedBox and no decoration overrides: the theme now
-                // sizes this to AppControl.heightField (36), not a push
-                // button's 32. §5.1 makes that split on purpose — a button is
-                // sized to be HIT, a field to be TYPED IN and to anchor the
-                // column under it, which is why Finder and Mail both give
-                // sidebar search more room than a button in the same window.
-                child: TextField(
-                  focusNode: _filterFocus,
-                  style: grid.kFieldTextStyle,
-                  decoration: InputDecoration(
-                    hintText: 'filter machines / agents',
-                    prefixIcon: Icon(
-                      LucideIcons.search300,
-                      // The field's glyph follows the box it sits in, not the
-                      // button token next to it — see [grid.kFieldIconSize].
-                      size: grid.kFieldIconSize,
-                      color: grid.AppPalette.textFaint,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Still the window's drag handle — the title bar is hidden,
+                  // see configureDesktopWindow.
+                  DragToMoveArea(
+                    child: SizedBox(
+                      height: _headerHeight,
+                      child: Padding(
+                        // 16 left against 8 right, so the wordmark's stem and
+                        // the last button's CENTRE both land 20px from their
+                        // own edge. Matching the two paddings instead would
+                        // push the buttons visibly further in than the text.
+                        padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Harness',
+                                style: TextStyle(
+                                  color: grid.AppPalette.textPrimary,
+                                  fontSize: 16,
+                                  // Semibold, not bold. A wordmark at this size
+                                  // already out-ranks everything below it.
+                                  fontWeight: grid.AppFont.semibold,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ),
+                            AppIconButton(
+                              icon: LucideIcons.refreshCw300,
+                              size: 17,
+                              // A step up from the default resting ink. At
+                              // textSecondary these two hairline glyphs read as
+                              // half-loaded next to a semibold wordmark.
+                              color: grid.AppPalette.textPrimary.withValues(
+                                alpha: 0.72,
+                              ),
+                              tooltip: withShortcutHint(
+                                'Reload machines',
+                                ShortcutAction.reload,
+                              ),
+                              onPressed: widget.notifier.retryMachines,
+                            ),
+                            if (widget.onCollapse != null) ...[
+                              // 6, not 2. Two glyphs a hair apart read as one
+                              // smudge; this is the smallest gap that still
+                              // says "two buttons".
+                              const SizedBox(width: 6),
+                              AppIconButton(
+                                icon: LucideIcons.panelLeft300,
+                                size: 17,
+                                color: grid.AppPalette.textPrimary.withValues(
+                                  alpha: 0.72,
+                                ),
+                                tooltip: withShortcutHint(
+                                  'Collapse sidebar',
+                                  ShortcutAction.toggleRail,
+                                ),
+                                onPressed: widget.onCollapse!,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  onChanged: (value) =>
-                      setState(() => _query = value.trim().toLowerCase()),
-                ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                    child: SizedBox(
+                      height: _filterHeight,
+                      child: TextField(
+                        key: const Key('rail-filter-field'),
+                        controller: _filter,
+                        focusNode: _filterFocus,
+                        style: grid.kFieldTextStyle.copyWith(fontSize: 12.5),
+                        // The app's field theme builds a 36px form control with
+                        // a 10px gutter and a full rim. Inside a toolbar that
+                        // is the wrong object, so the metrics are restated here
+                        // — the tokens are not: fill, rim and ink all still
+                        // come from the palette.
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          // The rail's OWN fill, not another `recess` on top of
+                          // the toolbar's. `recess` lightens in dark and darkens
+                          // in light — it always raises a surface off its
+                          // ground — so stacking it here built the field UP out
+                          // of the toolbar when the whole point is that it sits
+                          // down in it. Painting it back at the rail's level
+                          // makes the three layers read in the right order:
+                          // list, toolbar above it, field cut back down into
+                          // the toolbar. Which is also a Finder search field —
+                          // white, in a toolbar greyer than the list below.
+                          fillColor: grid.AppGlass.sidebarFill,
+                          hintText: 'Filter machines and agents',
+                          hintStyle: TextStyle(
+                            color: grid.AppPalette.textFaint,
+                            fontFamily: grid.AppFont.sans,
+                            fontSize: 12.5,
+                          ),
+                          constraints: const BoxConstraints(
+                            minHeight: _filterHeight,
+                            maxHeight: _filterHeight,
+                          ),
+                          contentPadding: const EdgeInsets.fromLTRB(0, 0, 8, 0),
+                          prefixIcon: Icon(
+                            LucideIcons.search300,
+                            size: 14,
+                            color: grid.AppPalette.textFaint,
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: _filterHeight,
+                          ),
+                          // A suffix that only exists once there is something
+                          // to clear — an ✕ on an empty box is a button that
+                          // does nothing.
+                          suffixIcon: _query.isEmpty
+                              ? null
+                              : AppIconButton(
+                                  icon: LucideIcons.x300,
+                                  size: 13,
+                                  tooltip: 'Clear filter',
+                                  onPressed: () {
+                                    _filter.clear();
+                                    setState(() => _query = '');
+                                  },
+                                ),
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 28,
+                            minHeight: _filterHeight,
+                          ),
+                          border: _filterBorder(grid.AppGlass.hair),
+                          enabledBorder: _filterBorder(grid.AppGlass.hair),
+                          focusedBorder: _filterBorder(
+                            grid.AppPalette.accentOnSurface,
+                            width: 1.4,
+                          ),
+                        ),
+                        onChanged: (value) =>
+                            setState(() => _query = value.trim().toLowerCase()),
+                      ),
+                    ),
+                  ),
+                ],
               ),
+            ),
             Expanded(
               child: machines.isEmpty
                   // Two kinds of empty, and they must not look the same: the
