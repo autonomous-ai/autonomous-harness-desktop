@@ -235,16 +235,12 @@ void main() {
       expect(find.text('diego@autonomous.ai'), findsOneWidget);
       expect(find.byKey(const Key('account-menu-button')), findsOneWidget);
       expect(find.byIcon(LucideIcons.logOut300), findsNothing);
-      // The rail is present. Asserted on its primary action, not on the
-      // filter field: that field lives behind the rail's search toggle, so its
-      // absence says nothing about whether the rail rendered. The "Machines"
-      // heading it used to check is gone — a machine is a caption over its own
-      // agents now, so a caption over the captions would be two headings deep.
-      //
-      // This case is "no machines", and the button is drawn (disabled) even
-      // then, on purpose: a rail that shows nothing at all cannot be told from
-      // a rail that failed to build.
-      expect(find.byKey(const Key('rail-new-agent-button')), findsOneWidget);
+      // The rail is present. Not asserted on the filter field, which lives
+      // behind the rail's search toggle, nor on the "Machines" heading it used
+      // to check — a machine is a caption over its own agents now, so a caption
+      // over the captions would be two headings deep. This case is "no
+      // machines", and the rail's own answer to that is the thing to look for.
+      expect(find.text('no remote machines'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('account-menu-button')));
       await tester.pumpAndSettle();
