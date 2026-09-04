@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -352,19 +350,21 @@ class _PaneCell extends StatelessWidget {
           border: Border.all(
             // Only meaningful with company. A ring around the only tile would
             // be decoration, since there is nowhere else focus could be.
-            // NOT the accent, even when focused. A saturated 1px line sits
-            // under the glow and adds to it, and the sum is what reads as a
-            // hard stroke rather than as light — the glow's own rim is the
-            // only edge focus needs.
-            color: _single ? Colors.transparent : AppColors.border,
+            color: _single
+                ? Colors.transparent
+                : focused
+                ? AppColors.accent
+                : AppColors.border,
             width: 1,
           ),
         ),
-        // Attention keeps the ring; focus is drawn as LIGHT, below.
-        //
-        // The ring means "waiting on you" and must stay a hard, unambiguous
-        // 2px edge. Focus wearing the same shape in another colour is what
-        // made the two argue in the first place.
+        // Attention, drawn OVER the terminal and inside the border above, so a
+        // pane can carry both at once — this one is blocked AND focused is a
+        // normal state, not a conflict to resolve. It is amber and 2px against
+        // the border's 1px accent precisely so the two never read as each
+        // other. Unlike focus, it shows on a single pane too: with one tile
+        // there is nowhere else focus could be, but there is very much a
+        // question waiting.
         foregroundDecoration: blocked
             ? BoxDecoration(
                 border: Border.all(color: grid.AppPalette.warn, width: 2),
@@ -373,118 +373,36 @@ class _PaneCell extends StatelessWidget {
         // Keeps a terminal's constant repainting inside its own layer instead
         // of dirtying the whole grid. No key: nothing reads this boundary, it
         // only has to exist.
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: _SwapZone(
+        child: RepaintBoundary(
+          child: _SwapZone(
+            notifier: notifier,
+            paneId: pane.id,
+            child: _DropZone(
+              notifier: notifier,
+              paneId: pane.id,
+              dragging: dragging,
+              child: ValueListenableBuilder<PaneDragRef?>(
+                valueListenable: paneDragging,
+                // The tile being carried fades where it sits, so the grid shows
+                // where it came FROM while the ghost shows where it is going.
+                builder: (context, inFlight, child) => Opacity(
+                  opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                  child: child,
+                ),
+                child: _PaneContent(
                   notifier: notifier,
-                  paneId: pane.id,
-                  child: _DropZone(
-                    notifier: notifier,
-                    paneId: pane.id,
-                    dragging: dragging,
-                    child: ValueListenableBuilder<PaneDragRef?>(
-                      valueListenable: paneDragging,
-                      // The tile being carried fades where it sits, so the grid shows
-                      // where it came FROM while the ghost shows where it is going.
-                      builder: (context, inFlight, child) => Opacity(
-                        opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
-                        child: child,
-                      ),
-                      child: _PaneContent(
-                        notifier: notifier,
-                        pane: pane,
-                        single: _single,
-                      ),
-                    ),
-                  ),
+                  pane: pane,
+                  single: _single,
                 ),
               ),
             ),
-            // Focus, as light. Painted OVER the terminal so it never depends on
-            // what the engine's own colour scheme puts underneath.
-            if (focused && !_single)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: CustomPaint(
-                    painter: _FocusGlow(
-                      // Amber when the tile is also asking a question: it is
-                      // still the louder fact, and focus does not recolour it.
-                      blocked ? grid.AppPalette.warn : AppColors.accent,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// The focused tile's edge light.
-///
-/// Concentric 1px strokes fading inward — NOT a blurred shadow. `BlurStyle.inner`
-/// is the obvious reach and it is wrong: it means "keep the blur inside the
-/// shape", which on a filled rectangle fills the whole tile, and a 4px radius
-/// already washed an entire pane blue. Rendered and looked at, not reasoned
-/// about.
-///
-/// A flat stroke is the other failed answer — 2px of saturated accent reads as
-/// a selected form field, uniform and dead. What makes this read as LIGHT is
-/// the falloff: a crisp rim, then sixteen steps decaying cubically, so the
-/// brightness gradient is what the eye catches rather than an outline.
-class _FocusGlow extends CustomPainter {
-  const _FocusGlow(this.color);
-
-  final Color color;
-
-  /// How far the light reaches inward, in logical pixels.
-  static const int _steps = 22;
-
-  /// Brightness at the rim.
-  ///
-  /// Well under 1. At full strength the outermost ring is a saturated line and
-  /// the whole thing reads as a bold stroke with a halo behind it — the exact
-  /// look this replaced. Kept dim, the eye reads the FALLOFF instead, which is
-  /// what makes it light. Chosen by rendering the sweep and looking at it.
-  static const double _peak = 0.40;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    // Outermost last: the rim is the brightest line and must not be dimmed by
-    // a step drawn over it.
-    for (var i = _steps - 1; i >= 0; i--) {
-      final t = i / (_steps - 1);
-      paint.color = color.withValues(
-        alpha: _peak * math.pow(1 - t, 3).toDouble(),
-      );
-      canvas.drawRect(
-        Rect.fromLTWH(
-          i + 0.5,
-          i + 0.5,
-          size.width - 2 * i - 1,
-          size.height - 2 * i - 1,
-        ),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_FocusGlow old) => old.color != color;
-}
-
-/// Everything a tile can be, decided per tile.
-///
-/// This chain used to live in HomeScreen and decide the WHOLE content area from
-/// the one selected machine. That is wrong the moment tiles can come from
-/// different machines: one machine needing a link would blank three working
-/// terminals belonging to two other machines.
 class _PaneContent extends StatelessWidget {
   const _PaneContent({
     required this.notifier,
