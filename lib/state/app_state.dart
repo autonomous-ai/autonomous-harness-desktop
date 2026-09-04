@@ -1737,12 +1737,7 @@ class AppNotifier extends ChangeNotifier {
     try {
       result = await _conn(machineId).request(
         'agent_retarget',
-        payload: {
-          'agentId': agentId,
-          // Exactly one of the two, and never `grid: null` — the CLI's parser reads an absent grid
-          // and a null grid the same way, so own login has to say so in its own field.
-          if (grid != null) 'grid': grid.toJson() else 'clearGrid': true,
-        },
+        payload: retargetPayload(agentId, grid),
         timeout: const Duration(seconds: 20),
       );
     } catch (error) {
@@ -1756,6 +1751,22 @@ class AppNotifier extends ChangeNotifier {
     await _loadMachineData(machine, force: true);
     return null;
   }
+
+  /// The `agent_retarget` payload for moving [agentId] onto [grid] — or, when [grid] is null, back
+  /// onto its own login.
+  ///
+  /// Pulled out of [moveAgentToGrid] so the one constraint this wire change exists to protect —
+  /// `grid` and `clearGrid` are mutually exclusive, and the CLI's parser reads an absent `grid` and
+  /// a null one the same way, so own login has to say so in its own field — is guaranteed by a
+  /// function under test rather than only by reading the code.
+  @visibleForTesting
+  static Map<String, dynamic> retargetPayload(
+    String agentId,
+    GridAgentOverride? grid,
+  ) => {
+    'agentId': agentId,
+    if (grid != null) 'grid': grid.toJson() else 'clearGrid': true,
+  };
 
   /// [moveAgentToGrid]'s answer when the agent was already gone.
   ///

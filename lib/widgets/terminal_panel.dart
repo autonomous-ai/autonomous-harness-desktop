@@ -10,6 +10,7 @@ import 'package:xterm/xterm.dart';
 import '../state/app_state.dart';
 
 import 'agent_drag.dart';
+import 'agent_model_menu.dart';
 import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
 import '../terminal/terminal_font_store.dart';
@@ -637,6 +638,13 @@ class _TerminalHeader extends StatelessWidget {
               ),
             ),
 
+            AgentModelMenu(
+              notifier: notifier,
+              machineId: session.machineId,
+              agentId: session.agentId,
+              engine: session.engineId ?? '',
+            ),
+            const SizedBox(width: 6),
             if (session.status == TerminalSessionStatus.controlling)
               Padding(padding: const EdgeInsets.all(4), child: statusMark)
             else
