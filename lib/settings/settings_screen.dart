@@ -172,7 +172,10 @@ class _SettingsBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screen = switch (section) {
-      SettingsSection.grid => GridSection(controller: gridNetworks),
+      SettingsSection.grid => GridSection(
+        controller: gridNetworks,
+        harnessEmail: notifier.currentUser?.email,
+      ),
       SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),

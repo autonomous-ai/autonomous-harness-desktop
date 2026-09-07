@@ -33,6 +33,7 @@ class GridSection extends StatefulWidget {
     required this.controller,
     this.selection,
     this.session,
+    this.harnessEmail,
   });
 
   final GridNetworksController controller;
@@ -45,6 +46,10 @@ class GridSection extends StatefulWidget {
   /// has none. The app uses the singleton every other reader shares, so a
   /// sign-in here is a sign-in for the status rail and the share sheet as well.
   final GridSessionStore? session;
+
+  /// Who the app is signed in to Harness as, for the one comparison nothing
+  /// else makes — see [_AccountMismatch]. Null before the profile lands.
+  final String? harnessEmail;
 
   @override
   State<GridSection> createState() => _GridSectionState();
@@ -119,6 +124,20 @@ class _GridSectionState extends State<GridSection> {
     );
   }
 
+  /// The Grid account, when it is not the Harness one — the state the bootstrap
+  /// sign-in deliberately leaves alone.
+  ///
+  /// Null while either address is unknown: "we have not asked yet" and "they
+  /// differ" must not draw the same, and a warning that flashes on every open
+  /// while the profile loads is a warning people stop reading.
+  String? _mismatch(String? gridEmail) {
+    final harness = widget.harnessEmail?.trim();
+    final grid = gridEmail?.trim();
+    if (harness == null || harness.isEmpty) return null;
+    if (grid == null || grid.isEmpty) return null;
+    return grid.toLowerCase() == harness.toLowerCase() ? null : grid;
+  }
+
   /// The pane's one layout, with or without its answer. [email] and
   /// [networks] are null while the grids load, and every part that depends
   /// on them is then drawn at its final size and left blank.
@@ -132,6 +151,13 @@ class _GridSectionState extends State<GridSection> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           GridTargetStrip(chosen: chosen),
+          if (_mismatch(email) case final String grid) ...[
+            const SizedBox(height: 12),
+            _AccountMismatch(
+              gridEmail: grid,
+              harnessEmail: widget.harnessEmail!,
+            ),
+          ],
           const SizedBox(height: 16),
           _FilterBar(
             query: _query,
@@ -584,6 +610,57 @@ class _SignedOutState extends State<_SignedOut> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The Grid CLI is signed in as somebody other than the Harness account.
+///
+/// A statement, not a fix. The app signs this computer in to Grid only when it
+/// has NO session (`AppNotifier._ensureGridSession`), precisely so a session
+/// somebody pointed at another account on purpose is never overwritten — which
+/// leaves exactly one duty here: to say so, rather than let a person read
+/// another account's grids without ever being told whose they are.
+class _AccountMismatch extends StatelessWidget {
+  const _AccountMismatch({required this.gridEmail, required this.harnessEmail});
+
+  final String gridEmail;
+  final String harnessEmail;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      key: const Key('grid-account-mismatch'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: grid.AppPalette.warn.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: grid.AppPalette.warn.withValues(alpha: 0.26)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            LucideIcons.triangleAlert300,
+            size: 15,
+            color: grid.AppPalette.warn,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              'These are $gridEmail\'s grids. Harness is signed in as '
+              '$harnessEmail. Run `harness grid logout`, then `harness grid '
+              'login`, to use the Harness account here.',
+              style: TextStyle(
+                color: grid.AppPalette.textSecondary,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

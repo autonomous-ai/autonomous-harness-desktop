@@ -14,6 +14,7 @@ import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/models.dart';
 import '../grid/grid_agent_override.dart';
+import '../grid/grid_session.dart';
 import '../settings/config_store.dart';
 import '../terminal/terminal_session.dart';
 import 'pane_layout_store.dart';
@@ -640,12 +641,46 @@ class AppNotifier extends ChangeNotifier {
     } catch (error) {
       debugPrint('bootstrap: profile unavailable: $error');
     }
+    // Not awaited: the Grid sign-in is a child process on a network, and the
+    // machine list is what the window is waiting to draw.
+    unawaited(_ensureGridSession());
     try {
       await refreshMachines();
     } catch (error) {
       _lastError = 'Could not load machines: $error';
     }
     notifyListeners();
+  }
+
+  /// Signs this computer in to Grid once the Harness sign-in has resolved — but
+  /// ONLY when it has no Grid session at all.
+  ///
+  /// The two accounts are one person, and `harness grid login` needs no browser
+  /// and about a second, so making somebody go and ask for a second sign-in is
+  /// asking them to care about a split they did not create.
+  ///
+  /// **Only when there is none, and that guard is the whole design.** Every run
+  /// mints a fresh 365-day session and revokes nothing, so a sign-in on every
+  /// launch would pile sessions onto the account forever — and the only cleanup
+  /// is `grid logout --everywhere`, which is all-or-nothing and signs out every
+  /// other machine too. It would also overwrite a session somebody deliberately
+  /// pointed at another account. A session that already exists is therefore
+  /// left exactly alone, whoever it belongs to; Settings ▸ Grid is where a
+  /// mismatch is said out loud.
+  ///
+  /// Silent either way. This is a convenience on top of a Harness sign-in that
+  /// already succeeded, and a machine with no `grid` on PATH (or no network)
+  /// must not have its login reported as a failure over it — the Grid pane
+  /// still has its own button, and says why when it cannot.
+  Future<void> _ensureGridSession() async {
+    try {
+      await gridSessionStore.load();
+      if (gridSessionStore.signedIn) return;
+      final failure = await gridSessionStore.signIn();
+      if (failure != null) debugPrint('grid sign-in skipped: $failure');
+    } catch (error) {
+      debugPrint('grid sign-in skipped: $error');
+    }
   }
 
   /// The local daemon (`harness start`) must be up before any local REST/WS call can work — unlike

@@ -203,6 +203,27 @@ name = "A Grid"
     expect(store.signedIn, isFalse);
   });
 
+  // --- signing in exactly once ---------------------------------------------
+
+  test(
+    'a session that already exists is left alone, whoever it belongs to',
+    () async {
+      final file = File('${scratch.path}/credentials.toml')
+        ..writeAsStringSync(_realShape);
+      final runner = FakeCliRunner(exited(0));
+      final store = GridSessionStore(file: file, runner: runner);
+      await store.load();
+
+      // What `AppNotifier._ensureGridSession` does, and the guard that is the
+      // whole design: every run mints a fresh 365-day session and revokes
+      // nothing, so signing in over a live one piles sessions onto the account.
+      if (!store.signedIn) await store.signIn();
+
+      expect(runner.calls, isEmpty);
+      expect(store.value?.token, 'session-abc');
+    },
+  );
+
   // --- what the client does with it ---------------------------------------
 
   test('with no session the client refuses before it opens a socket', () async {

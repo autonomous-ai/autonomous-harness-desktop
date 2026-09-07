@@ -171,7 +171,13 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   to production. Signing in is `GridSessionStore.signIn()` → `harness grid login --json`, which
   hands the Harness session this app already has to `grid login --harness` over that child's
   **stdin** — no browser, and the account token never reaches an argv. Its refusals already name
-  their own way forward, so they are shown verbatim rather than re-worded. No session is a state,
+  their own way forward, so they are shown verbatim rather than re-worded. **The app signs in for
+  you on bootstrap (`AppNotifier._ensureGridSession`), but ONLY when the machine has no Grid session
+  at all** — every run mints a fresh 365-day session and revokes nothing, so signing in on each
+  launch would pile sessions onto the account, with `grid logout --everywhere` (all-or-nothing,
+  every machine) as the only cleanup. An existing session is therefore left alone whoever owns it,
+  which leaves Settings ▸ Grid one duty: `_AccountMismatch` says whose grids these are when the Grid
+  CLI's account is not the Harness one. No session is a state,
   not an error: `GridSignedOutException` → `GridNetworksSignedOut` → the sign-in card in Settings ▸
   Grid, kept apart from `GridNetworksFailed` because that one offers a Retry and retrying a sign-out
   fails identically forever. `--dart-define=GRID_API_TOKEN=…` still pins a token for a build that

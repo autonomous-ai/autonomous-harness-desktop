@@ -119,7 +119,11 @@ void main() {
 
     setUp(() => selection = GridSelectionStore(storage: _MemoryStore()));
 
-    Future<void> pump(WidgetTester tester, GridNetworksController c) async {
+    Future<void> pump(
+      WidgetTester tester,
+      GridNetworksController c, {
+      String? harnessEmail,
+    }) async {
       // A window the size the app actually opens at. At the 800x600 default the
       // table's viewport is one row tall, so a lazy list never builds the
       // second grid and the test is asserting about a pane no user ever sees.
@@ -134,7 +138,11 @@ void main() {
               AppTheme.brightness.value = Brightness.light;
               return BrightnessScope(
                 child: Scaffold(
-                  body: GridSection(controller: c, selection: selection),
+                  body: GridSection(
+                    controller: c,
+                    selection: selection,
+                    harnessEmail: harnessEmail,
+                  ),
                 ),
               );
             },
@@ -150,6 +158,40 @@ void main() {
       await pump(tester, controller);
       return controller;
     }
+
+    testWidgets('says whose grids these are when it is not you', (
+      tester,
+    ) async {
+      final controller = GridNetworksController(client: FakeGridApi());
+      addTearDown(controller.dispose);
+      await pump(tester, controller, harnessEmail: 'someone-else@example.com');
+
+      // The bootstrap sign-in leaves an existing session alone whoever owns it,
+      // so saying so here is the only thing standing between a person and
+      // another account's grids read as their own.
+      expect(find.byKey(const Key('grid-account-mismatch')), findsOneWidget);
+      expect(find.textContaining('huy@example.com'), findsWidgets);
+    });
+
+    testWidgets('says nothing when the two accounts agree', (tester) async {
+      final controller = GridNetworksController(client: FakeGridApi());
+      addTearDown(controller.dispose);
+      await pump(tester, controller, harnessEmail: 'HUY@example.com');
+
+      // Case-insensitively: an address is not two accounts for being typed
+      // with a capital.
+      expect(find.byKey(const Key('grid-account-mismatch')), findsNothing);
+    });
+
+    testWidgets('says nothing before the Harness profile lands', (
+      tester,
+    ) async {
+      await ready(tester);
+
+      // A warning that flashes on every open while the profile loads is a
+      // warning people stop reading.
+      expect(find.byKey(const Key('grid-account-mismatch')), findsNothing);
+    });
 
     testWidgets('lists every grid, marking the one you own', (tester) async {
       await ready(tester);
