@@ -55,7 +55,8 @@ MachineState _machine(AppNotifier app, String id, List<String> agentIds) {
     status: 'online',
   );
   final state = MachineState(machine)
-    ..nodeOnline = false // keeps _attachSession from dialling out
+    ..nodeOnline =
+        false // keeps _attachSession from dialling out
     ..agentLoadStatus = AgentLoadStatus.loaded
     ..agents = [for (final agentId in agentIds) _agent(agentId)];
   app.machines = [...app.machines, machine];
@@ -98,30 +99,42 @@ void main() {
     app.dispose();
   });
 
-  test('dropping an agent that is already open MOVES it rather than duplicating', () async {
+  test(
+    'dropping an agent that is already open MOVES it rather than duplicating',
+    () async {
+      final app = _notifier();
+      _machine(app, 'm1', ['a', 'b']);
+
+      await app.assignAgentToPane(null, 'm1', 'a');
+      await app.assignAgentToPane(null, 'm1', 'b');
+      final second = app.panes[1].id;
+
+      await app.assignAgentToPane(second, 'm1', 'a');
+      expect(app.panes.length, 1);
+      expect(app.panes.single.agentId, 'a');
+      app.dispose();
+    },
+  );
+
+  test('the grid stops at the ceiling, and the extra opens nothing', () async {
+    // Written against the constant, not against a number: the ceiling has moved
+    // once already (four, then nine when ⌘1–⌘9 became the way to reach a tile),
+    // and a test that hardcodes it fails for the change rather than for a bug.
     final app = _notifier();
-    _machine(app, 'm1', ['a', 'b']);
+    final ids = [for (var i = 0; i <= AppNotifier.maxPanes; i++) 'a$i'];
+    _machine(app, 'm1', ids);
 
-    await app.assignAgentToPane(null, 'm1', 'a');
-    await app.assignAgentToPane(null, 'm1', 'b');
-    final second = app.panes[1].id;
-
-    await app.assignAgentToPane(second, 'm1', 'a');
-    expect(app.panes.length, 1);
-    expect(app.panes.single.agentId, 'a');
-    app.dispose();
-  });
-
-  test('the grid stops at four', () async {
-    final app = _notifier();
-    _machine(app, 'm1', ['a', 'b', 'c', 'd', 'e']);
-
-    for (final id in ['a', 'b', 'c', 'd', 'e']) {
+    for (final id in ids) {
       await app.assignAgentToPane(null, 'm1', id);
     }
     expect(app.panes.length, AppNotifier.maxPanes);
     expect(app.canAddPane, isFalse);
-    expect(app.panes.map((pane) => pane.agentId), ['a', 'b', 'c', 'd']);
+    // The ones that fit are the ones asked for FIRST — the last request is
+    // refused, rather than evicting a tile the user is looking at.
+    expect(
+      app.panes.map((pane) => pane.agentId),
+      ids.take(AppNotifier.maxPanes),
+    );
     app.dispose();
   });
 
@@ -199,67 +212,86 @@ void main() {
     app.dispose();
   });
 
-  test('a restored tile appears before its machine answers, then attaches', () async {
-    final storage = _MemoryStore()
-      ..values['terminal_pane_layout'] = jsonEncode([
-        {'machineId': 'm1', 'agentId': 'a'},
-      ]);
-    final store = PaneLayoutStore(storage: storage);
+  test(
+    'a restored tile appears before its machine answers, then attaches',
+    () async {
+      final storage = _MemoryStore()
+        ..values['terminal_pane_layout'] = jsonEncode([
+          {'machineId': 'm1', 'agentId': 'a'},
+        ]);
+      final store = PaneLayoutStore(storage: storage);
 
-    final entries = await store.load();
-    expect(entries.length, 1);
-    expect(entries.single.agentId, 'a');
-  });
+      final entries = await store.load();
+      expect(entries.length, 1);
+      expect(entries.single.agentId, 'a');
+    },
+  );
 
-  test('a duplicate in the saved file is dropped rather than reopened twice', () async {
-    final storage = _MemoryStore()
-      ..values['terminal_pane_layout'] = jsonEncode([
-        {'machineId': 'm1', 'agentId': 'a'},
-        {'machineId': 'm1', 'agentId': 'a'},
-        {'machineId': 'm1', 'agentId': 'b'},
-      ]);
-    final entries = await PaneLayoutStore(storage: storage).load();
-    expect(entries.map((e) => e.agentId), ['a', 'b']);
-  });
+  test(
+    'a duplicate in the saved file is dropped rather than reopened twice',
+    () async {
+      final storage = _MemoryStore()
+        ..values['terminal_pane_layout'] = jsonEncode([
+          {'machineId': 'm1', 'agentId': 'a'},
+          {'machineId': 'm1', 'agentId': 'a'},
+          {'machineId': 'm1', 'agentId': 'b'},
+        ]);
+      final entries = await PaneLayoutStore(storage: storage).load();
+      expect(entries.map((e) => e.agentId), ['a', 'b']);
+    },
+  );
 
-  test('a corrupt layout file opens the app empty rather than not at all', () async {
-    final storage = _MemoryStore()..values['terminal_pane_layout'] = 'not json';
-    expect(await PaneLayoutStore(storage: storage).load(), isEmpty);
-  });
+  test(
+    'a corrupt layout file opens the app empty rather than not at all',
+    () async {
+      final storage = _MemoryStore()
+        ..values['terminal_pane_layout'] = 'not json';
+      expect(await PaneLayoutStore(storage: storage).load(), isEmpty);
+    },
+  );
 
-  test('a file from a build that allows more tiles cannot open five', () async {
-    final storage = _MemoryStore()
-      ..values['terminal_pane_layout'] = jsonEncode([
-        for (final id in ['a', 'b', 'c', 'd', 'e'])
-          {'machineId': 'm1', 'agentId': id},
-      ]);
-    final entries = await PaneLayoutStore(storage: storage).load();
-    expect(entries.length, PaneLayoutStore.maxPanes);
-  });
+  test(
+    'a file from a build that allows more tiles is trimmed on the way in',
+    () async {
+      final storage = _MemoryStore()
+        ..values['terminal_pane_layout'] = jsonEncode([
+          for (var i = 0; i <= PaneLayoutStore.maxPanes; i++)
+            {'machineId': 'm1', 'agentId': 'a$i'},
+        ]);
+      final entries = await PaneLayoutStore(storage: storage).load();
+      expect(entries.length, PaneLayoutStore.maxPanes);
+    },
+  );
 
-  test('a pane keeps its identity when reassigned, so the grid cell survives', () async {
-    final app = _notifier();
-    _machine(app, 'm1', ['a', 'b']);
-    await app.assignAgentToPane(null, 'm1', 'a');
-    final id = app.panes.single.id;
+  test(
+    'a pane keeps its identity when reassigned, so the grid cell survives',
+    () async {
+      final app = _notifier();
+      _machine(app, 'm1', ['a', 'b']);
+      await app.assignAgentToPane(null, 'm1', 'a');
+      final id = app.panes.single.id;
 
-    await app.assignAgentToPane(id, 'm1', 'b');
-    expect(app.panes.single.id, id);
-    expect(app.panes.single.agentId, 'b');
-    app.dispose();
-  });
+      await app.assignAgentToPane(id, 'm1', 'b');
+      expect(app.panes.single.id, id);
+      expect(app.panes.single.agentId, 'b');
+      app.dispose();
+    },
+  );
 
-  test('a tile is only reported as holding the agent it actually holds', () async {
-    final app = _notifier();
-    _machine(app, 'm1', ['a']);
-    _machine(app, 'm2', ['a']);
+  test(
+    'a tile is only reported as holding the agent it actually holds',
+    () async {
+      final app = _notifier();
+      _machine(app, 'm1', ['a']);
+      _machine(app, 'm2', ['a']);
 
-    await app.assignAgentToPane(null, 'm1', 'a');
-    expect(app.isAgentInPane('m1', 'a'), isTrue);
-    // Same agent id on a different machine is a different agent.
-    expect(app.isAgentInPane('m2', 'a'), isFalse);
-    app.dispose();
-  });
+      await app.assignAgentToPane(null, 'm1', 'a');
+      expect(app.isAgentInPane('m1', 'a'), isTrue);
+      // Same agent id on a different machine is a different agent.
+      expect(app.isAgentInPane('m2', 'a'), isFalse);
+      app.dispose();
+    },
+  );
 
   test('dial focus selects a remote agent on the machine named by the CLI', () async {
     final app = _notifier();
@@ -375,17 +407,20 @@ void main() {
     app.dispose();
   });
 
-  test('a layout written before the composer existed opens with it showing', () async {
-    // Absent must read as "never chose", not as "chose off" — otherwise shipping this feature
-    // would silently hide the box for everyone who already has a saved grid.
-    final storage = _MemoryStore()
-      ..values['terminal_pane_layout'] = jsonEncode([
-        {'machineId': 'm1', 'agentId': 'a'},
-      ]);
+  test(
+    'a layout written before the composer existed opens with it showing',
+    () async {
+      // Absent must read as "never chose", not as "chose off" — otherwise shipping this feature
+      // would silently hide the box for everyone who already has a saved grid.
+      final storage = _MemoryStore()
+        ..values['terminal_pane_layout'] = jsonEncode([
+          {'machineId': 'm1', 'agentId': 'a'},
+        ]);
 
-    final restored = await PaneLayoutStore(storage: storage).load();
-    expect(restored.single.composerVisible, isTrue);
-  });
+      final restored = await PaneLayoutStore(storage: storage).load();
+      expect(restored.single.composerVisible, isTrue);
+    },
+  );
 
   test('an empty layout leaves the first-run auto-pick free to run', () {
     final pane = TerminalPane(id: 1, machineId: 'm1', agentId: 'a');

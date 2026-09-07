@@ -72,6 +72,32 @@ void main() {
     });
   });
 
+  group('more than four tiles', () {
+    test('an axis of even fractions, and nothing for fewer than two slots', () {
+      expect(PaneSplits.even(3), [1 / 3, 1 / 3, 1 / 3]);
+      expect(PaneSplits.even(1), isEmpty);
+      expect(PaneSplits.even(0), isEmpty);
+    });
+
+    test('fractions are stored normalised, not repaired on every read', () {
+      // A list that has to be fixed before each use is one that will eventually
+      // be drawn before someone remembers to fix it.
+      final s = const PaneSplits().copyWith(cols: [2, 1, 1]);
+      expect(s.cols, [0.5, 0.25, 0.25]);
+    });
+
+    test('a nonsense entry does not poison the whole axis', () {
+      expect(PaneSplits.fromJson({'cols': [0.5, -1]}).cols, isEmpty);
+      expect(PaneSplits.fromJson({'rows': ['x', 1]}).rows, isEmpty);
+    });
+
+    test('round trips, and stays absent while it has nothing to say', () {
+      const s = PaneSplits(row: 0.6, col: 0.4, cols: [0.5, 0.5]);
+      expect(PaneSplits.fromJson(s.toJson()), s);
+      expect(const PaneSplits().toJson().containsKey('cols'), isFalse);
+    });
+  });
+
   group('what is written to disk', () {
     test('a centred grid writes nothing to read back wrong later', () async {
       final storage = _MemoryStore();
@@ -98,7 +124,7 @@ void main() {
       // Written by a future build with a bigger grid, or by hand.
       final storage = _MemoryStore();
       storage.values['terminal_pane_splits'] =
-          '{"4":{"row":0.3},"9":{"row":0.3},"1":{"row":0.3}}';
+          '{"4":{"row":0.3},"12":{"row":0.3},"1":{"row":0.3}}';
       final back = await PaneLayoutStore(storage: storage).loadSplits();
       expect(back.keys, [4]);
     });
@@ -129,10 +155,15 @@ void main() {
     });
 
     test('a count off the grid is refused', () async {
+      // One tile has no divider, and the ceiling is nine because ⌘1–⌘9 is as
+      // far as the keyboard reaches.
       final n = notifier(PaneLayoutStore(storage: _MemoryStore()));
       n.setSplits(1, const PaneSplits(row: 0.7));
-      n.setSplits(9, const PaneSplits(row: 0.7));
+      n.setSplits(10, const PaneSplits(row: 0.7));
       expect(n.paneSplits, isEmpty);
+
+      n.setSplits(9, const PaneSplits(row: 0.7));
+      expect(n.paneSplits.keys, [9]);
     });
 
     test('moving a divider is written straight through', () async {

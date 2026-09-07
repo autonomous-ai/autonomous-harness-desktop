@@ -92,8 +92,18 @@ class _FamilyField extends StatelessWidget {
       key: const Key('terminal-font-family-dropdown'),
       width: SettingRow.controlWidth,
       value: family,
+      // The faces this OS actually has, plus whatever is selected. The second
+      // half matters: a `state.json` carried over from a Mac selects a face
+      // Linux does not offer, and [AppSelectField] draws a value it cannot find
+      // among its options as an EMPTY field — so the user's chosen face would
+      // read as no choice at all. Showing it, rather than silently rewriting
+      // what they picked, keeps the pane honest about what is on.
+      //
+      // (Material's `DropdownButton` asserts instead of blanking. This app does
+      // not use it — see [AppSelectField] — but the list has to be right for
+      // the same reason either way.)
       options: [
-        for (final choice in TerminalFontChoice.values)
+        for (final choice in {...TerminalFontChoice.available, family})
           SelectOption(value: choice, label: choice.label),
       ],
       onChanged: (choice) => unawaited(terminalFontStore.setFamily(choice)),

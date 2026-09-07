@@ -72,6 +72,46 @@ final agentDrag = ValueNotifier<AgentDragRef?>(null);
 final paneDragging = ValueNotifier<PaneDragRef?>(null);
 
 /// The one way out of a tile, in the one place every tile puts it.
+/// Hold this tile to its slot, or let it go.
+///
+/// Always present rather than revealed on hover: a control that only exists
+/// while the pointer is over it cannot be found by someone who does not already
+/// know it is there, and the whole point of the pin is to be reached for AFTER
+/// the grid has rearranged itself once and annoyed them. Muted until it is on,
+/// so the header of an unpinned tile stays quiet.
+class PanePinButton extends StatelessWidget {
+  const PanePinButton({
+    super.key,
+    required this.pinned,
+    required this.onPressed,
+  });
+
+  final bool pinned;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Tooltip(
+      message: pinned
+          ? 'Pinned to this slot — click to release'
+          : 'Pin to this slot',
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(
+          pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          size: 14,
+          color: pinned ? AppColors.accent : AppColors.muted,
+        ),
+        splashRadius: 13,
+        constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+}
+
 class PaneCloseButton extends StatelessWidget {
   const PaneCloseButton({super.key, required this.onPressed});
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/harness_file_store.dart';
 import 'package:harness/core/startup.dart';
+import 'package:harness/grid/grid_session.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/shared/theme/theme_mode_store.dart';
 import 'package:harness/terminal/terminal_font_store.dart';
@@ -58,14 +59,23 @@ void main() {
 
     final gridSelection =
         GridSelectionStore(storage: HarnessFileStore(directory: dir));
+    // Pointed at the scratch dir like every other store here: the Grid session
+    // lives in the CLI's own `~/.grid/credentials.toml`, and a test that took
+    // the singleton would read the developer's real one.
+    final gridSession = GridSessionStore(
+      file: File('${dir.path}/credentials.toml'),
+    );
     await loadPersistedSettings(
       themeMode: themeMode,
       terminalFont: terminalFont,
       gridSelection: gridSelection,
+      gridSession: gridSession,
     );
 
     expect(themeMode.value, ThemeMode.system);
-    expect(terminalFont.family, TerminalFontChoice.sfMono);
+    // Per platform since the Linux work — not a fixed face this repo picked.
+    expect(terminalFont.family, TerminalFontChoice.defaultForPlatform);
     expect(gridSelection.value.hasGrid, isFalse);
+    expect(gridSession.signedIn, isFalse);
   });
 }

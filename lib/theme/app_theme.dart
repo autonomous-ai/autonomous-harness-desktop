@@ -58,20 +58,23 @@ abstract final class AppColors {
       grid.AppTheme.pick(const Color(0xFFB3261E), const Color(0xFFF2544B));
 }
 
-/// The app's two font stacks. Mono is for strings the user copies (a token, a
-/// path, terminal output) — everything else is read, not copied, and reads
-/// faster in the system's own UI face. `.AppleSystemUIFont` is the private
-/// CoreText name that actually resolves to San Francisco on macOS; the public
-/// name `'SF Pro'`/`'SF Mono'` does not resolve and silently falls through to
-/// Menlo instead, which is the trap this constant avoids.
+/// The app's two font stacks — adapters over the design system's, exactly like
+/// [AppColors] above.
+///
+/// Mono is for strings the user copies (a token, a path, terminal output);
+/// everything else is read, not copied, and reads faster in the system's own UI
+/// face. Which face that is belongs to `grid.AppFont`, which answers per
+/// platform — these used to re-declare the macOS names as `const`, which is how
+/// the whole app came to be drawn in Noto Sans on Ubuntu (nothing in the Apple
+/// stack resolves there) and how `mono` here drifted to `'Menlo'` while the
+/// token said `.AppleSystemUIFontMonospaced`. Nothing is `const` for the same
+/// reason nothing in [AppColors] is: freezing the value is what breaks the
+/// second platform.
 abstract final class AppFonts {
-  static const String sans = '.AppleSystemUIFont';
-  static const List<String> sansFallback = [
-    'SF Pro Text',
-    'Helvetica Neue',
-    'Arial',
-  ];
-  static const String mono = 'Menlo';
+  static String get sans => grid.AppFont.sans;
+  static List<String> get sansFallback => grid.AppFont.sansFallback;
+  static String get mono => grid.AppFont.mono;
+  static List<String> get monoFallback => grid.AppFont.monoFallback;
 }
 
 /// The app's ThemeData now comes from `grid.buildAppTheme` — see `main.dart`.

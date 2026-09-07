@@ -14,6 +14,7 @@ import 'shared/theme/app_theme.dart' as grid;
 import 'shared/theme/appearance_prefs_store.dart';
 import 'shared/theme/theme_mode_store.dart';
 import 'terminal/terminal_font_store.dart';
+import 'widgets/layout_palette.dart';
 import 'widgets/awaiting_browser_login_screen.dart';
 import 'widgets/environment_setup_screen.dart';
 import 'widgets/flash_firmware_dialog.dart';
@@ -175,6 +176,8 @@ class _RootShellState extends ConsumerState<RootShell> {
         await showUpdateCheckDialog(context, app, result);
       case 'flashFirmware':
         await showFlashFirmwareDialog(context);
+      case 'showLayout':
+        await showLayoutPalette(context, ref.read(appStateProvider));
       case 'showShortcuts':
         await showShortcutsSheet(context);
       case 'increaseTerminalFontSize':

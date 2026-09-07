@@ -48,6 +48,22 @@ class TerminalPane {
   /// Lives on the pane so its lifetime is the tile's, exactly like [id].
   final GlobalKey cellKey = GlobalKey();
 
+  /// The slot this tile insists on keeping, or null for a tile that is happy to
+  /// slide.
+  ///
+  /// What it protects against is the hole a close leaves: shut the second of
+  /// four tiles and everything after it slides up one, so the agent someone was
+  /// reading in the bottom-left is suddenly top-right — the grid rearranged
+  /// itself under a hand that only asked to close something else. A pinned tile
+  /// stays where it is and the others fill in around it.
+  ///
+  /// It binds automatic movement only. Dragging a tile is an explicit answer to
+  /// the same question, so a drag always wins and takes the pin with it —
+  /// otherwise the tile would spring back and the drag would look broken.
+  int? pinnedSlot;
+
+  bool get isPinned => pinnedSlot != null;
+
   /// Whether this tile shows the composer textbox under its terminal.
   ///
   /// Only ever consulted for a remote machine — that is the one where typing straight into the
@@ -62,16 +78,20 @@ class PaneLayoutEntry {
     required this.machineId,
     required this.agentId,
     this.composerVisible = true,
+    this.pinnedSlot,
   });
 
   final String machineId;
   final String agentId;
   final bool composerVisible;
+  final int? pinnedSlot;
 
   Map<String, dynamic> toJson() => {
     'machineId': machineId,
     'agentId': agentId,
     'composerVisible': composerVisible,
+    // Absent for the tiles nobody pinned, which is nearly all of them.
+    'pinnedSlot': ?pinnedSlot,
   };
 
   static PaneLayoutEntry? fromJson(Object? raw) {
@@ -88,6 +108,13 @@ class PaneLayoutEntry {
       // tile the user has never had an opinion about — never to OFF, which would read as a setting
       // they chose.
       composerVisible: composer is bool ? composer : true,
+      // A negative or absurd slot is read as "not pinned" rather than clamped:
+      // a pin is a place someone chose, and inventing a different one for them
+      // is worse than forgetting it.
+      pinnedSlot: switch (raw['pinnedSlot']) {
+        final int slot when slot >= 0 => slot,
+        _ => null,
+      },
     );
   }
 }

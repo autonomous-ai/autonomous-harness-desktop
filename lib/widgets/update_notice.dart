@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../core/app_version.dart';
@@ -73,7 +72,7 @@ class UpdateNotice extends StatelessWidget {
       message = 'Harness ${update.version} is available';
     }
 
-    return DragToMoveArea(
+    return WindowDragArea(
       child: Material(
         color: Colors.transparent,
         child: DecoratedBox(

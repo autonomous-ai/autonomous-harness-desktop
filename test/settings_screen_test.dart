@@ -147,7 +147,10 @@ void main() {
       find.byKey(const Key('terminal-font-family-dropdown')),
       findsOneWidget,
     );
-    expect(find.text(TerminalFontChoice.sfMono.label), findsOneWidget);
+    expect(
+      find.text(TerminalFontChoice.defaultForPlatform.label),
+      findsOneWidget,
+    );
     expect(find.text('13pt'), findsOneWidget);
     expect(
       find.byKey(const Key('terminal-font-size-decrease')),
@@ -166,6 +169,24 @@ void main() {
     // The Appearance controls are gone with their pane.
     expect(find.byType(ThemePreviewTile), findsNothing);
     expect(find.byKey(const Key('appearance-ui-size-field')), findsNothing);
+  });
+
+  testWidgets('About prints the running version', (tester) async {
+    await openSettings(tester);
+
+    await tester.tap(find.text('About'));
+    await tester.pumpAndSettle();
+
+    // The version the account menu used to carry. It reads the same
+    // runningAppVersion() a release does — on Linux that means version.txt
+    // beside the executable first, then package metadata (mocked above), which
+    // is why this passes on either build host.
+    //
+    // The number, not a "Version" label: this branch draws About as one card
+    // where the version sits beside the update pill, so the label main's row
+    // had is gone. `about_section_test.dart` owns that shape; what this test
+    // owes is that the pane prints the running version at all.
+    expect(find.text('1.0.0'), findsOneWidget);
   });
 
   testWidgets('the rail filter narrows to matching rows, and says so when '

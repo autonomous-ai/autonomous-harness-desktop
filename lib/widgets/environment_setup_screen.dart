@@ -29,7 +29,7 @@ class EnvironmentSetupScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Preparing this Mac',
+                    'Preparing this computer',
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
@@ -111,7 +111,7 @@ class _StepRow extends StatelessWidget {
       ),
     };
     final label = switch (step) {
-      EnvironmentStep.node => 'Managed Node runtime',
+      EnvironmentStep.node => 'Node.js runtime',
       EnvironmentStep.harness => 'Harness CLI',
       EnvironmentStep.tmux => 'tmux terminal support',
       EnvironmentStep.grid => 'Grid CLI for Share Intelligence',

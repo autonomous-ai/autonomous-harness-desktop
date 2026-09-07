@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:window_manager/window_manager.dart';
+
+import 'window_chrome.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_icon_button.dart';
@@ -42,7 +43,7 @@ class MachineRailMini extends StatelessWidget {
         children: [
           // Same inset and drag handle as the wide rail's head, for the same
           // reason: the traffic lights float over this corner.
-          DragToMoveArea(
+          WindowDragArea(
             child: SizedBox(
               height: _headerHeight,
               child: Center(

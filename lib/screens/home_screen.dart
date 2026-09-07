@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
+import '../widgets/layout_palette.dart';
 import '../widgets/link_machine_screen.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/machine_rail_mini.dart';
@@ -173,6 +173,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
+              ShortcutAction.pinPane: () {
+                final id = notifier.focusedPaneId;
+                if (id != null && notifier.panes.length > 1) {
+                  notifier.togglePinPane(id);
+                }
+              },
+              ShortcutAction.showLayout: () =>
+                  unawaited(showLayoutPalette(context, notifier)),
               ShortcutAction.showShortcuts: () =>
                   unawaited(showShortcutsSheet(context)),
             },
@@ -474,7 +482,7 @@ class _ErrorStrip extends StatelessWidget {
     // Pinned to the window's top edge, where the traffic lights float — so
     // the text starts past them, and the strip drags the window like the rest
     // of that edge.
-    return DragToMoveArea(
+    return WindowDragArea(
       child: Container(
         constraints: const BoxConstraints(minHeight: 34),
         color: const Color(0xff26131b),

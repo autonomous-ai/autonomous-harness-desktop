@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:xterm/xterm.dart';
 
@@ -11,20 +13,80 @@ import 'terminal_typography.dart';
 /// picker: the vendored renderer measures cell width by laying out ten `'m'`
 /// glyphs and dividing by 10 (`TerminalPainter._measureCharSize`), a hard
 /// monospace assumption. A proportional font would misalign every column a
-/// remote TUI draws regardless of how correctly resize is handled. These four
-/// are the faces guaranteed present on stock macOS — nothing here needs Flutter
-/// to enumerate installed fonts (it can't) or risk a silent substitution.
+/// remote TUI draws regardless of how correctly resize is handled. Nothing here
+/// needs Flutter to enumerate installed fonts (it can't) or risk a silent
+/// substitution — every face named is one the OS it is offered on ships.
+///
+/// Which is why the list is per-platform ([available]). The first four are
+/// stock macOS and resolve to nothing on Linux: fontconfig answers `Menlo` and
+/// `.AppleSystemUIFontMonospaced` with the proportional Noto Sans, so all four
+/// rendered the same broken grid there. The rest are the Ubuntu/Debian faces —
+/// `Ubuntu Sans Mono` is the 25.04-and-later family and `Ubuntu Mono` the older
+/// one, so both are listed rather than guessing the release.
+///
+/// Every value exists on every platform. A `state.json` written on a Mac and
+/// carried to a Linux box still loads, and the Settings dropdown keeps showing
+/// whatever is actually selected (see `_FamilyDropdown`).
 enum TerminalFontChoice {
-  sfMono('SF Mono', terminalFontFamily, terminalFontFallback),
+  sfMono('SF Mono', macTerminalFontFamily, macTerminalFontFallback),
   menlo('Menlo', 'Menlo', ['Monaco', 'Courier New', 'monospace']),
   monaco('Monaco', 'Monaco', ['Menlo', 'Courier New', 'monospace']),
-  courierNew('Courier New', 'Courier New', ['Menlo', 'Monaco', 'monospace']);
+  courierNew('Courier New', 'Courier New', ['Menlo', 'Monaco', 'monospace']),
+
+  dejaVuSansMono(
+    'DejaVu Sans Mono',
+    linuxTerminalFontFamily,
+    linuxTerminalFontFallback,
+  ),
+  ubuntuSansMono('Ubuntu Sans Mono', 'Ubuntu Sans Mono', [
+    'Ubuntu Mono',
+    'DejaVu Sans Mono',
+    'Noto Sans Mono',
+    'monospace',
+  ]),
+  ubuntuMono('Ubuntu Mono', 'Ubuntu Mono', [
+    'Ubuntu Sans Mono',
+    'DejaVu Sans Mono',
+    'monospace',
+  ]),
+  liberationMono('Liberation Mono', 'Liberation Mono', [
+    'DejaVu Sans Mono',
+    'Noto Sans Mono',
+    'monospace',
+  ]),
+  notoSansMono('Noto Sans Mono', 'Noto Sans Mono', [
+    'DejaVu Sans Mono',
+    'Liberation Mono',
+    'monospace',
+  ]);
 
   const TerminalFontChoice(this.label, this.fontFamily, this.fontFamilyFallback);
 
   final String label;
   final String fontFamily;
   final List<String> fontFamilyFallback;
+
+  static const _macChoices = [sfMono, menlo, monaco, courierNew];
+  static const _linuxChoices = [
+    dejaVuSansMono,
+    ubuntuSansMono,
+    ubuntuMono,
+    liberationMono,
+    notoSansMono,
+  ];
+
+  /// The faces worth offering on the host this build is running on.
+  ///
+  /// Windows falls in with Linux deliberately rather than with macOS: its
+  /// runner is unexercised (see CLAUDE.md), and of the two lists the Linux one
+  /// at least ends every fallback at the generic `monospace`, which Windows
+  /// does resolve.
+  static List<TerminalFontChoice> get available =>
+      Platform.isMacOS ? _macChoices : _linuxChoices;
+
+  /// What a fresh install opens with, and what `reset()` returns to.
+  static TerminalFontChoice get defaultForPlatform =>
+      Platform.isMacOS ? sfMono : dejaVuSansMono;
 }
 
 /// The user's chosen terminal typography (family + size), remembered across
@@ -47,7 +109,7 @@ enum TerminalFontChoice {
 class TerminalFontStore extends ValueNotifier<TerminalStyle> {
   TerminalFontStore({LocalKeyValueStore? storage})
     : _storage = storage ?? HarnessFileStore.shared,
-      super(_styleFor(TerminalFontChoice.sfMono, terminalFontSize));
+      super(_styleFor(TerminalFontChoice.defaultForPlatform, terminalFontSize));
 
   static const _familyKey = 'terminal_font_family';
   static const _sizeKey = 'terminal_font_size';
@@ -74,7 +136,7 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
   TerminalFontChoice get family =>
       TerminalFontChoice.values.firstWhere(
         (choice) => choice.fontFamily == value.fontFamily,
-        orElse: () => TerminalFontChoice.sfMono,
+        orElse: () => TerminalFontChoice.defaultForPlatform,
       );
 
   double get size => value.fontSize;
@@ -91,11 +153,11 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
           .firstOrNull;
       final size = savedSize == null ? null : double.tryParse(savedSize);
       value = _styleFor(
-        choice ?? TerminalFontChoice.sfMono,
+        choice ?? TerminalFontChoice.defaultForPlatform,
         _clamp(size ?? terminalFontSize),
       );
     } catch (_) {
-      value = _styleFor(TerminalFontChoice.sfMono, terminalFontSize);
+      value = _styleFor(TerminalFontChoice.defaultForPlatform, terminalFontSize);
     }
   }
 
@@ -105,7 +167,8 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
   Future<void> decreaseSize() => _set(family, size - _step);
   Future<void> setSize(double size) => _set(family, size);
 
-  Future<void> reset() => _set(TerminalFontChoice.sfMono, terminalFontSize);
+  Future<void> reset() =>
+      _set(TerminalFontChoice.defaultForPlatform, terminalFontSize);
 
   /// Whether the current pick *is* the default — what [reset] would leave the
   /// store at, so a Reset control can say it has nothing to do.

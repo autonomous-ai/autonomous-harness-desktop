@@ -30,7 +30,7 @@ void main() {
     final store = TerminalFontStore(storage: _FakeStore());
     await store.load();
 
-    expect(store.family, TerminalFontChoice.sfMono);
+    expect(store.family, TerminalFontChoice.defaultForPlatform);
     expect(store.size, terminalFontSize);
   });
 
@@ -66,7 +66,7 @@ void main() {
 
     await store.reset();
 
-    expect(store.family, TerminalFontChoice.sfMono);
+    expect(store.family, TerminalFontChoice.defaultForPlatform);
     expect(store.size, terminalFontSize);
   });
 
@@ -99,7 +99,7 @@ void main() {
       await store.setSize(15);
       final first = store.value;
 
-      await store.setFamily(TerminalFontChoice.sfMono);
+      await store.setFamily(TerminalFontChoice.defaultForPlatform);
       await store.setFamily(TerminalFontChoice.monaco);
       await store.setSize(15);
 
@@ -113,7 +113,7 @@ void main() {
 
     await store.load();
 
-    expect(store.family, TerminalFontChoice.sfMono);
+    expect(store.family, TerminalFontChoice.defaultForPlatform);
     expect(store.size, terminalFontSize);
   });
 
@@ -131,6 +131,6 @@ void main() {
 
     await store.load();
 
-    expect(store.family, TerminalFontChoice.sfMono);
+    expect(store.family, TerminalFontChoice.defaultForPlatform);
   });
 }

@@ -5,7 +5,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
 
-
 /// How far a full-width strip drawn at the very top of the window has to
 /// start from the left to clear the traffic lights.
 double get trafficLightClearance => Platform.isMacOS ? 78.0 : 0.0;
@@ -60,6 +59,36 @@ class HarnessTopBar extends StatelessWidget {
   }
 }
 
+/// A window drag handle that does not hold up the controls drawn inside it.
+///
+/// window_manager's own [DragToMoveArea] binds double-tap-to-maximize as well
+/// as the drag, and a `DoubleTapGestureRecognizer` **holds the gesture arena**
+/// for `kDoubleTapTimeout` (300ms) after the first tap comes up — it has to,
+/// or it could never see a second one. Nothing else in that arena resolves
+/// until it lets go, so every button inside one of those regions fires 300ms
+/// after the mouse was released. That is the rail header (fold, reload,
+/// filter), a pane header's close, and the update strip's Install: the whole
+/// top edge of the window, which is also the part of it people click most.
+///
+/// The maximize gesture is worth having on a strip that holds nothing —
+/// [HarnessTopBar] and [WindowDragStrip] keep [DragToMoveArea] for it — and is
+/// not worth 300ms on every control in the app's chrome.
+class WindowDragArea extends StatelessWidget {
+  const WindowDragArea({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // Translucent, like DragToMoveArea: the drag has to be available from
+      // the gaps between whatever the region draws.
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => windowManager.startDragging(),
+      child: child,
+    );
+  }
+}
 
 /// A strip along the top of a screen that fills the window, so it can still be
 /// dragged with the title bar gone. Zero height off macOS, where the native

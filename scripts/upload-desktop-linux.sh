@@ -13,12 +13,14 @@
 #                                                       # e.g. 2.0.0, is also forced)
 #   bash scripts/upload-desktop-linux.sh --no-bump     # keep the current published version, build + upload
 #   bash scripts/upload-desktop-linux.sh --no-build    # upload the existing build/ artifact as-is
+#   TARGET_ARCH=arm64 bash scripts/upload-desktop-linux.sh
+#   TARGET_ARCH=amd64 bash scripts/upload-desktop-linux.sh  # amd64 is normalized to x64
 #   GCS_BUCKET=other bash scripts/upload-desktop-linux.sh   # env overrides (see below)
 #
 # The CURRENT version is read from the remote metadata.json on GCS — the SAME manifest the macOS
-# script publishes to, under a different key (desktop-linux-x64) — so both platforms share one
-# version number by default. Nothing is git-committed; pubspec.yaml's `version:` field is never
-# touched (see RELEASE.md).
+# script publishes to, under an architecture-specific key (`desktop-linux-arm64` or
+# `desktop-linux-x64`). Nothing is git-committed; pubspec.yaml's `version:` field is never touched
+# (see RELEASE.md).
 #
 # `flutter build linux` has no Info.plist-style version stamping, so this script writes a plain
 # version.txt into the built bundle instead — read back by lib/core/app_version.dart at runtime and
@@ -31,13 +33,27 @@ set -euo pipefail
 set +x
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # repository root
-BUNDLE_DIR="$APP_DIR/build/linux/x64/release/bundle"
+
+normalize_architecture() {
+  case "${1,,}" in
+    arm64|aarch64) printf 'arm64\n' ;;
+    x64|x86_64|amd64) printf 'x64\n' ;;
+    *)
+      echo "error: unsupported Linux architecture '$1' (expected arm64, aarch64, x64, x86_64, or amd64)" >&2
+      return 1
+      ;;
+  esac
+}
+
+HOST_ARCH="$(normalize_architecture "$(uname -m)")"
+RELEASE_ARCH="$(normalize_architecture "${TARGET_ARCH:-$HOST_ARCH}")"
+BUNDLE_DIR="$APP_DIR/build/linux/${RELEASE_ARCH}/release/bundle"
 
 # --- GCS config (all overridable via env) ---
 GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
 GCS_PUBLIC_BASE_URL="${GCS_PUBLIC_BASE_URL:-https://storage.googleapis.com/${GCS_BUCKET}}"
 METADATA_PATH="${METADATA_PATH:-harness/desktop/metadata.json}"
-OTA_KEY="${OTA_KEY:-desktop-linux-x64}"   # must match _otaKeyLinux in lib/update/desktop_updater.dart
+OTA_KEY="${OTA_KEY:-desktop-linux-${RELEASE_ARCH}}"   # must match DesktopUpdater's architecture key
 
 next_desktop_version() {
   local current="$1" major minor patch
@@ -89,6 +105,12 @@ if [ "$DO_FORCE" -eq 1 ] && [ "$DO_BUMP" -eq 0 ]; then
 fi
 
 [ "$(uname -s)" = "Linux" ] || { echo "error: this must run on a Linux build host — flutter build linux cannot cross-compile" >&2; exit 1; }
+if [ "$DO_BUILD" -eq 1 ] && [ "$RELEASE_ARCH" != "$HOST_ARCH" ]; then
+  echo "error: cannot build linux-${RELEASE_ARCH} on a linux-${HOST_ARCH} host" >&2
+  echo "       Flutter Linux desktop builds use the host architecture. Run this command on a matching host," >&2
+  echo "       or use --no-build with an existing build/linux/${RELEASE_ARCH}/release/bundle." >&2
+  exit 1
+fi
 command -v gsutil  >/dev/null 2>&1 || { echo "error: gsutil not found — install/authenticate the gcloud SDK" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 command -v flutter >/dev/null 2>&1 || { echo "error: flutter not found" >&2; exit 1; }
@@ -99,6 +121,7 @@ cleanup() { rm -f "${SRC:-}" "${DST:-}"; rm -rf "${STAGE_ROOT:-}"; }
 trap cleanup EXIT
 
 # --- Step 1: resolve the version (source of truth = remote metadata.json) ---
+echo ">> target architecture: ${RELEASE_ARCH} (host: ${HOST_ARCH})"
 META_URL="${GCS_PUBLIC_BASE_URL%/}/${METADATA_PATH#/}"
 CUR="$(curl -fsSL "$META_URL" 2>/dev/null | python3 -c '
 import json, sys
@@ -147,13 +170,13 @@ STAMPED="$(cat "$BUNDLE_DIR/version.txt")"
 # lib/update/desktop_updater.dart expects the unpacked bundle at "$stagingDir/Harness".
 STAGE_ROOT="$(mktemp -d)"
 cp -a "$BUNDLE_DIR" "$STAGE_ROOT/Harness"
-TARBALL="$APP_DIR/build/Harness-linux-x64-$VER.tar.gz"
+TARBALL="$APP_DIR/build/Harness-linux-${RELEASE_ARCH}-$VER.tar.gz"
 rm -f "$TARBALL"
 echo ">> packaging $TARBALL"
 ( cd "$STAGE_ROOT" && tar -czf "$TARBALL" Harness )
 
 # --- Step 4: upload the artifact + merge the manifest ---
-GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-linux-x64.tar.gz}"
+GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-linux-${RELEASE_ARCH}.tar.gz}"
 URL="${GCS_PUBLIC_BASE_URL%/}/${GCS_PATH#/}"
 SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
 SIZE="$(wc -c < "$TARBALL" | tr -d ' ')"
@@ -191,7 +214,7 @@ gsutil -h "Content-Type:application/json" \
        cp "$DST" "gs://${GCS_BUCKET}/${METADATA_PATH}"
 
 echo
-echo ">> published desktop app (linux-x64) $VER"
+echo ">> published desktop app (linux-${RELEASE_ARCH}) $VER"
 echo "   url:      $URL"
 echo "   sha256:   $SHA"
 echo "   manifest: ${GCS_PUBLIC_BASE_URL%/}/${METADATA_PATH#/}"

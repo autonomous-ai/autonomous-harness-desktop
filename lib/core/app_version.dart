@@ -20,7 +20,12 @@ Future<String> runningAppVersion({
     final exe = File(executablePath ?? Platform.resolvedExecutable);
     final versionFile = File('${exe.parent.path}/version.txt');
     try {
-      final raw = (await versionFile.readAsString()).trim();
+      // Read synchronously. It is a dozen bytes sitting next to the executable,
+      // and an async read of it never completes inside flutter_test's
+      // fake-async zone: every widget test on a Linux host would sit forever on
+      // this line and paint the em dash the FutureBuilder falls back to, while
+      // the same widget showed a version on macOS (which skips this branch).
+      final raw = versionFile.readAsStringSync().trim();
       if (raw.isNotEmpty) return raw;
     } catch (_) {
       // Not a packaged build (no version.txt) — fall through below.

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
+import 'pane_preset.dart';
 import 'pane_splits.dart';
 import 'terminal_pane.dart';
 
@@ -24,10 +25,21 @@ class PaneLayoutStore {
   /// rather than just the part it cannot use.
   static const _splitsKey = 'terminal_pane_splits';
 
-  /// Four, matching the grid. Enforced on the way IN as well as out: a file
-  /// written by a future build that allows more must not make this one try to
-  /// open five terminals it has nowhere to put.
-  static const maxPanes = 4;
+  /// Chosen shapes, by tile count. Its own key for the same reason the splits
+  /// have one: an older build that cannot read it should lose the shape, not
+  /// the whole layout.
+  static const _presetsKey = 'terminal_pane_presets';
+
+  /// The ceiling on tiles, enforced on the way IN as well as out: a file written
+  /// by a future build that allows more must not make this one try to open
+  /// terminals it has nowhere to put.
+  ///
+  /// Nine, because ⌘1–⌘9 already addresses that many and a tenth would have no
+  /// key. It is a CEILING, not a target — how many actually fit is decided by
+  /// the window, since every terminal has a floor of 40 columns and 12 rows
+  /// that both this app and the daemon enforce. On a 1280px window with the
+  /// rail open that is about three columns; on a 2560px display, six.
+  static const maxPanes = 9;
 
   final LocalKeyValueStore _storage;
 
@@ -96,6 +108,42 @@ class PaneLayoutStore {
           if (!entry.value.isDefault) '${entry.key}': entry.value.toJson(),
       };
       await _storage.write(_splitsKey, jsonEncode(payload));
+    } catch (_) {
+      // Kept in memory for this run; see above.
+    }
+  }
+
+  /// Chosen shapes, by tile count. An id this build does not know is dropped —
+  /// a shape it cannot draw is worse than the default it can.
+  Future<Map<int, PanePreset>> loadPresets() async {
+    try {
+      final raw = await _storage.read(_presetsKey);
+      if (raw == null || raw.isEmpty) return const {};
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const {};
+      final out = <int, PanePreset>{};
+      for (final entry in decoded.entries) {
+        final count = int.tryParse(entry.key.toString());
+        if (count == null || count < 2 || count > maxPanes) continue;
+        final preset = PanePreset.byId(entry.value?.toString());
+        if (preset == null) continue;
+        if (!PanePreset.forCount(count).contains(preset)) continue;
+        out[count] = preset;
+      }
+      return out;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> savePresets(Map<int, PanePreset> presets) async {
+    try {
+      await _storage.write(
+        _presetsKey,
+        jsonEncode({
+          for (final entry in presets.entries) '${entry.key}': entry.value.id,
+        }),
+      );
     } catch (_) {
       // Kept in memory for this run; see above.
     }

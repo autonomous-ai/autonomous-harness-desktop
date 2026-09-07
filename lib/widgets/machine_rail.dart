@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:window_manager/window_manager.dart';
+
+import 'window_chrome.dart';
 
 import '../core/models.dart';
 import '../shared/layouts/widgets/sidebar_item.dart';
@@ -166,8 +168,16 @@ class MachineRailState extends State<MachineRail> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Still the window's drag handle — the title bar is hidden,
-                  // see configureDesktopWindow.
-                  DragToMoveArea(
+                  // see configureDesktopWindow. `WindowDragArea` rather than
+                  // window_manager's own `DragToMoveArea`: main introduced one
+                  // for the whole app when `HarnessTopBar` took over the
+                  // traffic-light row, and two ways to drag the same window is
+                  // one too many.
+                  //
+                  // No top inset for the traffic lights here — that bar sits
+                  // above the window now, and an inset would push the wordmark
+                  // down twice.
+                  WindowDragArea(
                     child: SizedBox(
                       height: _headerHeight,
                       child: Padding(
@@ -1133,7 +1143,23 @@ class _AgentRowState extends State<_AgentRow> {
           selected: selected,
           enabled: enabled,
           dimmed: !visuallyEnabled,
-          onTap: () => notifier.selectAgent(state.machine.machineId, agent.id),
+          // ⌘-click opens a NEW tile, the same meaning it has on a link in
+          // every browser. A plain click stays navigation — it replaces the
+          // focused tile — because that rule is what keeps four glances at the
+          // rail from becoming four terminals. But until this existed, ADDING a
+          // tile was only possible by dragging a row onto the grid, so the
+          // ceiling of nine was unreachable for anyone who did not know the
+          // drag: a cap nobody can climb to is the same as no cap being raised.
+          onTap: () {
+            final machineId = state.machine.machineId;
+            if (HardwareKeyboard.instance.isMetaPressed &&
+                notifier.canAddPane &&
+                notifier.paneOfAgent(machineId, agent.id) == null) {
+              unawaited(notifier.assignAgentToPane(null, machineId, agent.id));
+              return;
+            }
+            unawaited(notifier.selectAgent(machineId, agent.id));
+          },
           // The same "Edit name" the row's own menu opens — a double click is
           // just the shorter way to it, and the place a hand reaches first.
           onDoubleTap: _showRenameDialog,
@@ -1601,11 +1627,8 @@ class _EmptyAgents extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
           child: _EmptyNewAgentButton(
-            onPressed: () => showNewAgentDialog(
-              context,
-              notifier,
-              state.machine.machineId,
-            ),
+            onPressed: () =>
+                showNewAgentDialog(context, notifier, state.machine.machineId),
           ),
         ),
       ],
