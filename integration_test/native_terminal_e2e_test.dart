@@ -49,8 +49,11 @@ void main() {
         home: Scaffold(
           body: AnimatedBuilder(
             animation: session,
-            builder: (_, _) =>
-                TerminalPanel(notifier: notifier, session: session),
+            builder: (_, _) => TerminalPanel(
+              notifier: notifier,
+              session: session,
+              focused: true,
+            ),
           ),
         ),
       ),
@@ -192,7 +195,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: TerminalPanel(notifier: notifier, session: session),
+            body: TerminalPanel(
+              notifier: notifier,
+              session: session,
+              focused: true,
+            ),
           ),
         ),
       );
