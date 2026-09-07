@@ -24,17 +24,44 @@ Future<void> showLayoutPalette(BuildContext context, AppNotifier notifier) {
   );
 }
 
-class _LayoutPalette extends StatelessWidget {
+class _LayoutPalette extends StatefulWidget {
   const _LayoutPalette({required this.notifier});
 
   final AppNotifier notifier;
 
   @override
+  State<_LayoutPalette> createState() => _LayoutPaletteState();
+}
+
+class _LayoutPaletteState extends State<_LayoutPalette> {
+  /// Which shape the arrow keys are resting on, which is NOT the same as the
+  /// one in use: moving the cursor must not rearrange the grid under someone
+  /// still looking at the choices. Applying is Enter, a digit, or a click.
+  int? _cursor;
+
+  /// Where the cursor is, read from state rather than from a captured local.
+  ///
+  /// Two keys can land inside one frame — an arrow and the Enter that takes it
+  /// — and a value closed over at build time would still hold the position
+  /// BEFORE the arrow moved, so the palette would apply the shape the cursor
+  /// had just left. Reading it here means the answer is always current.
+  ///
+  /// It starts on the shape already in use, so the first arrow press steps off
+  /// that one rather than jumping to the top of the list.
+  int _cursorIn(List<PanePreset> choices, PanePreset? current) {
+    if (choices.isEmpty) return 0;
+    final start = _cursor ?? choices.indexOf(current ?? choices.first);
+    return start.clamp(0, choices.length - 1);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final notifier = widget.notifier;
     grid.AppTheme.watch(context);
     final count = notifier.panes.length;
     final choices = PanePreset.forCount(count);
     final current = notifier.presetFor(count);
+    final cursor = _cursorIn(choices, current);
 
     return Dialog(
       backgroundColor: grid.AppGlass.surfaceFill,
@@ -45,13 +72,36 @@ class _LayoutPalette extends StatelessWidget {
       child: Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          // Repeats count: holding an arrow should walk the list, the way it
+          // does in every other list on this OS.
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          if (choices.isEmpty) return KeyEventResult.ignored;
+
+          void apply(PanePreset preset) {
+            notifier.setPreset(count, preset);
+            Navigator.of(context).pop();
+          }
+
+          final at = _cursorIn(choices, current);
+          final step = _step(event.logicalKey);
+          if (step != null) {
+            // Clamped, not wrapped: the shapes are laid out as a strip on
+            // screen, and a cursor that leaps from the last to the first reads
+            // as a mis-key rather than as an answer.
+            setState(() => _cursor = (at + step).clamp(0, choices.length - 1));
+            return KeyEventResult.handled;
+          }
+          if (_isCommit(event.logicalKey)) {
+            apply(choices[at]);
+            return KeyEventResult.handled;
+          }
           final index = _digit(event.logicalKey);
           if (index == null || index > choices.length) {
             return KeyEventResult.ignored;
           }
-          notifier.setPreset(count, choices[index - 1]);
-          Navigator.of(context).pop();
+          apply(choices[index - 1]);
           return KeyEventResult.handled;
         },
         child: ConstrainedBox(
@@ -105,6 +155,7 @@ class _LayoutPalette extends StatelessWidget {
                             count: count,
                             index: i + 1,
                             selected: choices[i] == current,
+                            cursor: i == cursor,
                             onTap: () {
                               notifier.setPreset(count, choices[i]);
                               Navigator.of(context).pop();
@@ -117,8 +168,9 @@ class _LayoutPalette extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 6, 18, 14),
                   child: Text(
-                    'Changing the shape resets the dividers — they described '
-                    'boundaries the old one had.',
+                    'Arrows to move, Enter or a number to pick. Changing the '
+                    'shape resets the dividers — they described boundaries the '
+                    'old one had.',
                     style: TextStyle(
                       color: grid.AppPalette.textFaint,
                       fontSize: 11,
@@ -133,6 +185,24 @@ class _LayoutPalette extends StatelessWidget {
       ),
     );
   }
+
+  /// Which way an arrow moves the cursor.
+  ///
+  /// Up and left both mean "back" and down and right both mean "forward",
+  /// because the shapes WRAP onto more than one line when there are five of
+  /// them: a vertical key that only moved between rows would do nothing on a
+  /// single-row palette, and stepping by one is the only motion that means the
+  /// same thing however the wrap happens to fall.
+  static int? _step(LogicalKeyboardKey key) => switch (key) {
+    LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowUp => -1,
+    LogicalKeyboardKey.arrowRight || LogicalKeyboardKey.arrowDown => 1,
+    _ => null,
+  };
+
+  static bool _isCommit(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter ||
+      key == LogicalKeyboardKey.numpadEnter ||
+      key == LogicalKeyboardKey.space;
 
   static int? _digit(LogicalKeyboardKey key) {
     const digits = [
@@ -154,13 +224,21 @@ class _ShapeButton extends StatelessWidget {
     required this.count,
     required this.index,
     required this.selected,
+    required this.cursor,
     required this.onTap,
   });
 
   final PanePreset preset;
   final int count;
   final int index;
+
+  /// The shape the grid is in now.
   final bool selected;
+
+  /// Where the arrow keys are resting. Drawn as a ring rather than as the
+  /// selected fill, so "what I am about to pick" never looks like "what is
+  /// already in use" — the two are different answers and both are on screen.
+  final bool cursor;
   final VoidCallback onTap;
 
   @override
@@ -175,7 +253,10 @@ class _ShapeButton extends StatelessWidget {
               : grid.AppSurface.hoverFill,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? AppColors.accent : grid.AppGlass.hair,
+            color: cursor
+                ? AppColors.accent
+                : (selected ? AppColors.accent : grid.AppGlass.hair),
+            width: cursor ? 2 : 1,
           ),
         ),
         child: Column(
