@@ -1,15 +1,28 @@
 name: Release
 
-# Cut a release by pushing a tag:  git tag v1.3.0 && git push origin v1.3.0
+# Cut a release by pushing a tag:  git tag v1.0.51 && git push origin v1.0.51
 #
-# The tag IS the version — CI never auto-bumps. scripts/upload-desktop*.sh bump by reading the
-# current version out of the remote metadata.json, so three jobs left to bump on their own would
-# read the same number and publish three different versions under one tag. Here it is resolved
-# once and passed to every script explicitly.
+# Shape (the one autonomous-grid's release.yml uses): every platform builds IN PARALLEL, and the
+# real manifest is written exactly once at the end.
 #
-# Publishes to the public GCS bucket running apps poll (lib/update/desktop_updater.dart):
-# desktop-macos + desktop-macos-dmg, desktop-linux-x64, desktop-linux-arm64. A MINOR bump
-# (1.2.x -> 1.3.1) is a forced update — running apps block until it is installed. See RELEASE.md.
+# metadata.json is a download-modify-reupload, so three jobs each merging their own key would drop
+# each other's. Rather than schedule around that — the first version of this file ran macOS and the
+# two Linux architectures one after another, ~70 minutes of wall clock — each build job is pointed
+# at its OWN scratch manifest under harness/desktop/.ci/<run id>/. Nothing collides because nothing
+# shares a file, the artifacts still go straight to their real paths, and the `publish` job merges
+# those scratch files into the real manifest in a single read-modify-write. ~25 minutes, and the
+# race cannot happen rather than being avoided.
+#
+# scripts/upload-desktop.sh and scripts/upload-desktop-linux.sh are used EXACTLY as they are, with
+# no flags this file invented: METADATA_PATH is an env override they already support.
+#
+# The tag IS the version — CI never auto-bumps. The scripts bump by reading the current version out
+# of the remote metadata.json, so three jobs left to bump on their own would read the same number
+# and publish three different versions under one tag.
+#
+# Publishes the keys running apps poll (lib/update/desktop_updater.dart): desktop-macos,
+# desktop-macos-dmg, desktop-linux-x64, desktop-linux-arm64. A MINOR bump (1.0.x -> 1.1.1) is a
+# forced update — running apps block until it is installed. See RELEASE.md.
 #
 # Dry run first: Actions -> Release -> Run workflow, with metadata_path = harness/desktop/
 # metadata-test.json. Nothing a real app polls is touched, and there is no undo on the real
@@ -17,10 +30,8 @@ name: Release
 # publishing a HIGHER version containing the older code.
 #
 # metadata_path moves the MANIFEST only. The scripts' GCS_PATH still defaults to
-# harness/desktop/<version>/, so a dry run uploads real artifacts there — harmless, since no
-# live manifest references them, but delete gs://<bucket>/harness/desktop/<dry-run-version>/
-# afterwards. Do NOT try to redirect them by exporting GCS_PATH: it is a single object path, so
-# the two architectures of the `linux` matrix would overwrite each other.
+# harness/desktop/<version>/, so a dry run uploads real artifacts there — harmless, since no live
+# manifest references them, but delete gs://<bucket>/harness/desktop/<dry-run-version>/ afterwards.
 
 on:
   push:
@@ -37,26 +48,27 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # only used by the Workload Identity Federation variant of the auth step below
+  id-token: write   # only used by the Workload Identity Federation variant of the auth steps below
 
 concurrency:
-  # Two releases overlapping would interleave their read-modify-write of metadata.json.
-  # Never cancelled in progress: a half-published release leaves the manifest describing one
-  # platform's new build and another's old one.
+  # Two releases overlapping would interleave their manifest writes. Never cancelled in progress:
+  # a half-published release leaves the manifest describing one platform's new build beside
+  # another's old one.
   group: desktop-release
   cancel-in-progress: false
 
 env:
-  GCS_BUCKET: s3-autonomous-upgrade-3   # the release scripts read this too — one place, not four
+  GCS_BUCKET: s3-autonomous-upgrade-3   # the release scripts read this too — one place, not five
 
 jobs:
-  # Resolve and validate BEFORE spending macOS runner minutes (billed at 10x Linux). A malformed
-  # tag fails here in seconds instead of 25 minutes into a notarized build.
+  # Resolve and validate before anything expensive starts. A malformed tag fails here in seconds
+  # rather than 25 minutes into a notarized build.
   version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       metadata_path: ${{ steps.resolve.outputs.metadata_path }}
+      scratch_prefix: ${{ steps.resolve.outputs.scratch_prefix }}
     steps:
       - id: resolve
         # Through env, never `${{ }}` inline in run:. Git permits quotes, backticks and $() in a
@@ -74,21 +86,40 @@ jobs:
           meta="${INPUT_METADATA_PATH:-harness/desktop/metadata.json}"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "metadata_path=$meta" >> "$GITHUB_OUTPUT"
+          echo "scratch_prefix=harness/desktop/.ci/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "Publishing **$ver** to \`$meta\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # Uploading is the last thing each build job does, ~25 minutes in. Proving the credential now
+  # means a broken one costs seconds. Runs beside `version` and `tests`, so it is free in wall clock.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Verify GCS write access
+        run: |
+          set -euo pipefail
+          probe="gs://${GCS_BUCKET}/harness/desktop/.ci-preflight/${GITHUB_RUN_ID}"
+          echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
+          gsutil rm "$probe"
 
   tests:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
-  macos:
-    needs: [version, tests]
+  build-macos:
+    needs: [version, tests, preflight]
     runs-on: macos-15
     timeout-minutes: 60   # two notarization submissions per release (zip, then dmg) — see RELEASE.md
     env:
-      METADATA_PATH: ${{ needs.version.outputs.metadata_path }}
+      # The script's own env override, pointed at this run's scratch file instead of the real
+      # manifest. The artifacts still land on their real GCS paths; only the key lands here.
+      METADATA_PATH: ${{ needs.version.outputs.scratch_prefix }}/macos.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Through $GITHUB_ENV, not a job-level `env:`: the `runner` context does not exist at job
       # level and $RUNNER_TEMP is not expanded there, so either spelling would silently yield
@@ -155,24 +186,12 @@ jobs:
             --password "$APPLE_APP_PASSWORD" \
             --keychain "$KEYCHAIN_PATH"
 
-      # Swap these two inputs for the keyless variant once a Workload Identity pool exists:
-      #   workload_identity_provider: projects/<n>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
-      #   service_account: harness-desktop-ci@<project>.iam.gserviceaccount.com
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
 
-      # The upload is the LAST thing the script does, after ~25 minutes of building and notarizing.
-      # Proving write access now means a credential problem costs seconds, not a whole run.
-      - name: Verify GCS write access
-        run: |
-          set -euo pipefail
-          probe="gs://${GCS_BUCKET}/harness/desktop/.ci-preflight/${GITHUB_RUN_ID}-macos"
-          echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
-          gsutil rm "$probe"
-
-      - name: Build, sign, notarize and publish macOS
+      - name: Build, sign, notarize and upload macOS
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -187,28 +206,23 @@ jobs:
         if: always()
         run: security delete-keychain "$KEYCHAIN_PATH" || true
 
-  # Both architectures in one job, run ONE AT A TIME. The scripts download-merge-reupload
-  # metadata.json, so two writers racing means whichever lands last drops the other's key — which
-  # is also why this waits on `macos` instead of running beside it.
-  linux:
-    needs: [version, tests, macos]
+  build-linux:
+    needs: [version, tests, preflight]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
-      max-parallel: 1
+      # No max-parallel: each job writes its own scratch manifest, so they cannot race.
       fail-fast: false
       matrix:
         include:
           # flutter build linux cannot cross-compile — each architecture needs its own host.
-          # The arm64 runner image is the one leg never exercised here yet: check the SDK setup
-          # step's log on the first dry run before trusting a real tag to it.
           - { runner: ubuntu-24.04, arch: x64 }
           - { runner: ubuntu-24.04-arm, arch: arm64 }
     env:
-      METADATA_PATH: ${{ needs.version.outputs.metadata_path }}
       TARGET_ARCH: ${{ matrix.arch }}
+      METADATA_PATH: ${{ needs.version.outputs.scratch_prefix }}/linux-${{ matrix.arch }}.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the Linux desktop toolchain
         run: |
@@ -229,14 +243,82 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Verify GCS write access
-        run: |
-          set -euo pipefail
-          probe="gs://${GCS_BUCKET}/harness/desktop/.ci-preflight/${GITHUB_RUN_ID}-${TARGET_ARCH}"
-          echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
-          gsutil rm "$probe"
-
-      - name: Build and publish linux-${{ matrix.arch }}
+      - name: Build and upload linux-${{ matrix.arch }}
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: bash scripts/upload-desktop-linux.sh "$VERSION"
+
+  # The only job that touches the REAL manifest, and the only one that can, because it is the only
+  # one that runs after every build has finished.
+  publish:
+    needs: [version, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    env:
+      METADATA_PATH: ${{ needs.version.outputs.metadata_path }}
+      SCRATCH_PREFIX: ${{ needs.version.outputs.scratch_prefix }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Merge every platform's key into the manifest in one write
+        run: |
+          set -euo pipefail
+          mkdir -p parts
+          gsutil -m cp "gs://${GCS_BUCKET}/${SCRATCH_PREFIX}/*.json" parts/
+          echo "::group::scratch manifests"; ls -la parts; echo "::endgroup::"
+
+          src="$(mktemp)"; dst="$(mktemp)"
+          if ! gsutil cp "gs://${GCS_BUCKET}/${METADATA_PATH}" "$src" 2>/dev/null; then
+            echo "   (no existing manifest at ${METADATA_PATH} — creating a new one)"
+            printf '{}' > "$src"
+          fi
+          # Paths through argv, NEVER piped into this heredoc — the heredoc claims stdin, so a pipe
+          # would be silently dropped and the merge would blank the manifest.
+          python3 - "$src" "$dst" parts <<'PY'
+          import json, os, sys
+
+          src, dst, parts = sys.argv[1:4]
+          try:
+              with open(src) as f:
+                  raw = f.read()
+              data = json.loads(raw) if raw.strip() else {}
+          except (OSError, json.JSONDecodeError):
+              data = {}
+          if not isinstance(data, dict):
+              data = {}
+
+          merged = 0
+          for name in sorted(os.listdir(parts)):
+              if not name.endswith(".json"):
+                  continue
+              with open(os.path.join(parts, name)) as f:
+                  part = json.load(f)
+              if not isinstance(part, dict):
+                  sys.exit(f"error: {name} is not a JSON object")
+              for key, entry in part.items():
+                  data[key] = entry
+                  merged += 1
+                  print(f"  {key} -> {entry.get('version')}")
+
+          # An empty merge would quietly re-upload the manifest unchanged and report success, which
+          # is indistinguishable from a release that published nothing.
+          if merged == 0:
+              sys.exit("error: no manifest entries found — did the build jobs upload anything?")
+
+          with open(dst, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
+          gsutil -h "Content-Type:application/json" \
+                 -h "Cache-Control:no-cache, no-store, must-revalidate" \
+                 cp "$dst" "gs://${GCS_BUCKET}/${METADATA_PATH}"
+          echo "Published to \`${METADATA_PATH}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # if: always() so a failed merge still clears the scratch files rather than leaving them for
+      # a later run to pick up — they are keyed by run id, but a stale prefix is still litter in a
+      # public bucket.
+      - name: Remove the scratch manifests
+        if: always()
+        run: gsutil -m rm -r "gs://${GCS_BUCKET}/${SCRATCH_PREFIX}" || true
