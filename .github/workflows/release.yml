@@ -341,6 +341,70 @@ jobs:
                  cp "$dst" "gs://${GCS_BUCKET}/${METADATA_PATH}"
           echo "Published to \`${METADATA_PATH}\`" >> "$GITHUB_STEP_SUMMARY"
 
+  # The GitHub Release. Notes are the tag's OWN message, verbatim — the same rule
+  # autonomous-grid's release.yml follows. CI generates nothing: what a human wrote and reviewed at
+  # tag time is exactly what publishes, and `generate_release_notes` would append a second,
+  # differently-built list under it that silently omits anything which reached main without a PR.
+  #
+  # No binaries attached. GCS is the distribution channel — the in-app updater and the website both
+  # read the manifest — so uploading 70MB of the same bytes here would create a second copy that can
+  # disagree with the one the app actually installs. The notes link to the real ones instead.
+  github-release:
+    needs: [version, publish]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # narrower than the workflow default only here, where a release is created
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Take the release notes from the tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # actions/checkout replaces the pushed annotated tag with a LIGHTWEIGHT local ref, even at
+          # fetch-depth: 0, so `git cat-file -t` below would see "commit" and reject a properly
+          # annotated tag. Re-fetch the tag object to restore the annotation before reading it.
+          git fetch --force origin tag "$REF_NAME"
+          # A lightweight tag has no message of its own, and %(contents) would quietly fall through
+          # to the commit's — publishing "chore(release): vX.Y.Z" as the notes.
+          if [ "$(git cat-file -t "$REF_NAME")" != tag ]; then
+            echo "::error::$REF_NAME is a lightweight tag, so it carries no release notes."
+            echo "::error::Re-tag with:  git tag -a $REF_NAME --cleanup=verbatim -F notes.md"
+            exit 1
+          fi
+          git tag -l --format='%(contents)' "$REF_NAME" > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::$REF_NAME has an empty tag message — no notes to publish."
+            exit 1
+          fi
+          base="https://storage.googleapis.com/${GCS_BUCKET}/harness/desktop/${VERSION}"
+          cat >> RELEASE_NOTES.md <<EOF
+
+          ---
+
+          ## Downloads
+
+          New install: <https://harness.autonomous.ai/desktop/download>
+
+          | | |
+          |---|---|
+          | macOS (universal) | [Harness-macos.dmg](${base}/Harness-macos.dmg) |
+          | Linux x64 | [Harness-linux-x64.tar.gz](${base}/Harness-linux-x64.tar.gz) |
+          | Linux arm64 | [Harness-linux-arm64.tar.gz](${base}/Harness-linux-arm64.tar.gz) |
+
+          Already running Harness? It updates itself — no download needed.
+          EOF
+          echo "::group::RELEASE_NOTES.md"; cat RELEASE_NOTES.md; echo "::endgroup::"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+
   # Its own job, not a step in `publish`: `publish` is SKIPPED when any build fails, which is
   # precisely when scratch manifests are left behind — the builds that DID succeed have already
   # written theirs. `if: always()` here means the prefix is cleared whatever happened upstream.
