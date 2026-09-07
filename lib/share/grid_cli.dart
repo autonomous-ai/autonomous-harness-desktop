@@ -17,9 +17,11 @@ import 'dart:io';
 /// that can serve them, and saying so on every invocation is cheaper than
 /// asking the user why their share went to a grid they cannot see.
 ///
-/// Unlike the Harness CLI this app never installs `grid`. It is a tool the user
-/// has or has not got, so [locate] returning null is an ordinary state the UI
-/// is built to show, not a failure to repair.
+/// First-run provisioning installs `grid` alongside the Harness CLI
+/// (`EnvironmentProvisioner`), but unlike the Harness one it is the step the
+/// app is content to go without: no network, no uv, a captive portal, and boot
+/// carries on. So [locate] returning null stays an ordinary state the UI is
+/// built to show, not a failure to repair here.
 class GridCli {
   GridCli({
     Map<String, String>? environment,

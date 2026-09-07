@@ -175,6 +175,7 @@ void main() {
         EnvironmentStep.node: EnvironmentStepStatus.ready,
         EnvironmentStep.harness: EnvironmentStepStatus.ready,
         EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
+        EnvironmentStep.grid: EnvironmentStepStatus.pending,
       },
       message: 'Complete the macOS setup in Terminal, then click Retry.',
     );

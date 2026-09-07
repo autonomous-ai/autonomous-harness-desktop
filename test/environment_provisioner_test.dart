@@ -123,6 +123,84 @@ void main() {
     expect(installEnvironments.single?['HARNESS_NODE_BINARY'], node.path);
   });
 
+  test('installs the Grid CLI once, and never over an existing one', () async {
+    final runtime = Directory('${scratch.path}/runtime')
+      ..createSync(recursive: true);
+    final node = File('${runtime.path}/node-v22/bin/node')
+      ..createSync(recursive: true);
+    File('${runtime.path}/current-node').writeAsStringSync('${node.path}\n');
+    var gridProbes = 0;
+    var gridInstalls = 0;
+    var gridPresent = false;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      architecture: () async => 'arm64',
+      run: (executable, arguments, {environment}) async {
+        final command = arguments.join(' ');
+        if (executable == node.path) return result(0, stdout: 'v22.4.1\n');
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":false}\n');
+        }
+        if (command.contains('grid.autonomous.ai/install.sh')) {
+          gridInstalls++;
+          gridPresent = true;
+          return result(0, stdout: 'installed');
+        }
+        if (command.contains('grid --version')) {
+          gridProbes++;
+          return gridPresent ? result(0, stdout: 'grid 0.3.35') : result(1);
+        }
+        return result(0, stdout: 'tmux 3.4');
+      },
+    );
+
+    final first = await provisioner.ensureReady(onProgress: (_) {});
+    expect(first.isReady, isTrue);
+    expect(first.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
+    expect(gridInstalls, 1);
+    expect(gridProbes, 2); // missing, then verified after the install
+
+    final second = await provisioner.ensureReady(onProgress: (_) {});
+    expect(second.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
+    expect(gridInstalls, 1, reason: 'a present Grid CLI is left alone');
+  });
+
+  test('a Grid CLI that will not install does not block the app', () async {
+    final runtime = Directory('${scratch.path}/runtime')
+      ..createSync(recursive: true);
+    final node = File('${runtime.path}/node-v22/bin/node')
+      ..createSync(recursive: true);
+    File('${runtime.path}/current-node').writeAsStringSync('${node.path}\n');
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      architecture: () async => 'arm64',
+      run: (executable, arguments, {environment}) async {
+        final command = arguments.join(' ');
+        if (executable == node.path) return result(0, stdout: 'v22.4.1\n');
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":false}\n');
+        }
+        if (command.contains('grid.autonomous.ai/install.sh')) {
+          return result(1, stderr: 'could not resolve host');
+        }
+        if (command.contains('grid --version')) return result(1);
+        return result(0, stdout: 'tmux 3.4');
+      },
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isTrue);
+    expect(
+      readiness.steps[EnvironmentStep.grid],
+      EnvironmentStepStatus.unavailable,
+    );
+    expect(readiness.needsTerminal, isFalse);
+    expect(readiness.output.last, contains('Share Intelligence'));
+  });
+
   test('opens Terminal when tmux and Homebrew are unavailable', () async {
     final runtime = Directory('${scratch.path}/runtime')
       ..createSync(recursive: true);

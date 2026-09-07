@@ -116,8 +116,10 @@ class _SharePaneState extends State<SharePane> {
         title: 'The Grid CLI is not on this computer.',
         message:
             "Sharing is the Grid CLI's job — it owns the models on this disk "
-            'and the engine that serves them, and Harness does not install it. '
-            'Install it, run "grid login", and this screen will find it.',
+            'and the engine that serves them. Harness tries to install it when '
+            'it starts, so this Mac either could not reach the installer or has '
+            'not been restarted since. Install it, run "grid login", and this '
+            'screen will find it.',
       );
     }
     final rail = ShareRail(

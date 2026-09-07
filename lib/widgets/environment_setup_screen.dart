@@ -105,11 +105,16 @@ class _StepRow extends StatelessWidget {
         AppColors.warning,
       ),
       EnvironmentStepStatus.failed => (Icons.error_outline, AppColors.danger),
+      EnvironmentStepStatus.unavailable => (
+        Icons.remove_circle_outline,
+        AppColors.muted,
+      ),
     };
     final label = switch (step) {
       EnvironmentStep.node => 'Managed Node runtime',
       EnvironmentStep.harness => 'Harness CLI',
       EnvironmentStep.tmux => 'tmux terminal support',
+      EnvironmentStep.grid => 'Grid CLI for Share Intelligence',
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
@@ -130,6 +135,7 @@ class _StepRow extends StatelessWidget {
             EnvironmentStepStatus.ready => 'Ready',
             EnvironmentStepStatus.needsTerminal => 'Terminal needed',
             EnvironmentStepStatus.failed => 'Failed',
+            EnvironmentStepStatus.unavailable => 'Not installed',
           }, style: TextStyle(fontSize: 12, color: color)),
         ],
       ),

@@ -78,8 +78,8 @@ holds an SSO token:
 
 `lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: prefer
 `~/.harness/runtime/current-node` + `~/.harness/cli/cli.js`, then `~/.local/bin/harness`, then PATH.
-`lib/bootstrap/environment_provisioner.dart` installs the managed Node runtime, the CLI and tmux on first
-run (the `preparingEnvironment` status).
+`lib/bootstrap/environment_provisioner.dart` installs the managed Node runtime, the CLI, tmux and the
+Grid CLI on first run (the `preparingEnvironment` status).
 
 ### Boot and state
 
@@ -179,7 +179,11 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
   `harness` cannot serve inference: the models live in `~/.grid/models`, the engine is
   `~/.grid/bin/llama-server`, and `grid join <grid-id> …` is what puts this Mac on a grid. This app
-  never installs `grid` — "not installed" is a state the pane explains, not a failure it repairs.
+  installs `grid` at boot too (`EnvironmentStep.grid`), but as the one **optional** step: it is
+  install-if-missing and never upgrade-if-old — a `grid` built from source must survive a launch,
+  the way the harness CLI's self-update does not — and a failure marks the step `unavailable`
+  rather than `failed`, so `isReady` (required steps only) still lets the app boot. "Not installed"
+  therefore stays a state the pane explains, not a failure it repairs.
   Three routes (`ShareRoute`): a local GGUF, a vendor key, or an OpenAI-compatible server already
   running here. **A key never reaches argv** (`ps` is world-readable) — it goes in the child's
   environment, which is why `GridCli.start` takes `secrets` separately. The engine `grid join`

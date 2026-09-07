@@ -19,9 +19,33 @@ String get _runtimeMetadataUrl => _runtimeMetadataUrlOverride.isEmpty
     ? _defaultRuntimeMetadataUrl
     : _runtimeMetadataUrlOverride;
 
-enum EnvironmentStep { node, harness, tmux }
+enum EnvironmentStep {
+  node,
+  harness,
+  tmux,
+  grid;
 
-enum EnvironmentStepStatus { pending, running, ready, needsTerminal, failed }
+  /// Whether the app refuses to boot without this step.
+  ///
+  /// Everything but [grid] is: no Node, no `harness`, no tmux means no
+  /// terminals, which is the whole app. The Grid CLI only powers Share
+  /// Intelligence, so a machine that could not install it still signs in and
+  /// runs agents — `SharePane` explains the gap on the one screen that needs it.
+  bool get isRequired => this != EnvironmentStep.grid;
+}
+
+enum EnvironmentStepStatus {
+  pending,
+  running,
+  ready,
+  needsTerminal,
+  failed,
+
+  /// Optional and not here: tried, did not land, and nothing is blocked by it.
+  /// Distinct from [failed] so the setup screen does not offer a Retry for a
+  /// step the app is content to go without.
+  unavailable,
+}
 
 class EnvironmentReadiness {
   final Map<EnvironmentStep, EnvironmentStepStatus> steps;
@@ -41,8 +65,9 @@ class EnvironmentReadiness {
     },
   );
 
-  bool get isReady =>
-      steps.values.every((status) => status == EnvironmentStepStatus.ready);
+  bool get isReady => steps.entries
+      .where((entry) => entry.key.isRequired)
+      .every((entry) => entry.value == EnvironmentStepStatus.ready);
 
   bool get needsTerminal => steps.values.any(
     (status) => status == EnvironmentStepStatus.needsTerminal,
@@ -280,8 +305,25 @@ class EnvironmentProvisioner {
       emit(
         step: EnvironmentStep.tmux,
         status: EnvironmentStepStatus.ready,
-        message: 'Environment ready.',
         output: 'tmux ready',
+      );
+
+      emit(
+        step: EnvironmentStep.grid,
+        status: EnvironmentStepStatus.running,
+        message: 'Checking the Grid CLI…',
+      );
+      final grid = await _ensureGrid();
+      emit(
+        step: EnvironmentStep.grid,
+        status: grid
+            ? EnvironmentStepStatus.ready
+            : EnvironmentStepStatus.unavailable,
+        message: 'Environment ready.',
+        output: grid
+            ? 'Grid CLI ready'
+            : 'Grid CLI unavailable — Share Intelligence stays off until it is '
+                  'installed.',
       );
       return state;
     } catch (error) {
@@ -479,6 +521,47 @@ class EnvironmentProvisioner {
     return false;
   }
 
+  /// Installs the Grid CLI when this Mac has not got it.
+  ///
+  /// The second CLI this app depends on, and the only optional one: `grid`
+  /// owns this computer's own inference — the models on its disk and the engine
+  /// that serves them — which is what Share Intelligence drives. Nothing else
+  /// in the app needs it, so this never throws: a machine that could not reach
+  /// the installer signs in and runs agents exactly as before.
+  ///
+  /// Install-if-missing, never upgrade-if-old. A developer running a build of
+  /// `grid` from source must not have it replaced by a release on every launch
+  /// — the same mistake the Harness CLI's self-update makes, and the reason
+  /// [_ensureHarness] also stops at the first working answer.
+  Future<bool> _ensureGrid() async {
+    try {
+      if (await _hasGrid()) return true;
+      final install = await _shell(
+        // The vendor installer: a `grid` binary on Linux, the universal wheel
+        // via uv on macOS (which it bootstraps itself). It is `bash`, not `sh`.
+        'set -e; curl -fsSL https://grid.autonomous.ai/install.sh | bash',
+        // A first install pulls uv, a Python and the wheel's dependencies. The
+        // ceiling is not a budget for that, it is a guard: an installer that
+        // hangs on a captive-portal proxy must not hold the whole boot open.
+        timeout: const Duration(minutes: 5),
+      );
+      if (install.exitCode != 0) return false;
+      return await _hasGrid();
+    } catch (_) {
+      // Nothing this can raise — a missing shell, a killed child — is worth
+      // failing a boot the Grid CLI is not needed for.
+      return false;
+    }
+  }
+
+  /// Must agree with `GridCli.locate`, which reads `~/.local/bin/grid` first —
+  /// [_shell] puts exactly that directory in front of a login shell's PATH, so
+  /// "the provisioner installed it" and "the app can find it" cannot disagree.
+  Future<bool> _hasGrid() async {
+    final result = await _shell('command -v grid >/dev/null && grid --version');
+    return result.exitCode == 0;
+  }
+
   Future<bool> _hasTmux() async {
     final result = await _shell('command -v tmux >/dev/null && tmux -V');
     return result.exitCode == 0;
@@ -509,11 +592,22 @@ echo 'tmux is ready. Return to Harness.'
   Future<ProcessResult> _shell(
     String command, {
     Map<String, String>? environment,
-  }) => _run('/bin/zsh', [
-    '-l',
-    '-c',
-    'export PATH="\$HOME/.local/bin:\$PATH"; $command',
-  ], environment: environment);
+    Duration? timeout,
+  }) {
+    final run = _run('/bin/zsh', [
+      '-l',
+      '-c',
+      'export PATH="\$HOME/.local/bin:\$PATH"; $command',
+    ], environment: environment);
+    if (timeout == null) return run;
+    // The child keeps running — Process.run gives us no handle to kill. That is
+    // the intent: a slow install finishes in the background and the next launch
+    // finds it, while this one stops waiting.
+    return run.timeout(
+      timeout,
+      onTimeout: () => ProcessResult(0, 124, '', 'timed out after $timeout'),
+    );
+  }
 
   Future<void> _makePrivate(FileSystemEntity entity) async {
     final result = await _run('/bin/chmod', ['700', entity.path]);
