@@ -211,7 +211,7 @@ class EnvironmentProvisioner {
         status: EnvironmentStepStatus.running,
         message: 'Installing Harness CLI…',
       );
-      await _ensureHarness();
+      await _ensureHarness(node);
       emit(
         step: EnvironmentStep.harness,
         status: EnvironmentStepStatus.ready,
@@ -325,7 +325,16 @@ class EnvironmentProvisioner {
     return match != null && int.parse(match.group(1)!) >= 22;
   }
 
-  Future<void> _ensureHarness() async {
+  /// [node] is the runtime [_ensureNode] just validated. It has to be handed
+  /// to the installer explicitly: a Finder/Dock launch inherits launchd's
+  /// default PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), which contains neither
+  /// `/opt/homebrew/bin` nor `/usr/local/bin`, so `command -v node` inside
+  /// install.sh finds nothing and the script exits 1 with "Node.js (>= 20) is
+  /// required but was not found" — directly under a Node step this same run
+  /// reported ready. `HARNESS_NODE_BINARY` is the installer's documented hook
+  /// for exactly this, and it also pins the launcher's shebang to the runtime
+  /// we checked rather than to whatever the install-time PATH happened to hold.
+  Future<void> _ensureHarness(File node) async {
     final runner = HarnessCliRunner(harnessHome: harnessHome, runProcess: _run);
     ProcessResult? status;
     try {
@@ -338,14 +347,14 @@ class EnvironmentProvisioner {
         (status.stdout as String).trim().isNotEmpty) {
       return;
     }
-    final install = await _run('/bin/sh', [
-      '-c',
+    final install = await _shell(
       // Served by the Harness web application; the retired top-level /install.sh is gone.
       // A stale URL is worse here than anywhere else: a 404 piped into bash still exits 0 (measured),
       // so the `install.exitCode != 0` check below would pass and the failure would only surface as
       // the confusing "CLI did not start after installation" a few lines further down.
       'set -e; curl -fsSL https://harness.autonomous.ai/cli/install.sh | /bin/sh',
-    ]);
+      environment: {'HARNESS_NODE_BINARY': node.path},
+    );
     if (install.exitCode != 0) {
       throw StateError('Harness installer failed: ${_resultText(install)}');
     }

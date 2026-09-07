@@ -429,4 +429,51 @@ void main() {
       contains('brew install tmux'),
     );
   });
+
+  // A Finder/Dock launch inherits launchd's default PATH, which has neither
+  // /opt/homebrew/bin nor /usr/local/bin on it. Piping install.sh into a bare
+  // `/bin/sh` there made the script's own `command -v node` come up empty and
+  // abort with "Node.js (>= 20) is required but was not found" — one step
+  // after this same run had reported that exact Node as ready.
+  test('hands the installer the Node it just validated, not the app PATH', () async {
+    const nodePath = '/usr/local/bin/node';
+    var harnessInstalled = false;
+    String? installerExecutable;
+    Map<String, String>? installerEnvironment;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      run: (executable, arguments, {environment}) async {
+        final command = arguments.join(' ');
+        if (isShellCall(executable) && command.contains('command -v node')) {
+          return result(0, stdout: '$nodePath\n');
+        }
+        if (executable == nodePath) return result(0, stdout: 'v22.4.1\n');
+        if (command.contains('harness.autonomous.ai/cli/install.sh')) {
+          installerExecutable = executable;
+          installerEnvironment = environment;
+          harnessInstalled = true;
+          return result(0);
+        }
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return harnessInstalled
+              ? result(0, stdout: '{"loggedIn":false}\n')
+              : result(127, stderr: 'harness: command not found\n');
+        }
+        if (isShellCall(executable) && command.contains('command -v tmux')) {
+          return result(0, stdout: 'tmux 3.4\n');
+        }
+        return result(0);
+      },
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.ready);
+    expect(harnessInstalled, isTrue);
+    // A login shell, so PATH is the user's own rather than launchd's default…
+    expect(installerExecutable, predicate<String?>((e) => isShellCall(e ?? '')));
+    // …and the runtime is pinned explicitly, so PATH cannot decide it at all.
+    expect(installerEnvironment?['HARNESS_NODE_BINARY'], nodePath);
+  });
 }
