@@ -185,8 +185,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Preparing this Mac'), findsOneWidget);
-    expect(find.text('Managed Node runtime'), findsOneWidget);
+    expect(find.text('Preparing this computer'), findsOneWidget);
+    expect(find.text('Node.js runtime'), findsOneWidget);
     expect(find.text('Retry after setup'), findsOneWidget);
   });
 

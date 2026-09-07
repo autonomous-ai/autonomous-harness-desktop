@@ -1,4 +1,4 @@
-.PHONY: upload-desktop upload-desktop-linux upload-node-runtime terminal-local-manual terminal-local-e2e terminal-prod-e2e
+.PHONY: upload-desktop upload-desktop-linux terminal-local-manual terminal-local-e2e terminal-prod-e2e
 
 ## upload-desktop: build, sign, notarize, and publish a macOS desktop release.
 upload-desktop:
@@ -7,10 +7,6 @@ upload-desktop:
 ## upload-desktop-linux: build and publish a Linux (x64) desktop release. Must run on a Linux host.
 upload-desktop-linux:
 	bash scripts/upload-desktop-linux.sh $(ARGS)
-
-## upload-node-runtime: publish checksum-verified managed Node runtimes for desktop bootstrap.
-upload-node-runtime:
-	bash scripts/publish-managed-node-runtime.sh $(ARGS)
 
 ## terminal-local-manual: start the local backend/CLI stack and open the desktop fixture.
 terminal-local-manual:

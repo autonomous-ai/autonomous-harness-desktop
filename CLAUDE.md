@@ -56,15 +56,14 @@ make terminal-prod-e2e       # opt-in, refuses without PROD_TERMINAL_E2E=1 + rel
 ```
 
 Release (`make upload-desktop` for macOS, `make upload-desktop-linux` for Linux — the latter must run
-on an Ubuntu host — plus `make upload-node-runtime ARGS=22.16.0`) is documented in RELEASE.md. Both
-platforms publish to the same GCS `metadata.json` under different keys (`desktop-macos` /
-`desktop-linux-x64`) and share one version number by default; `pubspec.yaml`'s `version:` is a
-placeholder and is never bumped — Linux instead gets a `version.txt` written into the built bundle at
-package time (see `lib/core/app_version.dart`, since `flutter build linux` has no Info.plist-style
-stamping). Test the updater against a scratch manifest with
-`--dart-define=DESKTOP_UPDATE_METADATA_URL=...`; `HARNESS_RUNTIME_METADATA_URL` does the same for the
-managed Node runtime (published per-OS/arch: `darwin-arm64`, `darwin-x64`, `linux-x64`,
-`linux-arm64`).
+on an Ubuntu host) is documented in RELEASE.md. Both platforms publish to the same GCS
+`metadata.json` under different keys (`desktop-macos` / `desktop-linux-x64`) and share one version
+number by default; `pubspec.yaml`'s `version:` is a placeholder and is never bumped — Linux instead
+gets a `version.txt` written into the built bundle at package time (see `lib/core/app_version.dart`,
+since `flutter build linux` has no Info.plist-style stamping). Test the updater against a scratch
+manifest with `--dart-define=DESKTOP_UPDATE_METADATA_URL=...`. There is no separate Node runtime
+channel to publish — `environment_provisioner.dart` provisions a real system Node via Homebrew/apt
+at first run instead of downloading a private copy (see below).
 
 ## Architecture
 
@@ -87,10 +86,14 @@ holds an SSO token:
   compile-time-gated dev entrypoint fed by `scripts/start-terminal-local-manual.sh`. It fails closed
   unless every `--dart-define` is present.
 
-`lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: prefer
-`~/.harness/runtime/current-node` + `~/.harness/cli/cli.js`, then `~/.local/bin/harness`, then PATH.
-`lib/bootstrap/environment_provisioner.dart` installs the managed Node runtime, the CLI and tmux on first
-run (the `preparingEnvironment` status).
+`lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: the
+`~/.local/bin/harness` launcher, then bare `harness` on PATH (a legacy
+`~/.harness/runtime/current-node` + `~/.harness/cli/cli.js` pair from an older app version is checked
+first for compatibility, but nothing writes it anymore).
+`lib/bootstrap/environment_provisioner.dart` ensures a real, system-wide Node (`>= 22`, via Homebrew
+on macOS or `apt`/NodeSource on Linux — not a private copy), installs the CLI, and installs tmux on
+first run (the `preparingEnvironment` status). A package-manager install that needs a password (fresh
+Homebrew, any `apt-get install`) opens a terminal instead of running non-interactively.
 
 ### Boot and state
 

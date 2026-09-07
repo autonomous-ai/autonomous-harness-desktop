@@ -59,7 +59,6 @@ public GCS release bucket. Release commands stay in this repository:
 ```bash
 make upload-desktop           # macOS
 make upload-desktop-linux     # Linux (x64) — must run on an Ubuntu build host
-make upload-node-runtime ARGS="22.16.0"
 ```
 
 See [RELEASE.md](RELEASE.md) for signing, notarization, versioning, managed
