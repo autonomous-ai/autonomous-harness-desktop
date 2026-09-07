@@ -123,6 +123,7 @@ class AppMenuItem extends StatefulWidget {
     this.note,
     this.detail,
     this.leading,
+    this.trailing,
     this.metrics = AppMenuRowMetrics.compact,
   });
 
@@ -135,6 +136,16 @@ class AppMenuItem extends StatefulWidget {
   /// apart by ink rather than by a separator character, so it reads as an aside
   /// instead of as part of the name.
   final String? note;
+
+  /// A mark at the row's far end, after [note] — a state the row has rather
+  /// than a word about it.
+  ///
+  /// For a fact that repeats down a list, where the same short phrase on every
+  /// other row turns the column into noise the eye has to re-read. A glyph is
+  /// scanned once. Give it a [Tooltip]: a mark carries no meaning to a reader
+  /// meeting it for the first time, and there is nowhere else in a menu row to
+  /// put the sentence.
+  final Widget? trailing;
 
   /// A quiet SECOND LINE under the label, for a row whose label alone does not
   /// say what picking it does — "Most tokens read in the last 24h" under
@@ -295,6 +306,10 @@ class _AppMenuItemState extends State<AppMenuItem> {
                       ),
                     ),
                   ),
+                ],
+                if (widget.trailing != null) ...[
+                  const SizedBox(width: 8),
+                  widget.trailing!,
                 ],
               ],
             ),

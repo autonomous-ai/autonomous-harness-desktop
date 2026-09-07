@@ -13,6 +13,7 @@ class SelectOption<T> {
     required this.label,
     this.note,
     this.leading,
+    this.trailing,
   });
 
   final T value;
@@ -26,6 +27,14 @@ class SelectOption<T> {
   /// A short qualifier shown after the label in quieter ink — "SF Pro" beside
   /// "System", or a warning that a saved choice is no longer installed.
   final String? note;
+
+  /// A mark at the row's far end. Built fresh per use, like [leading].
+  ///
+  /// For a state that recurs down the list, where the same words on several
+  /// rows read as noise. Only in the open list: the closed control shows the
+  /// chosen option's [note], and a glyph there would have to explain itself
+  /// with no room to.
+  final Widget Function()? trailing;
 }
 
 /// A control that picks one of a list, replacing [DropdownButtonFormField].
@@ -149,6 +158,7 @@ class _AppSelectFieldState<T> extends State<AppSelectField<T>> {
               label: option.label,
               note: option.note,
               leading: option.leading?.call(),
+              trailing: option.trailing?.call(),
               onPressed: () {
                 _controller.close();
                 if (option.value != widget.value) {

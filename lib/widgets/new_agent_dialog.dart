@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../core/engine_availability.dart';
 import '../grid/grid_agent_override.dart';
@@ -120,14 +121,20 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   String? _engineInstallNote(String engine) {
     final entry = _availability(engine);
     if (entry == null || entry.installed) return null;
-    return entry.installable ? 'will install' : 'not installed';
+    // Only the state Harness cannot fix keeps words. It is rare, it is the one
+    // the reader has to act on themselves, and a glyph for "we cannot help you
+    // here" would be a glyph nobody decodes in time.
+    return entry.installable ? null : 'not installed';
+  }
+
+  /// This engine is absent and Harness would install it before launching.
+  bool _willInstallEngine(String engine) {
+    final entry = _availability(engine);
+    return entry != null && !entry.installed && entry.installable;
   }
 
   /// The engine will have to be installed before it can run.
-  bool get _willInstall {
-    final entry = _availability(_engine);
-    return entry != null && !entry.installed && entry.installable;
-  }
+  bool get _willInstall => _willInstallEngine(_engine);
 
   /// The engine is missing and Harness has no line it can cite to fix that —
   /// Pi, and anything else without an entry in the CLI's install table. Stated
@@ -404,6 +411,14 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                               ? null
                               : 'no bypass flag'),
                 leading: () => EngineMark(engine: identity.id, size: 14),
+                // "will install" said in words repeated down a third of the
+                // list, and a column of the same two words is a column the eye
+                // has to read to discover it says nothing new. The glyph is
+                // scanned once; the sentence moves to its tooltip and to the
+                // preflight panel, which names the exact command anyway.
+                trailing: _willInstallEngine(identity.id)
+                    ? () => _InstallMark(engine: identity.id)
+                    : null,
               ),
           ],
           onChanged: (value) => setState(() {
@@ -1123,6 +1138,39 @@ class _NewAgentSummary extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// "Not here yet — Harness will fetch it first."
+///
+/// A download arrow rather than the words, because this state recurs down the
+/// engine list and a repeated two-word phrase stops being read. The tooltip
+/// carries the meaning for a first encounter; the preflight panel carries the
+/// actual command, which is the thing worth reading.
+///
+/// Drawn in [AppPalette.textFaint] — the ink the row's own qualifiers use. This
+/// is a fact about the engine, not a warning about the choice: installing is a
+/// normal outcome of picking it, and an amber glyph would say otherwise.
+class _InstallMark extends StatelessWidget {
+  const _InstallMark({required this.engine});
+
+  final String engine;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Tooltip(
+      message: '${engineIdentity(engine).label} is not on this machine — '
+          'Harness installs it before launching',
+      child: Icon(
+        LucideIcons.download300,
+        // A shade under the note text beside it: the glyph reads heavier than
+        // type at the same nominal size, and matching the number makes it
+        // louder than the words it replaced.
+        size: 12,
+        color: grid.AppPalette.textFaint,
       ),
     );
   }
