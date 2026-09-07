@@ -12,13 +12,30 @@ make upload-desktop ARGS="--no-bump"    # keep the current published version, re
 make upload-desktop ARGS="--no-build"   # upload the existing build/ artifact as-is
 ```
 
-## Node runtime
+## Managed Node runtime
 
-The first-run desktop bootstrap no longer manages a private Node copy. It requires a real,
-system-wide Node (`>= 22`) and installs/upgrades one itself via the OS package manager — Homebrew on
-macOS, `apt`/NodeSource on Linux — falling back to an interactive terminal when that install needs a
-password (`lib/bootstrap/environment_provisioner.dart`). There is nothing to publish for this: no GCS
-runtime channel, no per-arch archives, no app-side release step tied to the Node version.
+The first-run desktop bootstrap installs Node under `~/.harness/runtime`; it does not alter the
+user's system Node, Homebrew, nvm, or shell PATH. That is the point of it — the CLI launcher is
+written against that exact binary, so a Finder launch (where PATH is launchd's bare
+`/usr/bin:/bin:/usr/sbin:/sbin`) and a Terminal launch behave identically. Publish macOS and Linux
+archives for both ARM64 and x64 (including machines where `uname -m` reports `amd64`) before
+releasing a desktop build that requires a new Node version:
+
+```bash
+make upload-node-runtime ARGS="22.23.2"
+```
+
+The publisher downloads the official Node archives and `SHASUMS256.txt`, verifies each archive before
+uploading, then atomically merges `harness/runtime/metadata.json`. The app verifies the manifest's
+size and SHA-256 again before extracting an archive. A runtime manifest applies to fresh installs;
+roll out a changed runtime to existing users with a newer desktop build. Never replace an existing
+versioned archive in place.
+
+Until that managed manifest covers a platform, the desktop build falls back to its checksum-pinned
+official Node 22 archive for it. The fallback keeps first-run setup functional but is intentionally
+not a replacement for publishing the managed runtime channel before release.
+
+Homebrew and `apt` are still used for **tmux**, which is a separate step and unrelated to Node.
 
 ## What the script does
 

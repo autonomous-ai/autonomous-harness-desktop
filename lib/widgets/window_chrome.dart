@@ -10,7 +10,13 @@ import '../shared/theme/app_theme.dart' as grid;
 double get trafficLightClearance => Platform.isMacOS ? 78.0 : 0.0;
 
 /// The traffic lights' own row, as a drag handle.
-const double _dragStripHeight = 28;
+///
+/// Public because screens have to place their own controls clear of it: this
+/// band belongs to AppKit, so a button drawn inside it renders correctly and
+/// never responds. A screen that puts anything clickable near the top edge
+/// offsets by this rather than by a 28 typed locally, which would be a second
+/// copy of a number that must not drift.
+const double windowDragBandHeight = 28;
 
 /// The window's own strip, above everything the app draws.
 ///
@@ -25,7 +31,7 @@ const double _dragStripHeight = 28;
 /// nowhere to go, so the Flutter drag wins by default.
 ///
 /// [_barHeight] is therefore a floor, not a taste: it must clear
-/// [_dragStripHeight]. The extra 4px is what the rail used to inset itself by.
+/// [windowDragBandHeight]. The extra 4px is what the rail used to inset itself by.
 class HarnessTopBar extends StatelessWidget {
   const HarnessTopBar({super.key});
 
@@ -100,7 +106,7 @@ class WindowDragStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return DragToMoveArea(
       child: SizedBox(
-        height: Platform.isMacOS ? _dragStripHeight : 0,
+        height: Platform.isMacOS ? windowDragBandHeight : 0,
         width: double.infinity,
       ),
     );

@@ -3,17 +3,16 @@ import 'dart:io';
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
 ///
-/// `EnvironmentProvisioner` now provisions a real, system-wide Node (via
-/// Homebrew/apt) rather than a private copy, so the normal path is the
-/// installed `~/.local/bin/harness` launcher (its shebang already resolves
-/// the right system Node), falling back to bare `harness` on PATH for a
-/// developer-managed installation.
+/// The normal path is the managed tier: `~/.harness/runtime/current-node` — a
+/// private, checksum-verified Node that `EnvironmentProvisioner` owns and
+/// rewrites on every boot — paired with the `~/.harness/cli/cli.js` bundle,
+/// invoked as `<node> <cli.js> …` with no shell in between. Because both are
+/// absolute paths beneath [harnessHome], launching Harness from Finder and from
+/// Terminal have identical runtime behavior; PATH never enters into it.
 ///
-/// `~/.harness/runtime/current-node` + `~/.harness/cli/cli.js` — a private
-/// Node binary paired with the CLI bundle — is a legacy tier kept only for
-/// compatibility with installs made by older app versions that still wrote
-/// it; nothing writes that file anymore, so a fresh install never has it and
-/// falls straight through to the launcher tier below.
+/// Behind that come the installed `~/.local/bin/harness` launcher and finally
+/// bare `harness` on PATH, which cover a developer-managed install and the
+/// window before the first provisioning run has finished.
 class HarnessCliRunner {
   final Directory harnessHome;
   final Map<String, String> environment;

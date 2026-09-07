@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # release.yml calls this, so a release is gated on the SAME suite a PR is rather than on
+  # someone remembering to watch it — a tag push does not trigger `on: push: branches: [main]`.
+  # It also hands the release the Flutter version this suite actually ran on (see below).
+  workflow_call:
+    outputs:
+      flutter-version:
+        description: The Flutter the suite ran on. release.yml builds every artifact with it.
+        value: ${{ jobs.analyze-test.outputs.flutter-version }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to a PR makes the previous run's verdict irrelevant. Nothing else is cancelled:
+  # a main/tag run is the record of whether that commit was green.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      flutter-version: ${{ steps.pin.outputs.flutter-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # THE toolchain pin for the whole repo — CI and every release artifact read this one line,
+      # so a release can never be built with a Flutter the suite did not run on.
+      #
+      # Pinned rather than `channel: stable` unqualified: pubspec.yaml pins `sdk: ^3.13.0`, so
+      # anything below Flutter 3.47 dies at `flutter pub get` with "version solving failed", and a
+      # floating stable turns an unrelated upstream release into a red build on an untouched commit.
+      # Bump deliberately, alongside the local toolchain.
+      - id: pin
+        run: echo "flutter-version=3.47.2" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.pin.outputs.flutter-version }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # --no-fatal-infos, NOT an analyzer exclude: errors and warnings still fail this job. 13 of
+      # the repo's 14 infos are lint nits inside third_party/xterm, a deliberately vendored and
+      # patched xterm 4.0.0 (see its README.autonomous.md) that must not be reformatted to please a
+      # linter. Measured 2026-09-07: 14 infos, 0 warnings, 0 errors.
+      - run: flutter analyze --no-fatal-infos
+
+      # Unit + widget suite only (698 tests). integration_test/ needs a real device
+      # (-d macos / -d linux) and is deliberately not part of this gate.
+      - run: flutter test
