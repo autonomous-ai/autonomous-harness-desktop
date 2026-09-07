@@ -25,6 +25,16 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
+  // The packaged icon lives beside the executable in the relocatable Linux
+  // bundle. Resolve it once so both the native window icon and GNOME's custom
+  // header title use the exact same asset.
+  g_autofree gchar* icon_path = nullptr;
+  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
+  if (exe_path != nullptr) {
+    g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
+    icon_path = g_build_filename(exe_dir, "harness.png", nullptr);
+  }
+
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
   // desktop).
@@ -45,23 +55,36 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "Harness");
+    // GTK's stock header title has no application icon. Supply a compact,
+    // centered title widget so the native caption identifies Harness the same
+    // way it does in the dock and task switcher.
+    GtkWidget* title = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    if (icon_path != nullptr && g_file_test(icon_path, G_FILE_TEST_IS_REGULAR)) {
+      g_autoptr(GError) icon_error = nullptr;
+      g_autoptr(GdkPixbuf) title_pixbuf = gdk_pixbuf_new_from_file_at_scale(
+          icon_path, 20, 20, TRUE, &icon_error);
+      if (title_pixbuf != nullptr) {
+        GtkWidget* icon = gtk_image_new_from_pixbuf(title_pixbuf);
+        gtk_box_pack_start(GTK_BOX(title), icon, FALSE, FALSE, 0);
+      }
+    }
+    GtkWidget* label = gtk_label_new("Harness");
+    gtk_box_pack_start(GTK_BOX(title), label, FALSE, FALSE, 0);
+    gtk_widget_show_all(title);
+    gtk_header_bar_set_custom_title(header_bar, title);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "Harness");
   }
+  // Keep the native window metadata correct even when a custom header is
+  // drawn. Window managers use it for non-GNOME captions and accessibility.
+  gtk_window_set_title(window, "Harness");
 
   gtk_window_set_default_size(window, 1280, 720);
 
   // App icon — installed at the bundle root next to the executable by
   // linux/CMakeLists.txt's install() rule (a stock `flutter create` scaffold
   // has no icon wired in at all).
-  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
-  if (exe_path != nullptr) {
-    g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
-    g_autofree gchar* icon_path =
-        g_build_filename(exe_dir, "harness.png", nullptr);
+  if (icon_path != nullptr) {
     gtk_window_set_icon_from_file(window, icon_path, nullptr);
   }
 
