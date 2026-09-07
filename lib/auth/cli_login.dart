@@ -57,15 +57,19 @@ class CliLogin {
     return CliAuthStatus.fromJson(jsonDecode(line) as Map<String, dynamic>);
   }
 
-  /// Runs `harness login --json`. Calls [onAuthorizeUrl] as soon as the CLI reports the SSO page to
-  /// show, then resolves once the CLI's own loopback callback server completes the flow (or throws on
-  /// failure/cancellation). The process is killed if [cancel] is called while this is in flight.
+  /// Runs `harness login --force --json`. This is only ever reached from [LoginScreen], i.e. the app
+  /// has already decided this computer is signed out — so a stale-but-present session file on disk
+  /// must not short-circuit into a silent refresh attempt (`loginCommand`'s `readAuthSession() &&
+  /// !force` branch), which just re-reports the same failure forever instead of opening a fresh SSO
+  /// flow. Calls [onAuthorizeUrl] as soon as the CLI reports the SSO page to show, then resolves once
+  /// the CLI's own loopback callback server completes the flow (or throws on failure/cancellation).
+  /// The process is killed if [cancel] is called while this is in flight.
   Future<void> login({
     required void Function(String url) onAuthorizeUrl,
   }) async {
     final Process process;
     try {
-      process = await _runner.start(['login', '--json']);
+      process = await _runner.start(['login', '--force', '--json']);
     } catch (error) {
       throw CliNotAvailableException('Could not run the harness CLI: $error');
     }

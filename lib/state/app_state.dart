@@ -258,7 +258,7 @@ class AppNotifier extends ChangeNotifier {
   int _nextPaneId = 1;
 
   static const maxPanes = PaneLayoutStore.maxPanes;
-  // Set only while `harness login --json` is waiting for the user to finish SSO in their system
+  // Set only while `harness login --force --json` is waiting for the user to finish SSO in their system
   // browser. It arrives PART WAY THROUGH the flow — the CLI has to start before it can hand one
   // over — so it says "the browser is open", not "a sign-in is running". Use [signingIn] for the
   // second question; see the note there.

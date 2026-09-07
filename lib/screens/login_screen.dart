@@ -27,7 +27,7 @@ import '../widgets/window_chrome.dart';
 /// opener — which a single-window embedded webview cannot satisfy. The system
 /// browser handles it natively, so `AppNotifier.login` launches it there and
 /// this screen tracks the wait, returning on its own once
-/// `harness login --json` reports success. (This note came from the screen
+/// `harness login --force --json` reports success. (This note came from the screen
 /// that used to own the waiting state; it is the reason the flow leaves the
 /// app at all, so it outlives the widget it was written on.)
 class LoginScreen extends StatelessWidget {
