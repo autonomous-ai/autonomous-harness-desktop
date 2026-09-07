@@ -177,8 +177,7 @@ void main() {
     final app = makeNotifier(AppStatus.preparingEnvironment);
     app.environmentReadiness = EnvironmentReadiness(
       steps: {
-        EnvironmentStep.node: EnvironmentStepStatus.ready,
-        EnvironmentStep.harness: EnvironmentStepStatus.ready,
+          EnvironmentStep.harness: EnvironmentStepStatus.ready,
         EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
         EnvironmentStep.grid: EnvironmentStepStatus.pending,
       },
@@ -193,7 +192,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Preparing this computer'), findsOneWidget);
-    expect(find.text('Managed Node runtime'), findsOneWidget);
+    expect(find.text('Harness CLI & runtime'), findsOneWidget);
     expect(find.text('Retry after setup'), findsOneWidget);
   });
 

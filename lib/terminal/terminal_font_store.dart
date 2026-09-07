@@ -173,7 +173,8 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
   /// Whether the current pick *is* the default — what [reset] would leave the
   /// store at, so a Reset control can say it has nothing to do.
   bool get isDefault =>
-      family == TerminalFontChoice.sfMono && size == terminalFontSize;
+      family == TerminalFontChoice.defaultForPlatform &&
+      size == terminalFontSize;
 
   double _clamp(double size) => size.clamp(minSize, maxSize);
 

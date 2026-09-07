@@ -62,8 +62,9 @@ number by default; `pubspec.yaml`'s `version:` is a placeholder and is never bum
 gets a `version.txt` written into the built bundle at package time (see `lib/core/app_version.dart`,
 since `flutter build linux` has no Info.plist-style stamping). Test the updater against a scratch
 manifest with `--dart-define=DESKTOP_UPDATE_METADATA_URL=...`; `HARNESS_RUNTIME_METADATA_URL` does
-the same for the managed Node runtime, published per-OS/arch with `make upload-node-runtime
-ARGS=22.23.2` (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`).
+the same for the desktop updater only. The managed Node runtime is still published from this repo with
+`make upload-node-runtime ARGS=22.23.2` (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`), but
+its consumer is now the `harness` installer rather than this app.
 
 ## Architecture
 
@@ -88,15 +89,18 @@ holds an SSO token:
 
 `lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: prefer
 `~/.harness/runtime/current-node` + `~/.harness/cli/cli.js`, then `~/.local/bin/harness`, then PATH.
-`lib/bootstrap/environment_provisioner.dart` installs the managed Node runtime, the CLI, tmux, and
-the **Grid** CLI on first run (the `preparingEnvironment` status).
+`lib/bootstrap/environment_provisioner.dart` installs the CLI, tmux and the **Grid** CLI on first run
+(the `preparingEnvironment` status) — three steps, not four.
 
-Node is deliberately the app's own, downloaded and sha256-verified into `~/.harness/runtime` — never
-Homebrew, nvm, or the user's PATH. The CLI launcher is written against that exact binary
-(`HARNESS_NODE_BINARY`, which `install.sh` bakes in absolute), so a Finder launch — where PATH is
-launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin` — and a Terminal launch behave identically. **tmux** is
-the one dependency still taken from the OS package manager, and the only reason the setup screen ever
-opens a terminal: a fresh Homebrew or any `apt-get install` needs a password prompt on a real tty.
+Node is deliberately not the user's: it is a private, sha256-verified runtime under
+`~/.harness/runtime`, never Homebrew, nvm or PATH. **The app does not install it — `install.sh` does**,
+on its own or on the app's behalf, and records it in `current-node`; the launcher it writes names that
+binary absolutely, so a Finder launch (PATH is launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`) and a
+Terminal launch behave identically. One implementation, shared with everyone who installs the CLI from
+a terminal, instead of a second copy here that had to keep its own pinned checksums in step.
+**tmux** is the one dependency still taken from the OS package manager, and the only reason the setup
+screen ever opens a terminal: a fresh Homebrew or any `apt-get install` needs a password prompt on a
+real tty.
 
 ### Boot and state
 

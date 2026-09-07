@@ -19,7 +19,16 @@ class ToolbarPill extends StatefulWidget {
     this.tinted = false,
     this.active = false,
     this.rimmed = false,
+    this.disabledCursor,
   });
+
+  /// The cursor to show while [onTap] is null, when `basic` would undersell why.
+  ///
+  /// Defaults to `basic` — the right answer for a pill that is merely not this row's action. A
+  /// caller passes `forbidden` when the pointer is over something that LOOKS pressable and is
+  /// deliberately refusing: the model pill mid-turn is rimmed, lit and captioned, so an arrow there
+  /// reads as a dead control rather than a temporary one.
+  final MouseCursor? disabledCursor;
 
   /// What the pill says. Its colours are the caller's — [tint] is the one to
   /// use, so the ink and the fill agree.
@@ -67,7 +76,9 @@ class _ToolbarPillState extends State<ToolbarPill> {
     final lit = widget.active || (_hovered && enabled);
 
     return MouseRegion(
-      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      cursor: enabled
+          ? SystemMouseCursors.click
+          : widget.disabledCursor ?? SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
