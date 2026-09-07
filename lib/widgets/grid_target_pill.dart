@@ -117,7 +117,11 @@ class _GridTargetPillState extends State<GridTargetPill> {
           // Wider than the rail, and capped taller than a plain menu: this one opens UPWARD off a
           // pill at the window's bottom edge, and an account on a dozen grids scrolls inside it
           // rather than lifting the panel clear of the control it belongs to.
-          style: grid.AppMenu.style(minWidth: 248, maxWidth: 304, maxHeight: 420),
+          style: grid.AppMenu.style(
+            minWidth: 248,
+            maxWidth: _panelMaxWidth,
+            maxHeight: 420,
+          ),
           // Cheap on every open: only the first one fetches.
           onOpen: _networks.ensureLoaded,
           menuChildren: _rows(chosen),
@@ -131,9 +135,19 @@ class _GridTargetPillState extends State<GridTargetPill> {
     );
   }
 
+  /// The panel's width, stated once.
+  ///
+  /// Read by [AppMenu.style] AND by the note at the top of the list, which
+  /// cannot wrap without it. Two literals that have to agree is exactly how the
+  /// note ends up clipped again.
+  static const double _panelMaxWidth = 304;
+
   List<Widget> _rows(GridSelection chosen) => [
     const AppMenuNote(
       'New agents only. Agents already running keep the grid they started on.',
+      // The same 304 handed to [AppMenu.style] below. A sentence this long has
+      // to be told the panel's width or it is clipped rather than wrapped.
+      panelWidth: _panelMaxWidth,
     ),
     const AppMenuDivider(),
     for (final option in gridTargetMenuOptions(_networks.state))

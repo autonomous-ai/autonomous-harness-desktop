@@ -321,6 +321,7 @@ class AppMenuNote extends StatelessWidget {
     this.message, {
     super.key,
     this.metrics = AppMenuRowMetrics.compact,
+    this.panelWidth,
   });
 
   final String message;
@@ -329,9 +330,37 @@ class AppMenuNote extends StatelessWidget {
   /// list is the drift [AppMenuRowMetrics] exists to end.
   final AppMenuRowMetrics metrics;
 
+  /// The `maxWidth` its panel was given, when the note is a SENTENCE rather than
+  /// a label.
+  ///
+  /// ⚠️ Without this a long note does not wrap — it is CLIPPED, and the panel
+  /// does not look narrow, it looks broken mid-word. `MenuAnchor` lays its
+  /// children out inside a vertical `SingleChildScrollView`, which hands them
+  /// **unbounded width**; the row then takes its intrinsic width (a 70-character
+  /// note measured 805px against a 304px panel), and the panel's own
+  /// `maximumSize` clips what overflows. [maxLines] never comes into it, and
+  /// neither does the [Expanded] below: there is no bounded width to expand
+  /// into.
+  ///
+  /// So the width has to arrive from the call site, which is the only place that
+  /// knows what it passed to [AppMenu.style]. A note that is one short label —
+  /// a placeholder standing in for a list — can leave this null and size
+  /// itself.
+  final double? panelWidth;
+
   @override
   Widget build(BuildContext context) {
     AppTheme.watch(context);
+    // The text's own share of the panel: what is left after the 6px gutter on
+    // each side, the row's own padding, and the empty icon slot the label
+    // column starts after.
+    final textWidth = panelWidth == null
+        ? null
+        : panelWidth! -
+              12 -
+              metrics.padding.horizontal -
+              metrics.iconSize -
+              9;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       child: Padding(
@@ -340,11 +369,20 @@ class AppMenuNote extends StatelessWidget {
           children: [
             SizedBox(width: metrics.iconSize),
             const SizedBox(width: 9),
-            Expanded(
+            ConstrainedBox(
+              // Bounded so the sentence WRAPS. Unbounded, it runs off the panel
+              // and is cut — see [panelWidth].
+              constraints: BoxConstraints(
+                maxWidth: textWidth ?? double.infinity,
+              ),
               child: Text(
                 message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                // A note is prose, not a label: let it take the lines it needs
+                // rather than ellipsing a sentence the reader has to finish.
+                maxLines: panelWidth == null ? 2 : null,
+                overflow: panelWidth == null
+                    ? TextOverflow.ellipsis
+                    : TextOverflow.clip,
                 style: TextStyle(
                   color: AppPalette.textFaint,
                   fontFamily: AppFont.sans,

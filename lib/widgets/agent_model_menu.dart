@@ -167,6 +167,11 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
               message: tooltip,
               child: MenuAnchor(
                 controller: _controller,
+                // Bounded because the note at the top of this list is a
+                // sentence. Left to the theme's default the panel is unbounded,
+                // and the sentence is clipped rather than wrapped — see
+                // [AppMenuNote.panelWidth].
+                style: grid.AppMenu.style(maxWidth: _panelMaxWidth),
                 onOpen: () {
                   final networkId = selection.networkId;
                   if (networkId != null) {
@@ -203,13 +208,21 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
     );
   }
 
+  /// The panel's width, stated once — read by [AppMenu.style] and by the note
+  /// that has to wrap inside it. Wider than the grid picker's: this list holds
+  /// model ids, which are longer than a grid's name.
+  static const double _panelMaxWidth = 320;
+
   /// The panel's rows: a standing note that picking restarts the agent, then
   /// [agentModelMenuOptions] turned into entries — a real, tappable [AppMenuItem] for each choice,
   /// and a plain [AppMenuNote] in their place for the loading/failed placeholder, which exists to
   /// be read rather than picked.
   List<Widget> _rows(String? currentValue) {
     return [
-      const AppMenuNote('Changing the model restarts this agent and resumes the conversation'),
+      const AppMenuNote(
+        'Changing the model restarts this agent and resumes the conversation',
+        panelWidth: _panelMaxWidth,
+      ),
       const AppMenuDivider(),
       for (final option in agentModelMenuOptions(gridModelsController.state))
         if (option.enabled)
