@@ -164,6 +164,27 @@ void main() {
     notifier.dispose();
   });
 
+  testWidgets('the reload button reports a run in flight by turning', (
+    tester,
+  ) async {
+    final notifier = railNotifier();
+    await pumpRail(tester, notifier);
+
+    final reload = find.byTooltip('Reload machines  ⌘R');
+    RotationTransition glyph() => tester.widget<RotationTransition>(
+      find.descendant(of: reload, matching: find.byType(RotationTransition)),
+    );
+
+    // At rest the mark is upright and stays there — the transition is always in
+    // the tree, so "not spinning" has to be read off the angle, not off which
+    // widgets exist.
+    final resting = glyph().turns.value;
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(glyph().turns.value, resting);
+
+    notifier.dispose();
+  });
+
   testWidgets('the toolbar keeps its two buttons apart, and its bottom edge', (
     tester,
   ) async {

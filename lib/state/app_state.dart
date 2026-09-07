@@ -1259,7 +1259,36 @@ class AppNotifier extends ChangeNotifier {
     }
   }
 
-  Future<void> retryMachines() async {
+  /// A user-triggered reload is in flight.
+  ///
+  /// Read by the rail's reload button, which spins its glyph and stops taking
+  /// clicks while this is true. It is deliberately NOT [machinesLoading]: that
+  /// one means "there is nothing on screen yet", and a refresh over a list
+  /// already up leaves it false on purpose.
+  bool get machinesRefreshing => _retryInFlight != null;
+
+  /// The run itself, so a second press joins the first instead of starting a
+  /// second `GET /api/machines` beside it. The button's disabled state makes
+  /// this hard to reach by pointer, but ⌘R has no such guard, and neither has
+  /// the error strip's own retry.
+  Future<void>? _retryInFlight;
+
+  Future<void> retryMachines() {
+    final inFlight = _retryInFlight;
+    if (inFlight != null) return inFlight;
+    late final Future<void> run;
+    run = _performRetryMachines().whenComplete(() {
+      if (identical(_retryInFlight, run)) {
+        _retryInFlight = null;
+        notifyListeners();
+      }
+    });
+    _retryInFlight = run;
+    notifyListeners();
+    return run;
+  }
+
+  Future<void> _performRetryMachines() async {
     try {
       await refreshMachines();
       _lastError = null;

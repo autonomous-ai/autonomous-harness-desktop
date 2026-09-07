@@ -34,11 +34,25 @@ class AppIconButton extends StatefulWidget {
     this.hoverColor,
     this.hoverFill,
     this.destructive = false,
+    this.spinning = false,
   });
 
   final IconData icon;
   final VoidCallback? onPressed;
   final String? tooltip;
+
+  /// The glyph turns, and the button stops taking presses.
+  ///
+  /// For a control whose work the user cannot otherwise see finishing — the
+  /// rail's reload, which fires a REST call and an `agents_list` per open
+  /// machine and may take a second or two over a slow relay. Greying it out
+  /// would say "unavailable", which is the wrong word: it is *working*, and
+  /// the turn is what says so.
+  ///
+  /// Kept separate from a null [onPressed] on purpose. Disabled draws
+  /// [AppPalette.textFaint]; a spinning button keeps its resting ink, because
+  /// it is about to be pressable again.
+  final bool spinning;
 
   /// Glyph size. 15 is the inline default — a ✕ that clears a field, a dismiss
   /// on a row. A dialog's own close is 18, the size the app draws it at.
@@ -102,13 +116,57 @@ class AppIconButton extends StatefulWidget {
   State<AppIconButton> createState() => _AppIconButtonState();
 }
 
-class _AppIconButtonState extends State<AppIconButton> {
+class _AppIconButtonState extends State<AppIconButton>
+    with SingleTickerProviderStateMixin {
   bool _hovered = false;
+
+  /// One turn. Slow enough to read as deliberate rather than as a busy
+  /// indicator thrashing, fast enough that a reload finishing inside a single
+  /// revolution still looks like it moved.
+  static const Duration _spinPeriod = Duration(milliseconds: 900);
+
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: _spinPeriod,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.spinning) _spin.repeat();
+  }
+
+  @override
+  void didUpdateWidget(AppIconButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.spinning == oldWidget.spinning) return;
+    if (widget.spinning) {
+      _spin.repeat();
+    } else {
+      // Let the current revolution land instead of stopping the glyph at
+      // whatever angle the reply happened to arrive at. A mark frozen at 200°
+      // reads as a failure state; one that comes to rest upright reads as done.
+      _spin.animateTo(1, duration: _spinPeriod * (1 - _spin.value)).whenComplete(
+        () {
+          if (mounted && !widget.spinning) _spin.value = 0;
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     AppTheme.watch(context); // reads AppPalette/AppSurface tokens.
-    final enabled = widget.onPressed != null;
+    // Spinning does not grey the glyph out, but it does stop the press: the
+    // work the last one asked for is still running.
+    final enabled = widget.onPressed != null && !widget.spinning;
+    final pressable = widget.onPressed != null;
     final resting = widget.color ?? AppPalette.textSecondary;
     // Only the glyph changes. The fill stays the same neutral lift every other
     // button gets, so a destructive button reads as *the same affordance* the
@@ -126,7 +184,7 @@ class _AppIconButtonState extends State<AppIconButton> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
-        onTap: widget.onPressed,
+        onTap: enabled ? widget.onPressed : null,
         child: AnimatedContainer(
           duration: AppMotion.hover,
           curve: AppMotion.curve,
@@ -139,12 +197,15 @@ class _AppIconButtonState extends State<AppIconButton> {
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(AppIconButton._radius),
           ),
-          child: Icon(
-            widget.icon,
-            size: widget.size,
-            color: enabled
-                ? (_hovered ? active : resting)
-                : AppPalette.textFaint,
+          child: RotationTransition(
+            turns: _spin,
+            child: Icon(
+              widget.icon,
+              size: widget.size,
+              color: pressable
+                  ? (_hovered && enabled ? active : resting)
+                  : AppPalette.textFaint,
+            ),
           ),
         ),
       ),

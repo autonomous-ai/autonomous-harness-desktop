@@ -204,7 +204,15 @@ class MachineRailState extends State<MachineRail> {
                                 'Reload machines',
                                 ShortcutAction.reload,
                               ),
-                              onPressed: widget.notifier.retryMachines,
+                              // The glyph turns for as long as the reload runs
+                              // and the button refuses presses meanwhile — a
+                              // reload is a REST call plus an `agents_list` per
+                              // open machine, long enough that a button which
+                              // just sat there read as not having registered
+                              // the click.
+                              spinning: widget.notifier.machinesRefreshing,
+                              onPressed: () =>
+                                  unawaited(widget.notifier.retryMachines()),
                             ),
                             if (widget.onCollapse != null) ...[
                               // 6, not 2. Two glyphs a hair apart read as one
