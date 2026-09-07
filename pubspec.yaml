@@ -55,6 +55,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Only for the test that stands in for the OS folder panel, which a widget
+  # test cannot open — see `test/new_agent_grid_warning_test.dart`.
+  file_selector_platform_interface: ^2.7.0
   integration_test:
     sdk: flutter
 

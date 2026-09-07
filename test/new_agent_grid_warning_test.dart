@@ -2,6 +2,7 @@
 // so it is where "this engine cannot use the grid you picked" has to be readable —
 // and where the button has to stop, rather than send a frame that only ever comes
 // back as an error the user was already shown.
+import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -55,6 +56,12 @@ void main() {
   // would change what every later test sees.
   final before = gridSelectionStore.value;
   tearDown(() => gridSelectionStore.value = before);
+
+  // The system panel cannot open in a widget test, so the platform is swapped
+  // for one that answers with a fixed path — enough to exercise everything the
+  // dialog does with the answer.
+  const pickedFolder = '/Users/macbookpro/Desktop/A';
+  setUp(() => FileSelectorPlatform.instance = _StubFileSelector(pickedFolder));
 
   const machine = Machine(
     machineId: 'machine-1',
@@ -335,6 +342,38 @@ void main() {
     }
   });
 
+  testWidgets('a chosen folder starts at the control\'s left edge', (
+    tester,
+  ) async {
+    // The path used to be laid out RTL so it would ellipsize from its head, but
+    // direction drives alignment too: the string was shoved to the trailing edge
+    // and left a hole after the folder glyph, worst for the SHORT paths that
+    // needed no truncation at all.
+    gridSelectionStore.value = GridSelection.none;
+    await openDialog(tester, engine: 'claude', thisComputer: true);
+    await tester.tap(find.text('Choose a folder…'));
+    await tester.pumpAndSettle();
+
+    // Scoped to the control: the summary states the same path in its own column.
+    final icon = find.byIcon(Icons.folder_outlined);
+    final path = find.descendant(
+      of: find.byKey(const Key('new-agent-folder-text')),
+      matching: find.byType(Text),
+    );
+    expect(path, findsOneWidget);
+    // Whole or trimmed from the head — never from the tail, which would drop the
+    // only segment that identifies the folder. (Whether THIS path needs trimming
+    // is a question about font metrics, and a widget test runs without SF Mono.)
+    expect(tester.widget<Text>(path).data, endsWith('Desktop/A'));
+    expect(tester.widget<Text>(path).textDirection, isNot(TextDirection.rtl));
+
+    // Flush against the glyph beside it, not floating off to the right.
+    expect(
+      tester.getTopLeft(path).dx - tester.getBottomRight(icon).dx,
+      lessThan(12),
+    );
+  });
+
   testWidgets('the tick box is the app\'s own, not raw Material', (
     tester,
   ) async {
@@ -487,4 +526,18 @@ void main() {
       'pi',
     });
   });
+}
+
+
+/// Stands in for the OS folder panel, which a widget test cannot open.
+class _StubFileSelector extends FileSelectorPlatform {
+  _StubFileSelector(this.path);
+
+  final String path;
+
+  @override
+  Future<String?> getDirectoryPath({
+    String? initialDirectory,
+    String? confirmButtonText,
+  }) async => path;
 }

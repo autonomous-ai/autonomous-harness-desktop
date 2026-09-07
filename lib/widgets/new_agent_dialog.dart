@@ -449,6 +449,35 @@ const double _monoAdvance = 12 * 0.6;
 bool _fitsOneLine(String engine, String flag) =>
     ('\$ $engine $flag'.length) * _monoAdvance <= summaryContentWidth;
 
+/// A path shortened from its HEAD, so the leaf survives.
+///
+/// `/Users/macbookpro/Desktop/A` truncated the ordinary way keeps the part
+/// every path on the machine shares and drops the only part that identifies it.
+/// This drops whole leading segments instead and marks the cut with `…/`, the
+/// same shorthand a shell prompt uses:
+///
+/// ```
+/// /Users/macbookpro/work/harness/autonomous-harness-desktop
+/// …/harness/autonomous-harness-desktop
+/// ```
+///
+/// Segment-wise rather than character-wise: cutting mid-name reads as a typo,
+/// while a dropped segment reads as a path someone abbreviated. Windows paths
+/// come back untouched — they are separated by `\`, and a wrong guess about the
+/// separator would mangle the string rather than shorten it.
+String _ellipsizeHead(String path, double maxWidth) {
+  final fits = path.length * _monoAdvance <= maxWidth;
+  if (fits || !path.contains('/')) return path;
+  final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+  // Never below the leaf: a control too narrow for even that shows the leaf and
+  // lets the Text's own ellipsis take the rest.
+  for (var drop = 1; drop < segments.length; drop++) {
+    final candidate = '…/${segments.skip(drop).join('/')}';
+    if (candidate.length * _monoAdvance <= maxWidth) return candidate;
+  }
+  return '…/${segments.last}';
+}
+
 /// Below this the columns stack. Derived from the summary's own width plus the
 /// gap and the narrowest a select field stays usable at.
 const double _stackBelow = _summaryWidth + _gapColumns + 190;
@@ -567,26 +596,41 @@ class _FolderControl extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      picking
-                          ? 'Waiting for the folder picker…'
-                          // Not "on $machineName": the title says which machine
-                          // and so does the summary, and a hostname like
-                          // `MacBooks-MacBook-Pro.local` spent the whole control
-                          // repeating it and then truncated the sentence anyway.
-                          : chosen ?? 'Choose a folder…',
-                      maxLines: 1,
-                      // From the LEFT, so the leaf — the folder actually being
-                      // chosen — is what survives the ellipsis on a deep path.
-                      overflow: TextOverflow.ellipsis,
-                      textDirection: chosen != null && !picking
-                          ? TextDirection.rtl
-                          : TextDirection.ltr,
-                      style: chosen != null && !picking
-                          ? _mono(color: grid.AppPalette.textPrimary)
-                          : theme.textTheme.labelMedium?.copyWith(
-                              color: grid.AppPalette.textFaint,
-                            ),
+                    key: const Key('new-agent-folder-text'),
+                    // Aligned left like every other control's content.
+                    //
+                    // This used to set `TextDirection.rtl` to make a long path
+                    // ellipsize from its head, keeping the leaf visible. But
+                    // direction drives ALIGNMENT too, so the whole string was
+                    // shoved to the trailing edge and left a hole after the
+                    // folder glyph — wider the shorter the path, which is why a
+                    // remote `/home/node/work` looked worst of all.
+                    //
+                    // Truncation is a job for the string, not the layout, so the
+                    // head is now trimmed in [_ellipsizeHead] and the Text stays
+                    // plain LTR.
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          picking
+                              ? 'Waiting for the folder picker…'
+                              // Not "on $machineName": the title says which
+                              // machine and so does the summary, and a hostname
+                              // like `MacBooks-MacBook-Pro.local` spent the
+                              // whole control repeating it, then truncated.
+                              : chosen == null
+                              ? 'Choose a folder…'
+                              : _ellipsizeHead(chosen, constraints.maxWidth),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: chosen != null && !picking
+                              ? _mono(color: grid.AppPalette.textPrimary)
+                              : theme.textTheme.labelMedium?.copyWith(
+                                  color: grid.AppPalette.textFaint,
+                                ),
+                        ),
+                      ),
                     ),
                   ),
                   if (!picking) ...[
