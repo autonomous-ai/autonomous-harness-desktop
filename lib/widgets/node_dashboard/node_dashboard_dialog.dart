@@ -1,22 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../grid/grid_overview.dart';
 import '../../grid/grid_overview_controller.dart';
-import '../../grid/node_dashboard_layout.dart';
 import '../../grid/node_dashboard_view.dart';
-import '../../grid/node_display.dart' show modelCapabilities;
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/app_icon_button.dart';
-import '../../shared/widgets/empty_state.dart';
-import 'node_dashboard_card.dart';
-import 'node_dashboard_toolbar.dart';
+import 'node_dashboard_body.dart';
 
-/// Opens the node dashboard — every machine on this grid with its live readings.
+/// Opens the node dashboard in a dialog — every machine on this grid with its
+/// live readings, in a box over whatever the person was doing.
 ///
-/// A dialog rather than a Settings section on purpose: the entry point is the
-/// status rail, which is on screen from every part of the app, and a screen
-/// would have meant leaving whatever the person was doing to look at a gauge.
+/// **The status rail no longer comes here.** Its "View dashboard" link opens
+/// `showNodeDashboardScreen` instead: a grid of cards outgrew a 1180×860 box,
+/// and a dashboard is a place you go to read rather than a question you dismiss.
+/// This stays for callers that genuinely want a dismissable box over the shell,
+/// and it draws the identical [NodeDashboardBody] the screen does — so the two
+/// surfaces cannot drift into two dashboards that disagree.
 Future<void> showNodeDashboard(
   BuildContext context, {
   required GridOverviewController controller,
@@ -36,12 +34,9 @@ Future<void> showNodeDashboard(
   ),
 );
 
-/// The dashboard surface: one [NodeDashboardCard] per node, refreshed by the
-/// same overview poll the status rail reads, so opening this never starts a
-/// second timer or a second source of truth.
-///
-/// Ported from Grid (`features/network/presentation/node_dashboard_dialog.dart`),
-/// with Riverpod swapped for the controller and store handed in.
+/// The dashboard in a box, refreshed by the same overview poll the status rail
+/// reads, so opening this never starts a second timer or a second source of
+/// truth.
 class NodeDashboardDialog extends StatelessWidget {
   const NodeDashboardDialog({
     super.key,
@@ -94,13 +89,7 @@ class _Surface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nodes = [
-      for (final node in controller.overview?.nodes ?? const <OverviewNode>[])
-        if (node.online) node,
-    ];
-    // Two lists on purpose. The cards render [shown]; the toolbar and the header
-    // are given [nodes], because a filter's own menu must keep offering what the
-    // grid has rather than what is left after it — see [NodeDashboardToolbar].
+    final nodes = onlineDashboardNodes(controller);
     final shown = applyNodeDashboardView(nodes, store.value);
     return Dialog(
       backgroundColor: AppPalette.windowBg,
@@ -125,104 +114,22 @@ class _Surface extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               _DialogHeader(total: nodes.length, shown: shown.length),
-              if (nodes.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                NodeDashboardToolbar(nodes: nodes, store: store),
-              ],
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Flexible(
-                child: switch ((nodes.isEmpty, shown.isEmpty)) {
-                  (true, _) => _EmptyState(
-                    onShareIntelligence: onShareIntelligence,
-                    onInvite: onInvite,
-                  ),
-                  // Machines are serving, the filters just don't want any of
-                  // them — a different fact, and one with a way out.
-                  (false, true) => _NoMatchState(store: store),
-                  (false, false) => _NodeGrid(
-                    nodes: shown,
-                    gridWide: modelCapabilities(
-                      controller.overview?.models ?? const <OverviewModel>[],
-                    ),
-                  ),
-                },
+                child: NodeDashboardBody(
+                  controller: controller,
+                  store: store,
+                  onShareIntelligence: onShareIntelligence,
+                  onInvite: onInvite,
+                  // Pop before the offer pushes Settings — pushing first and
+                  // popping after would pop the thing just pushed.
+                  onLeaveSurface: () => Navigator.of(context).pop(),
+                ),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-/// The cards, laid out in rows that each take the height their tallest card
-/// needs.
-///
-/// **Not a `GridView`, and the reason is a bug this replaced.** A grid tile has
-/// to be given its height up front — `mainAxisExtent`, or an aspect ratio — and
-/// any figure chosen there is a guess about content that varies per node: a
-/// machine reporting three gauges, four detail fields and a throughput footer is
-/// taller than one reporting a size and a sentence. The guess was 300px and the
-/// fullest cards overflowed it by 22, clipping the tok/s figure off the bottom.
-/// Raising the number would only move the cliff.
-///
-/// Rows are built lazily, so this keeps what the grid was chosen for: a dashboard
-/// of many machines still builds only the rows on screen.
-class _NodeGrid extends StatelessWidget {
-  const _NodeGrid({required this.nodes, required this.gridWide});
-
-  final List<OverviewNode> nodes;
-  final Map<String, ModelCapability> gridWide;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = dashboardColumns(constraints.maxWidth);
-        final rowCount = (nodes.length + columns - 1) ~/ columns;
-        return ListView.builder(
-          itemCount: rowCount,
-          itemBuilder: (_, row) {
-            final first = row * columns;
-            final cards = nodes.skip(first).take(columns).toList();
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: row == rowCount - 1 ? 0 : kNodeCardGap,
-              ),
-              // `IntrinsicHeight` + `stretch`: every card in a row takes the
-              // height of the tallest, so their footers sit on one line and the
-              // row reads as a set rather than a ragged edge. It measures its
-              // children twice, which is affordable here — a row holds at most a
-              // handful of cards, and only visible rows are ever built.
-              //
-              // Still no card declares a height of its own: the row's height is
-              // whatever its content needs, which is what keeps the 22px
-              // overflow from the fixed-extent grid from coming back.
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < columns; i++) ...[
-                      if (i > 0) const SizedBox(width: kNodeCardGap),
-                      Expanded(
-                        child: i < cards.length
-                            // A trailing gap in the last row is an empty cell,
-                            // so the final card keeps its column width instead
-                            // of stretching across the leftovers.
-                            ? NodeDashboardCard(
-                                node: cards[i],
-                                gridWide: gridWide,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }
@@ -278,96 +185,6 @@ class _DialogHeader extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ],
-    );
-  }
-}
-
-/// Machines are serving, but none of them answer the filters in force.
-///
-/// Its own state rather than the empty grid's, because the two are opposite
-/// facts and only one of them is the user's to fix: an empty grid needs a
-/// machine joined to it, and this needs a button pressed. Telling somebody to go
-/// join a machine to a grid that already has nine is the kind of wrong advice
-/// that costs an afternoon.
-///
-/// [EmptyState] rather than a private column, and not [EmptyState.noMatches]
-/// either: that constructor is deliberately actionless because the usual fix for
-/// a filter is to retype the query, and here there is a button that does it.
-class _NoMatchState extends StatelessWidget {
-  const _NoMatchState({required this.store});
-
-  final NodeDashboardViewStore store;
-
-  @override
-  Widget build(BuildContext context) {
-    AppTheme.watch(context);
-    return EmptyState(
-      icon: Icons.filter_alt_off_outlined,
-      title: 'No machine matches',
-      message:
-          'Every machine on this grid is filtered out by what you asked for.',
-      action: TextButton(
-        onPressed: store.clearFilters,
-        child: const Text('Show all machines'),
-      ),
-    );
-  }
-}
-
-/// A grid with nothing serving it yet.
-///
-/// The header keeps the fact and this keeps the next step, because a grid grows
-/// in exactly two ways: this computer joins it, or somebody else's does. Both
-/// are offers rather than statements — a state that only restates the line above
-/// it leaves the reader with nowhere to go.
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({this.onShareIntelligence, this.onInvite});
-
-  final VoidCallback? onShareIntelligence;
-  final VoidCallback? onInvite;
-
-  @override
-  Widget build(BuildContext context) {
-    AppTheme.watch(context);
-    // Push the next screen only once this dialog is gone: pushing first and
-    // popping after would pop the thing just pushed.
-    VoidCallback? after(VoidCallback? action) {
-      if (action == null) return null;
-      return () {
-        Navigator.of(context).pop();
-        action();
-      };
-    }
-
-    final share = after(onShareIntelligence);
-    final invite = after(onInvite);
-    return EmptyState(
-      icon: LucideIcons.server300,
-      title: 'Add the first machine',
-      message:
-          "Share this computer's models with the grid, or invite someone who "
-          'can share theirs.',
-      action: (share == null && invite == null)
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (share != null) ...[
-                  // The screen's own name — Settings lists it under exactly
-                  // this word, and one screen answers to one word.
-                  FilledButton(
-                    onPressed: share,
-                    child: const Text('Share Intelligence'),
-                  ),
-                  if (invite != null) const SizedBox(width: 8),
-                ],
-                if (invite != null)
-                  TextButton(
-                    onPressed: invite,
-                    child: const Text('Invite people'),
-                  ),
-              ],
-            ),
     );
   }
 }

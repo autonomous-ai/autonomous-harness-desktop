@@ -259,11 +259,22 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
   `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
   exist to fit.
-- **The rail's two panels open two dialogs, and they are the only screens this
-  app grew that the CLI knows nothing about.** "View dashboard" opens the node
-  dashboard (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`
+- **The rail's two panels open the only surfaces this app grew that the CLI
+  knows nothing about.** "View dashboard" opens the node dashboard
+  (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`
   + `node_dashboard_layout.dart`) — one card per machine, off the same overview
-  poll the rail already runs, so opening it starts no second timer. Rows are
+  poll the rail already runs, so opening it starts no second timer.
+  **It is a SCREEN, pushed the way `showSettingsScreen` is** — a faded
+  `PageRouteBuilder`, "Back to app" rather than a close ✕, gutters instead of a
+  1180×860 cap, so a wide display buys real extra columns. The dialog form
+  (`node_dashboard_dialog.dart`, `showNodeDashboard`) is kept for callers that
+  want a dismissable box, and **both surfaces draw the same
+  `NodeDashboardBody`** (`node_dashboard_body.dart`) — a surface owns only its
+  frame, its header and its way out, so the two can never drift into two
+  dashboards that disagree. Each hands the body an `onLeaveSurface`, because the
+  empty state's offers push Settings and pushing before leaving pops the thing
+  just pushed. `NodeDashboardViewStore` is passed in rather than made per
+  surface, so filters survive leaving the screen and coming back. Rows are
   laid out with `IntrinsicHeight`, never a `GridView`: a tile has to be given its
   height up front and the fullest cards overflowed the guess by 22px. **No card
   may contain a `LayoutBuilder`** for the same reason — `IntrinsicHeight` asks

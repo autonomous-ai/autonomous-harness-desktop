@@ -9,7 +9,7 @@ import '../../shared/theme/app_theme.dart' as grid;
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
-import '../node_dashboard/node_dashboard_dialog.dart';
+import '../node_dashboard/node_dashboard_screen.dart';
 import '../share_grid/share_grid_dialog.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
@@ -322,14 +322,19 @@ class _ReadoutState extends State<_Readout> {
   ///
   /// Dismiss and push in that order, and `this.context` rather than the panel's:
   /// the callback runs from inside an [OverlayPortal] child, and hiding it
-  /// unmounts the very element the dialog would be pushed from.
+  /// unmounts the very element the route would be pushed from.
+  ///
+  /// A screen rather than the dialog this used to open: the panel is a glance,
+  /// and what it links to is the place you go when a glance was not enough — so
+  /// it takes the window, the way Settings does, instead of a box over a
+  /// greyed-out shell.
   void _openNodes() {
     _hide();
     analytics.gridDashboardOpened(
       networkId: widget.controller.networkId,
       nodes: widget.controller.overview?.nodes.length,
     );
-    showNodeDashboard(
+    showNodeDashboardScreen(
       context,
       controller: widget.controller,
       onShareIntelligence: widget.onShareIntelligence,
