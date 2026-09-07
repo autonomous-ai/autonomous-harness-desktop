@@ -21,6 +21,12 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
 import 'engine_identity.dart';
 
+/// The pane header's own horizontal inset. Named because
+/// `test/terminal_panel_header_test.dart` measures the model control against
+/// the right edge and has to subtract exactly this, not a number that once
+/// matched it.
+const double _stripPadding = 14;
+
 class TerminalPanel extends StatefulWidget {
   final AppNotifier notifier;
   final TerminalSession session;
@@ -598,92 +604,116 @@ class _TerminalHeader extends StatelessWidget {
     final strip = SizedBox(
       height: 46,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
-          children: [
-            EngineMark(engine: session.engineId, size: 17),
-            const SizedBox(width: 8),
-            Expanded(
-              // Double click the NAME to rename — the same dialog the rail's
-              // row opens, so one name has one way to change wherever it is
-              // shown. Scoped to the text rather than the whole strip: the
-              // strip is the drag handle, and a double click that both renamed
-              // and looked like the start of a drag would be two answers to one
-              // gesture.
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onDoubleTap: () => unawaited(
-                  showAgentRenameDialog(
-                    context,
-                    notifier,
-                    session.machineId,
-                    session.agentId,
-                    session.agentName,
+        padding: const EdgeInsets.symmetric(horizontal: _stripPadding),
+        // Outside the Row on purpose: a non-flex Row child is laid out with an
+        // INFINITE main-axis constraint, so a LayoutBuilder in the menu's slot
+        // would be handed infinity and could cap nothing. Here it sees the
+        // strip's real width.
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              EngineMark(engine: session.engineId, size: 17),
+              const SizedBox(width: 8),
+              Expanded(
+                // Double click the NAME to rename — the same dialog the rail's
+                // row opens, so one name has one way to change wherever it is
+                // shown. Scoped to the text rather than the whole strip: the
+                // strip is the drag handle, and a double click that both renamed
+                // and looked like the start of a drag would be two answers to one
+                // gesture.
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: () => unawaited(
+                    showAgentRenameDialog(
+                      context,
+                      notifier,
+                      session.machineId,
+                      session.agentId,
+                      session.agentName,
+                    ),
                   ),
-                ),
-                child: Tooltip(
-                  message: 'Double-click to rename',
-                  waitDuration: const Duration(milliseconds: 700),
-                  child: Text(
-                    session.agentName,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppColors.text,
-                      fontFamily: AppFonts.sans,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  child: Tooltip(
+                    message: 'Double-click to rename',
+                    waitDuration: const Duration(milliseconds: 700),
+                    child: Text(
+                      session.agentName,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontFamily: AppFonts.sans,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
 
-            // Flexible, not a bare child: the live grid serves model ids like
-            // `grid/claude-3-5-sonnet`, four panes can sit side by side, and the label
-            // (`agent_model_menu.dart`) ellipsizes once this bounds its width — without a bound it
-            // is an unconstrained Row child that overflows on a long id in a narrow pane.
-            Flexible(
-              child: AgentModelMenu(
-                notifier: notifier,
-                machineId: session.machineId,
-                agentId: session.agentId,
-                // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
-                // this ("$engine cannot use a grid"), and an empty string there reads with a leading
-                // space.
-                engine: session.engineId ?? 'this engine',
-              ),
-            ),
-            const SizedBox(width: 6),
-            if (session.status == TerminalSessionStatus.controlling)
-              Padding(padding: const EdgeInsets.all(4), child: statusMark)
-            else
-              Tooltip(
-                message: statusLabel,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: statusMark,
+              // Bounded, and NOT flexible. Both matter, for opposite reasons.
+              //
+              // Bounded because the live grid serves model ids like
+              // `grid/claude-3-5-sonnet`, four panes can sit side by side, and the label
+              // (`agent_model_menu.dart`) ellipsizes only once something bounds its width —
+              // unbounded it is a Row child with an infinite constraint that overflows on a
+              // long id in a narrow pane.
+              //
+              // Not flexible because a `Flexible` here was competing with the name's
+              // `Expanded` for the free space, one flex share each. The menu is loose and
+              // wanted far less than its half, and RenderFlex does not hand an unused share
+              // back — with `mainAxisAlignment.start` it lands as dead space at the END of
+              // the row, which put the pill and the status dot 350px shy of the right edge
+              // in a 900px pane. A non-flex child is laid out FIRST at its own width, so
+              // every remaining pixel goes to the name and these two stay flush right,
+              // which is the whole point of their being on this side.
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  // Half the strip: generous enough that a real model id never
+                  // ellipsizes in a pane anyone works in, small enough that the
+                  // name keeps a readable share in the narrowest four-pane tile.
+                  maxWidth: constraints.maxWidth / 2,
+                ),
+                child: AgentModelMenu(
+                  notifier: notifier,
+                  machineId: session.machineId,
+                  agentId: session.agentId,
+                  // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
+                  // this ("$engine cannot use a grid"), and an empty string there reads with a leading
+                  // space.
+                  engine: session.engineId ?? 'this engine',
                 ),
               ),
-            if (session.linkMode != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Tooltip(
-                  message: session.linkMode == 'p2p'
-                      ? 'Direct peer-to-peer connection'
-                      : 'Relayed through Harness',
-                  child: Icon(
-                    session.linkMode == 'p2p'
-                        ? Icons.bolt
-                        : Icons.cloud_outlined,
-                    size: 13,
-                    color: session.linkMode == 'p2p'
-                        ? AppColors.success
-                        : AppColors.mutedStrong,
+              const SizedBox(width: 6),
+              if (session.status == TerminalSessionStatus.controlling)
+                Padding(padding: const EdgeInsets.all(4), child: statusMark)
+              else
+                Tooltip(
+                  message: statusLabel,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: statusMark,
                   ),
                 ),
-              ),
-            if (onClose != null) PaneCloseButton(onPressed: onClose!),
-          ],
+              if (session.linkMode != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Tooltip(
+                    message: session.linkMode == 'p2p'
+                        ? 'Direct peer-to-peer connection'
+                        : 'Relayed through Harness',
+                    child: Icon(
+                      session.linkMode == 'p2p'
+                          ? Icons.bolt
+                          : Icons.cloud_outlined,
+                      size: 13,
+                      color: session.linkMode == 'p2p'
+                          ? AppColors.success
+                          : AppColors.mutedStrong,
+                    ),
+                  ),
+                ),
+              if (onClose != null) PaneCloseButton(onPressed: onClose!),
+            ],
+          ),
         ),
       ),
     );
