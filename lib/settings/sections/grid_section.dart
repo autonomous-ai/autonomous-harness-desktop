@@ -7,6 +7,7 @@ import '../../analytics/analytics.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
+import '../../grid/grid_session.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/section_scaffold.dart';
@@ -27,13 +28,23 @@ import 'grid_target_strip.dart';
 /// have to scroll to find the one it means. Picking here retargets nothing that
 /// is already running — the strip's own wording is what says so.
 class GridSection extends StatefulWidget {
-  const GridSection({super.key, required this.controller, this.selection});
+  const GridSection({
+    super.key,
+    required this.controller,
+    this.selection,
+    this.session,
+  });
 
   final GridNetworksController controller;
 
   /// Injected by tests. The app uses the shared singleton, which is what lets
   /// this pane and the New agent dialog change the same choice.
   final GridSelectionStore? selection;
+
+  /// Injected by tests too — the Grid sign-in this pane offers when the machine
+  /// has none. The app uses the singleton every other reader shares, so a
+  /// sign-in here is a sign-in for the status rail and the share sheet as well.
+  final GridSessionStore? session;
 
   @override
   State<GridSection> createState() => _GridSectionState();
@@ -93,6 +104,10 @@ class _GridSectionState extends State<GridSection> {
             // already on disk — so it is real from the first frame. Only the
             // table and the count are placeholders.
             GridNetworksIdle() || GridNetworksLoading() => _body(null, null),
+            GridNetworksSignedOut() => _SignedOut(
+              session: widget.session,
+              onSignedIn: () => unawaited(widget.controller.refresh()),
+            ),
             GridNetworksFailed(:final message) => _Failed(
               message: message,
               onRetry: () => unawaited(widget.controller.refresh()),
@@ -462,6 +477,109 @@ class _Failed extends StatelessWidget {
                   'Try again',
                   style: TextStyle(fontSize: 12.5),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// No Grid sign-in on this computer, and the one button that fixes it.
+///
+/// Its own surface rather than a [_Failed] with a different label: this is not
+/// an error, it is the state every machine starts in. `harness grid login`
+/// hands the Harness session the app already has to the Grid CLI, so there is
+/// no browser and nothing to type — which is why offering the button here is
+/// better than telling somebody to open a terminal.
+class _SignedOut extends StatefulWidget {
+  const _SignedOut({required this.onSignedIn, this.session});
+
+  final VoidCallback onSignedIn;
+
+  /// Tests pass one; the app uses the singleton every other reader does.
+  final GridSessionStore? session;
+
+  @override
+  State<_SignedOut> createState() => _SignedOutState();
+}
+
+class _SignedOutState extends State<_SignedOut> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _signIn() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final failure = await (widget.session ?? gridSessionStore).signIn();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = failure;
+    });
+    if (failure == null) widget.onSignedIn();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final error = _error;
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: grid.AppGlass.surfaceFill,
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: grid.AppGlass.cardShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "You're not signed in to Grid",
+              style: TextStyle(
+                color: grid.AppPalette.textPrimary,
+                fontSize: 12.5,
+                fontWeight: grid.AppFont.semibold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Grid is a separate account from Harness. Signing in reuses the '
+              'Harness session this app already has, so there is no browser '
+              'and nothing to type.',
+              style: TextStyle(
+                color: grid.AppPalette.textSecondary,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 8),
+              // The CLI's own sentence, verbatim: every one of its refusals
+              // already names the way forward, and re-wording them here would
+              // be a second opinion about a failure this app did not have.
+              Text(
+                error,
+                key: const Key('grid-sign-in-error'),
+                style: TextStyle(
+                  color: grid.AppPalette.warn,
+                  fontSize: 12,
+                  height: 1.45,
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton(
+                key: const Key('grid-sign-in-button'),
+                onPressed: _busy ? null : () => unawaited(_signIn()),
+                child: Text(_busy ? 'Signing in…' : 'Sign in to Grid'),
               ),
             ),
           ],

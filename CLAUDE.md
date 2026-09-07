@@ -158,11 +158,27 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   `harness/app_menu` MethodChannel (`checkForUpdates`, `flashFirmware`, `showShortcuts`, terminal font
   size). Keep the menu in Swift; only the handler lives in `RootShell`.
 - **Grid is the one exception to "the app talks only to the local CLI"**: `lib/grid/` calls
-  `https://api-grid.autonomous.ai/v1/grid/me` directly with its own bearer token, because the Harness
-  CLI owns a Harness session and knows nothing about Grid accounts. `kGridSessionToken` in
-  `grid_api_client.dart` is a **hardcoded developer token** — TODO(BE), it must not ship; override it
-  with `--dart-define=GRID_API_TOKEN=…`. Response fields were read off the live API, not the OpenAPI
-  spec, whose `/v1/grid/me` response schema is empty.
+  `https://api-grid.autonomous.ai/v1/grid/me` directly with a bearer token, because the Harness CLI
+  owns a Harness session and knows nothing about Grid accounts. That token is **the machine's own
+  Grid session**, read by `GridSessionStore` (`grid/grid_session.dart`) out of the *Grid* CLI's
+  `~/.grid/credentials.toml` — the file `grid login` writes. This app never writes it: one Grid
+  sign-in per machine, and a second copy here is a second thing to expire and to disagree about.
+  Loaded before the first frame by `loadPersistedSettings`, and read **per request** rather than
+  captured in `GridApiClient`'s constructor, so a sign-in or a `grid logout` mid-session lands
+  without rebuilding a controller. Only three top-level keys are parsed (`session_token`, `api_url`,
+  `email`), scanning stops at the first `[` table because `name`/`email` mean something else under
+  `[[networks]]`, and `api_url` is honoured so a `grid` pointed at staging does not send its token
+  to production. Signing in is `GridSessionStore.signIn()` → `harness grid login --json`, which
+  hands the Harness session this app already has to `grid login --harness` over that child's
+  **stdin** — no browser, and the account token never reaches an argv. Its refusals already name
+  their own way forward, so they are shown verbatim rather than re-worded. No session is a state,
+  not an error: `GridSignedOutException` → `GridNetworksSignedOut` → the sign-in card in Settings ▸
+  Grid, kept apart from `GridNetworksFailed` because that one offers a Retry and retrying a sign-out
+  fails identically forever. `--dart-define=GRID_API_TOKEN=…` still pins a token for a build that
+  wants an account it has not signed into here. **The hardcoded developer token is gone** — it was a
+  real credential in the repo, and every build made from that branch read one person's grids.
+  Response fields were read off the live API, not the OpenAPI spec, whose `/v1/grid/me` response
+  schema is empty.
 - **Picking a grid retargets NEW agents only.** `gridSelectionStore` (`lib/grid/`, persisted like
   `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid, and only the grid —
   **two** controls write it and they are the same store: the sidebar's grid pill

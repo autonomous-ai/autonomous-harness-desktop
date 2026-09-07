@@ -6,6 +6,7 @@ import '../api/api_client.dart' show ApiException;
 import '../share/catalog_models.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
+import 'grid_session.dart';
 import 'grid_overview.dart';
 import 'managed_network_member.dart';
 import 'member_usage.dart';
@@ -16,18 +17,24 @@ import 'member_usage.dart';
 /// Everything else goes through the local `harness` CLI on loopback (see
 /// CLAUDE.md), because the CLI owns the Harness session and terminates E2EE.
 /// Grid is a different backend with a different account, and the CLI proxies
-/// none of it, so there is nothing to route through: this client holds its own
-/// bearer token and talks to `api-grid.autonomous.ai` over HTTPS.
+/// none of it, so there is nothing to route through: this client talks to the
+/// Grid control plane over HTTPS with the machine's own Grid session.
 ///
-/// ⚠️ TODO(BE): [kGridSessionToken] is a HARDCODED session token — see it.
+/// That session comes from [gridSessionStore] — the Grid CLI's
+/// `~/.grid/credentials.toml`, read fresh on every request rather than captured
+/// here. A client built while signed out and a client built before a
+/// `grid logout` both have to tell the truth about the session that exists NOW,
+/// and a `final String` set in a constructor cannot.
 class GridApiClient {
-  GridApiClient({Dio? dio, String? token})
-    : _token = token ?? kGridSessionToken,
+  GridApiClient({Dio? dio, this.token, GridSessionStore? session})
+    : _session = session ?? gridSessionStore,
       _dio =
           dio ??
           Dio(
             BaseOptions(
-              baseUrl: kGridApiBaseUrl,
+              baseUrl:
+                  (session ?? gridSessionStore).value?.apiBaseUrl ??
+                  kGridApiBaseUrl,
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 30),
               // Let the wrapper below turn HTTP failures into short,
@@ -39,7 +46,27 @@ class GridApiClient {
           );
 
   final Dio _dio;
-  final String _token;
+
+  /// A token pinned for this client, used in place of the machine's session.
+  /// Tests pass one.
+  final String? token;
+
+  final GridSessionStore _session;
+
+  /// The dev override, for a build that wants to run against an account it has
+  /// not signed into on this machine. Empty in a normal build, and — unlike the
+  /// constant it replaced — not somewhere a credential can be committed: that
+  /// one was a real session token pasted into this file, so every build made
+  /// from this branch read one developer's grids.
+  static const String _tokenOverride = String.fromEnvironment('GRID_API_TOKEN');
+
+  /// The bearer for the next request, or null when this computer has no Grid
+  /// session. Read per call — see the class comment.
+  String? get _bearer {
+    final pinned = token ?? _tokenOverride;
+    if (pinned.isNotEmpty) return pinned;
+    return _session.value?.token;
+  }
 
   /// Who this token belongs to, and every grid it can talk to — one call, which
   /// is why this screen uses it rather than `/v1/grid/networks`: that endpoint
@@ -128,11 +155,7 @@ class GridApiClient {
 
   Future<Map<dynamic, dynamic>> _post(String path, Object body) async =>
       _unwrap(
-        await _dio.post<dynamic>(
-          path,
-          data: body,
-          options: Options(headers: {'Authorization': 'Bearer $_token'}),
-        ),
+        await _dio.post<dynamic>(path, data: body, options: _authorized()),
       );
 
   /// What this grid is made of — its machines, its models and what they have
@@ -215,7 +238,7 @@ class GridApiClient {
     _unwrapEmpty(
       await _dio.delete<dynamic>(
         '${_membersPath(networkId)}/${Uri.encodeComponent(email)}',
-        options: Options(headers: {'Authorization': 'Bearer $_token'}),
+        options: _authorized(),
       ),
     );
   }
@@ -261,12 +284,18 @@ class GridApiClient {
 
   /// One authenticated GET against the control plane, unwrapped into a map or
   /// an [ApiException] — the shape every call above shares.
-  Future<Map<dynamic, dynamic>> _get(String path) async => _unwrap(
-    await _dio.get<dynamic>(
-      path,
-      options: Options(headers: {'Authorization': 'Bearer $_token'}),
-    ),
-  );
+  Future<Map<dynamic, dynamic>> _get(String path) async =>
+      _unwrap(await _dio.get<dynamic>(path, options: _authorized()));
+
+  /// The bearer header, or a refusal that reads like a state rather than a
+  /// crash. Signed out is an ordinary condition here — a fresh machine has
+  /// never run `harness grid login` — and every caller of this client already
+  /// shows an [ApiException] to the user.
+  Options _authorized() {
+    final bearer = _bearer;
+    if (bearer == null || bearer.isEmpty) throw GridSignedOutException();
+    return Options(headers: {'Authorization': 'Bearer $bearer'});
+  }
 
   /// A call whose answer is its status code — a DELETE. Same failure shapes as
   /// [_unwrap], without insisting on a body the endpoint need not send.
@@ -306,40 +335,13 @@ class GridApiClient {
   }
 }
 
-/// Where the Grid control plane lives.
-const kGridApiBaseUrl = 'https://api-grid.autonomous.ai';
-
-/// ⚠️ TODO(BE): A HARDCODED Grid session token, and it must not ship.
+/// This computer has no Grid session, so there is nothing to call the control
+/// plane with.
 ///
-/// This app has no Grid sign-in yet: the Harness CLI owns the *Harness*
-/// session and knows nothing about Grid accounts, so there is nowhere to read a
-/// real one from. Until a Grid login exists, the Grid screen runs on one
-/// developer's session, pasted here.
-///
-/// What that means in practice, and why it is a temporary:
-///
-/// * It is a real credential in a git repository. Anyone with the checkout can
-///   read this account's grids.
-/// * It expires (`exp` 2027-08-19). After that the screen shows the
-///   sign-in-again error above and there is no way to fix it from the app.
-/// * Every user of a build made from this branch sees THIS account's grids,
-///   not their own.
-///
-/// Override it without editing this file — which is how it should be used in
-/// the meantime:
-///
-/// ```bash
-/// flutter run -d macos --dart-define=GRID_API_TOKEN=<token>
-/// ```
-String get kGridSessionToken =>
-    _tokenOverride.isEmpty ? _hardcodedToken : _tokenOverride;
-
-const _tokenOverride = String.fromEnvironment('GRID_API_TOKEN');
-
-const _hardcodedToken =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
-    'eyJpc3MiOiJodHRwczovL2FwaS1ncmlkLmF1dG9ub21vdXMuYWkiLCJhdWQiOiJncmlkOndl'
-    'YnNpdGUtc2Vzc2lvbiIsInN1YiI6IjEwNzIxNzIzNjgyOTQ4NjYxMTg5NSIsImVtYWlsIjoi'
-    'cGhhbW5nb2NodXkuMTk4OUBnbWFpbC5jb20iLCJuYW1lIjoiSHV5IFBoYW0iLCJpYXQiOjE3'
-    'ODcyODMxNDUsImV4cCI6MTgxODgxOTE0NSwidHlwIjoiZ3JpZF9zZXNzaW9uIn0.'
-    'f5sA3DDUg5RJdsxxO01_tK8P84QXtplyFKKPLx61jQw';
+/// Its own type rather than a plain [ApiException] so the Grid pane can offer
+/// the one thing that fixes it — a sign-in — instead of printing a sentence and
+/// a Retry that would fail identically.
+class GridSignedOutException extends ApiException {
+  GridSignedOutException()
+    : super("You're not signed in to Grid on this computer.", status: 401);
+}

@@ -29,6 +29,13 @@ class GridNetworksReady extends GridNetworksState {
   final GridMe me;
 }
 
+/// This computer has no Grid session. Its own state rather than a
+/// [GridNetworksFailed] carrying a 401, because the two want different buttons:
+/// a failure offers Retry, and retrying a sign-out fails identically forever.
+class GridNetworksSignedOut extends GridNetworksState {
+  const GridNetworksSignedOut();
+}
+
 class GridNetworksFailed extends GridNetworksState {
   const GridNetworksFailed(this.message);
 
@@ -73,6 +80,8 @@ class GridNetworksController extends ChangeNotifier {
         _countTracked = true;
         analytics.gridNetworksLoaded(count: me.networks.length);
       }
+    } on GridSignedOutException {
+      _set(const GridNetworksSignedOut());
     } catch (error) {
       _set(GridNetworksFailed('$error'));
     }

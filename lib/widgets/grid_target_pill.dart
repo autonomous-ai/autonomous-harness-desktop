@@ -54,6 +54,13 @@ List<GridTargetOption> gridTargetMenuOptions(GridNetworksState state) => [
     GridNetworksIdle() || GridNetworksLoading() => const [
       GridTargetOption(label: 'Loading grids…', enabled: false),
     ],
+    // No Grid sign-in on this computer. Said as a disabled row rather than
+    // offered as one: signing in is a real action with a real failure mode, and
+    // a menu that opens upward off a pill at the window's edge is the wrong
+    // place to run it. Settings ▸ Grid has the button.
+    GridNetworksSignedOut() => const [
+      GridTargetOption(label: 'Sign in to Grid in Settings', enabled: false),
+    ],
     // Already user-facing — GridApiClient turns the API's failure shapes into a sentence.
     GridNetworksFailed(:final message) => [
       GridTargetOption(label: message, enabled: false),

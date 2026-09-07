@@ -1,12 +1,15 @@
 /// Who may reach a grid at all — the rule under the people, in words.
 ///
 /// **Read-only here, deliberately.** Grid's own share sheet lets an owner change
-/// this rule; this app does not, and the reason is not effort. Changing it
+/// this rule; this app does not, and the reason is not effort: changing it
 /// restarts the grid under everyone using it and cuts off whoever the new rule
-/// excludes — and until Harness has a Grid sign-in of its own, every build runs
-/// on one shared developer token (see `kGridSessionToken`), so the flip would
-/// land on somebody else's grid, in somebody else's name. A statement of the
-/// rule is honest at that price; a control is not.
+/// excludes. A statement of the rule is honest at that price; a control is one
+/// click away from doing that to a room full of people, and this app has
+/// nowhere to warn them.
+///
+/// (It once had a second reason — every build ran on one shared developer token,
+/// so the flip would have landed in somebody else's name. That is gone: the app
+/// now signs in as the person using it, see `GridSessionStore`.)
 ///
 /// The wire values are the control plane's own (`grid_networks/store.py`,
 /// `VALID_NETWORK_TYPES`), read there rather than copied from Grid's client
