@@ -29,7 +29,7 @@ jobs:
     outputs:
       flutter-version: ${{ steps.pin.outputs.flutter-version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # THE toolchain pin for the whole repo — CI and every release artifact read this one line,
       # so a release can never be built with a Flutter the suite did not run on.
@@ -46,6 +46,14 @@ jobs:
           flutter-version: ${{ steps.pin.outputs.flutter-version }}
           channel: stable
           cache: true
+
+      # `test/support/real_fonts.dart` draws with a REAL face instead of Ahem, whose fixed-square
+      # glyphs measure a 24-character label at 276px where Arial measures ~140 — wide enough to
+      # invent overflows that do not exist. Liberation Sans and Liberation Mono are the
+      # metric-compatible stand-ins for the Arial and Courier New that helper loads on macOS, so
+      # the same layout assertions hold on both hosts rather than needing per-OS thresholds.
+      - name: Install the fonts the widget tests measure with
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
 
       - run: flutter pub get
 
