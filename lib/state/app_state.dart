@@ -204,9 +204,23 @@ class AppNotifier extends ChangeNotifier {
 
   static const maxPanes = PaneLayoutStore.maxPanes;
   // Set only while `harness login --json` is waiting for the user to finish SSO in their system
-  // browser — RootShell renders a lightweight waiting screen and clears this automatically once
-  // login() resolves.
+  // browser. It arrives PART WAY THROUGH the flow — the CLI has to start before it can hand one
+  // over — so it says "the browser is open", not "a sign-in is running". Use [signingIn] for the
+  // second question; see the note there.
   String? pendingAuthorizeUrl;
+
+  /// True from the moment the user presses Sign in until the flow settles, one way or the other.
+  ///
+  /// **Not the same question as `pendingAuthorizeUrl != null`, and the difference was a bug.**
+  /// `login()` flips [status] to `bootstrapping` immediately, but the authorize URL only lands
+  /// once the CLI has spawned Node and got as far as printing one — seconds later — and it is
+  /// cleared again in `finally` while `_finishBootstrapSignedIn()` is still restoring panes and
+  /// fetching machines. `RootShell` keyed the sign-in screen off the URL, so both of those windows
+  /// dropped the user onto a bare full-screen spinner: the card they were looking at vanished on
+  /// the click, came back, then vanished again on success.
+  ///
+  /// This flag spans the whole flow, so the screen the user pressed a button on stays put.
+  bool signingIn = false;
 
   AppNotifier({
     required AppConfig config,
@@ -706,6 +720,7 @@ class AppNotifier extends ChangeNotifier {
   Future<void> login() async {
     _lastError = null;
     status = AppStatus.bootstrapping;
+    signingIn = true;
     pendingAuthorizeUrl = null;
     notifyListeners();
     try {
@@ -727,6 +742,9 @@ class AppNotifier extends ChangeNotifier {
       _lastError = error.toString();
     } finally {
       pendingAuthorizeUrl = null;
+      // Cleared last, and only here: everything above may still be running when the URL goes, and
+      // dropping the flag any earlier is what put a bare spinner over the user's own screen.
+      signingIn = false;
     }
     notifyListeners();
   }
