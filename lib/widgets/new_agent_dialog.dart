@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../core/engine_availability.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_api_client.dart';
 import '../grid/grid_models_controller.dart';
@@ -84,6 +87,55 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         gridModelsController.ensureLoadedFor(networkId);
       });
     }
+    // Which engines this machine actually has. Asked here rather than at
+    // connect because the answer costs the far side one interactive shell per
+    // engine and is only ever read on this screen. Deferred a frame for the
+    // same reason as the models load above: the probe's first notifyListeners()
+    // must not land mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(widget.notifier.probeEngines(widget.machineId));
+    });
+  }
+
+  /// What this machine said about the selected engine, or null while the probe
+  /// is still out (or when the machine could not answer).
+  ///
+  /// Null is deliberately not "missing": until the machine has spoken, this
+  /// dialog behaves exactly as it did before the probe existed. Claiming an
+  /// engine is absent on no evidence would send someone to install one they
+  /// already have.
+  EngineAvailability? _availability(String engine) {
+    final machine = widget.notifier.stateOf(widget.machineId);
+    if (machine == null || !machine.engines.loaded) return null;
+    return machine.engines[engine];
+  }
+
+  /// The row's note about installation, or null when there is nothing to say —
+  /// which covers both "it is here" and "the machine has not answered yet".
+  ///
+  /// Those two produce the same absent note on purpose. A row cannot say
+  /// "not installed" on the strength of a probe that has not returned; the
+  /// dialog's own preflight panel is where the settled answer is stated, and it
+  /// arrives a moment later without moving anything.
+  String? _engineInstallNote(String engine) {
+    final entry = _availability(engine);
+    if (entry == null || entry.installed) return null;
+    return entry.installable ? 'will install' : 'not installed';
+  }
+
+  /// The engine will have to be installed before it can run.
+  bool get _willInstall {
+    final entry = _availability(_engine);
+    return entry != null && !entry.installed && entry.installable;
+  }
+
+  /// The engine is missing and Harness has no line it can cite to fix that —
+  /// Pi, and anything else without an entry in the CLI's install table. Stated
+  /// rather than silently offered, because the create WILL fail and the person
+  /// needs to install it themselves first.
+  bool get _missingAndUnfixable {
+    final entry = _availability(_engine);
+    return entry != null && !entry.installed && !entry.installable;
   }
 
   /// The system panel is modal and slow enough to notice. Without this the
@@ -251,6 +303,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                         selection: chosen,
                         model: _model,
                         refused: refused,
+                        installCommand: _willInstall
+                            ? _availability(_engine)?.installCommand
+                            : null,
+                        missingWithoutRecipe: _missingAndUnfixable,
                       );
                       // Below this the two columns would each be too narrow to
                       // hold a path, so the summary goes back on top of the
@@ -331,14 +387,22 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
               SelectOption(
                 value: identity.id,
                 label: identity.label,
-                // Stated in the row rather than discovered after picking: both
-                // of these change what the engine can do, and finding out by
-                // watching the checkbox vanish is a worse way to learn it.
+                // Stated in the row rather than discovered after picking: all
+                // three change what the engine can do, and finding out by
+                // watching the checkbox vanish — or by reading `command not
+                // found` out of a pane — is a worse way to learn it.
+                //
+                // `no grid` still wins. An engine that cannot be pointed at a
+                // grid is refused outright, so installing it would not make
+                // this create work: saying "will install" there would promise
+                // a launch that is still going to be refused. The install note
+                // therefore only appears for engines a create could reach.
                 note: !kGridCapableEngines.contains(identity.id)
                     ? 'no grid'
-                    : kEngineBypassPermissionFlag.containsKey(identity.id)
-                    ? null
-                    : 'no bypass flag',
+                    : _engineInstallNote(identity.id) ??
+                          (kEngineBypassPermissionFlag.containsKey(identity.id)
+                              ? null
+                              : 'no bypass flag'),
                 leading: () => EngineMark(engine: identity.id, size: 14),
               ),
           ],
@@ -766,6 +830,8 @@ class _NewAgentSummary extends StatelessWidget {
     required this.selection,
     required this.model,
     required this.refused,
+    this.installCommand,
+    this.missingWithoutRecipe = false,
   });
 
   final String engine;
@@ -784,12 +850,24 @@ class _NewAgentSummary extends StatelessWidget {
   final String? model;
   final bool refused;
 
+  /// The line this machine will run before the engine, when the engine is not
+  /// there yet. Named in full rather than summarised: installing software on a
+  /// computer — and this reaches remote ones — is not something to do behind a
+  /// button that says "Create agent".
+  final String? installCommand;
+
+  /// The engine is absent and Harness has no install line for it. Distinct from
+  /// [installCommand] being null, which is also the state while the machine has
+  /// not answered — this one is a settled "we know, and we cannot fix it".
+  final bool missingWithoutRecipe;
+
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final theme = Theme.of(context);
     final warn = grid.AppPalette.warn;
     final flag = bypassFlag;
+    final install = refused ? null : installCommand;
     final ready = folder != null && !refused;
 
     final Color dot;
@@ -797,6 +875,15 @@ class _NewAgentSummary extends StatelessWidget {
     if (refused) {
       dot = warn;
       heading = 'Will be refused';
+    } else if (missingWithoutRecipe && ready) {
+      // Not "refused": the app is not the thing saying no. The create will
+      // reach the machine and fail there, and the only useful thing to say is
+      // which half is missing.
+      dot = warn;
+      heading = 'Not installed on this machine';
+    } else if (install != null && ready) {
+      dot = grid.AppPalette.accentOnSurface;
+      heading = 'Will install, then launch';
     } else if (ready) {
       dot = grid.AppPalette.accentOnSurface;
       heading = 'Ready to launch';
@@ -928,6 +1015,59 @@ class _NewAgentSummary extends StatelessWidget {
                 "another engine, or set the sidebar's grid picker to each "
                 "engine's own login.",
                 style: theme.textTheme.bodySmall?.copyWith(color: warn),
+              ),
+            ),
+          ],
+          if (!refused && missingWithoutRecipe) ...[
+            const SizedBox(height: _gapBlock),
+            Container(
+              padding: const EdgeInsets.only(top: _gapBlock),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: warn.withValues(alpha: 0.28)),
+                ),
+              ),
+              child: Text(
+                '${engineIdentity(engine).label} is not on $machineName, and '
+                'Harness has no install line for it. Install it there first, '
+                'or choose another engine.',
+                style: theme.textTheme.bodySmall?.copyWith(color: warn),
+              ),
+            ),
+          ],
+          if (install != null) ...[
+            const SizedBox(height: _gapBlock),
+            Container(
+              padding: const EdgeInsets.only(top: _gapBlock),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: grid.AppPalette.textFaint.withValues(alpha: 0.28),
+                  ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${engineIdentity(engine).label} is not on $machineName '
+                    'yet. The terminal runs this first:',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: grid.AppPalette.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: _gapTight),
+                  // Verbatim, in the engine's own type. A summarised or
+                  // prettified command is one the reader cannot check against
+                  // what they would have typed, which defeats showing it.
+                  SelectableText(
+                    install,
+                    style: _mono(
+                      color: grid.AppPalette.textPrimary,
+                    ).copyWith(height: 1.4),
+                  ),
+                ],
               ),
             ),
           ],
