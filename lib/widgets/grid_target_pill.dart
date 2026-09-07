@@ -16,6 +16,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../analytics/analytics.dart';
 import '../grid/grid_networks_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../settings/settings_screen.dart';
@@ -57,20 +58,21 @@ List<GridTargetOption> gridTargetMenuOptions(GridNetworksState state) => [
     GridNetworksFailed(:final message) => [
       GridTargetOption(label: message, enabled: false),
     ],
-    GridNetworksReady(:final me) => me.networks.isEmpty
-        ? const [
-            GridTargetOption(
-              label: 'This account is on no grids',
-              enabled: false,
-            ),
-          ]
-        : [
-            for (final network in me.networks)
+    GridNetworksReady(:final me) =>
+      me.networks.isEmpty
+          ? const [
               GridTargetOption(
-                label: network.displayName,
-                networkId: network.networkId,
+                label: 'This account is on no grids',
+                enabled: false,
               ),
-          ],
+            ]
+          : [
+              for (final network in me.networks)
+                GridTargetOption(
+                  label: network.displayName,
+                  networkId: network.networkId,
+                ),
+            ],
   },
 ];
 
@@ -192,6 +194,7 @@ class _GridTargetPillState extends State<GridTargetPill> {
 
   Future<void> _pick(GridTargetOption option) {
     final networkId = option.networkId;
+    analytics.gridPicked(source: 'pill', networkId: networkId);
     return networkId == null
         ? _selection.clear()
         : _selection.selectNetwork(

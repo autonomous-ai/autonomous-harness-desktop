@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
 import '../../grid/node_metrics.dart';
 import '../../shared/theme/app_theme.dart' as grid;
@@ -242,8 +243,8 @@ class _ReadoutState extends State<_Readout> {
   }
 
   List<OverviewNode> get _onlineNodes => [
-    for (final node in widget.controller.overview?.nodes ??
-        const <OverviewNode>[])
+    for (final node
+        in widget.controller.overview?.nodes ?? const <OverviewNode>[])
       if (node.online) node,
   ];
 
@@ -324,6 +325,10 @@ class _ReadoutState extends State<_Readout> {
   /// unmounts the very element the dialog would be pushed from.
   void _openNodes() {
     _hide();
+    analytics.gridDashboardOpened(
+      networkId: widget.controller.networkId,
+      nodes: widget.controller.overview?.nodes.length,
+    );
     showNodeDashboard(
       context,
       controller: widget.controller,
@@ -338,6 +343,10 @@ class _ReadoutState extends State<_Readout> {
     final id = widget.controller.networkId;
     if (id == null) return;
     _hide();
+    analytics.gridShareOpened(
+      networkId: id,
+      members: widget.controller.members,
+    );
     showShareGridDialog(
       context,
       networkId: id,

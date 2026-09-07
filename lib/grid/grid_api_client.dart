@@ -149,9 +149,7 @@ class GridApiClient {
       Uri.parse('$baseUrl/grid/overview'),
       options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
     );
-    return GridOverview.fromJson(
-      Map<String, dynamic>.from(_unwrap(response)),
-    );
+    return GridOverview.fromJson(Map<String, dynamic>.from(_unwrap(response)));
   }
 
   /// Everyone on this grid, or null when the roster is not ours to read.

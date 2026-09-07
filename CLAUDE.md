@@ -243,6 +243,28 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   overlaps them; a `private-domain` grid's NAME is its domain, which is where
   "@autonomous.ai emails" comes from, because `access_domain` reads null on
   every network `GET /v1/grid/me` returns.
+- **Behavioural analytics is a PORT of Grid's, not a second design** (`lib/analytics/`, copied from
+  `autonomous-grid-app/lib/infrastructure/analytics/`). It reports to **Autonomous Analytics**, the
+  stream the website and Grid already feed, so one person's path across the three products is one
+  funnel; `AnalyticsConfig.category` (`harness-desktop`) is what keeps them apart inside it. Not to
+  be confused with the CLI's `harness analytics`, which is a different product entirely — aggregate
+  usage metering uploaded to the Harness backend. **It ships muted**: `_defaultWriteKey` is empty
+  until this app gets its own key (TODO(BE)), and Grid's is deliberately not borrowed;
+  `--dart-define=HARNESS_ANALYTICS_KEY=…` turns the stream on for a dev build. Muted also means a
+  test run and an opt-out (`{"enabled": false}` in `~/.harness/desktop-app/analytics.json`), each of
+  which hands out a `NoopAnalytics` rather than queueing into a void — checked in that order so
+  `flutter test` never reads a real Harness home. The sink is a **singleton** (`analytics`), like
+  `themeModeStore`: the call sites are `main`, `AppNotifier`, a settings pane and a menu inside a
+  pane header, and most were handed a notifier rather than a `Ref`. Every event name is written down
+  **once**, in `analytics_events.dart` — two call sites naming one action differently is what makes
+  a stream unqueryable — and params are product facts only: a short code, an option, a count, an id.
+  **Never** a prompt, terminal output, an agent or machine name, a path, or a grid's name. Two
+  events are deliberately not where you would look for them: `app_opened` is sent by `AppNotifier`
+  when bootstrap resolves (a first-frame event would report every launch as signed out) and
+  `grid_networks_loaded` by `GridNetworksController` on its first answer (both doors read that one
+  shared controller, so a per-surface event would count one account twice). `app_closed` hooks only
+  `didRequestAppExit` — intercepting the window's close button needs `setPreventClose(true)`, and a
+  bug on that path leaves a window nobody can close.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

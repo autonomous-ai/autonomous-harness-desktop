@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../analytics/analytics.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
@@ -139,14 +140,20 @@ class _GridSectionState extends State<GridSection> {
                     signedInEmail: email!,
                     selectedId: chosen.networkId,
                     filtered: visible.length != networks!.length,
-                    onUse: (network) => unawaited(
-                      network == null
-                          ? _selection.clear()
-                          : _selection.selectNetwork(
-                              networkId: network.networkId,
-                              networkName: network.displayName,
-                            ),
-                    ),
+                    onUse: (network) {
+                      analytics.gridPicked(
+                        source: 'settings',
+                        networkId: network?.networkId,
+                      );
+                      unawaited(
+                        network == null
+                            ? _selection.clear()
+                            : _selection.selectNetwork(
+                                networkId: network.networkId,
+                                networkName: network.displayName,
+                              ),
+                      );
+                    },
                   ),
           ),
           const SizedBox(height: 8),

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../analytics/analytics.dart';
 import 'grid_api_client.dart';
 import 'grid_network.dart';
 
@@ -64,11 +65,20 @@ class GridNetworksController extends ChangeNotifier {
     if (_state is GridNetworksLoading) return;
     _set(const GridNetworksLoading());
     try {
-      _set(GridNetworksReady(await _client.me()));
+      final me = await _client.me();
+      _set(GridNetworksReady(me));
+      // Once per launch, not per refresh: the refresh button and a second panel
+      // would otherwise count one account several times over.
+      if (!_countTracked) {
+        _countTracked = true;
+        analytics.gridNetworksLoaded(count: me.networks.length);
+      }
     } catch (error) {
       _set(GridNetworksFailed('$error'));
     }
   }
+
+  bool _countTracked = false;
 
   void _set(GridNetworksState next) {
     // The load outlives the screen when Settings is closed mid-flight, and

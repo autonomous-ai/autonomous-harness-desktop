@@ -138,9 +138,8 @@ class _SizeStepper extends StatelessWidget {
           ),
           Text(
             '${size.round()}pt',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
           ),
           AppIconButton(
             key: const Key('terminal-font-size-increase'),
@@ -293,9 +292,8 @@ class _ResetRow extends StatelessWidget {
       children: [
         Text(
           '⌘0',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: grid.AppPalette.textFaint),
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: grid.AppPalette.textFaint),
         ),
         const SizedBox(width: 10),
         OutlinedButton(

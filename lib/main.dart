@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'analytics/analytics_lifecycle.dart';
 import 'core/crash_log.dart';
 import 'core/desktop_window.dart';
 import 'screens/home_screen.dart';
@@ -116,7 +117,7 @@ class DesktopApp extends StatelessWidget {
         maxScaleFactor: scale,
         child: _GridTokenScope(child: child ?? const SizedBox.shrink()),
       ),
-      home: const RootShell(),
+      home: const AnalyticsLifecycle(child: RootShell()),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../analytics/analytics.dart';
 import '../api/api_client.dart';
 import '../auth/auth_session.dart';
 import '../auth/cli_link.dart';
@@ -114,6 +115,7 @@ class MachineState {
   // opening a terminal stream against an unavailable node.
   String? pendingOfflineAgentId;
   final Set<String> processingAgentIds = {};
+
   /// Agents on this machine that have stopped to ask something, by agentId.
   /// At most one per agent: a pane shows one dialog at a time, and the daemon
   /// re-announces the same open question rather than queueing a second.
@@ -518,7 +520,25 @@ class AppNotifier extends ChangeNotifier {
       currentUser = null;
       status = AppStatus.unauthenticated;
       notifyListeners();
+    } finally {
+      // A `finally` rather than a call per exit path: bootstrap resolves four
+      // ways (environment not ready, signed out, signed in, thrown) and the
+      // launch happened in all four. `retryEnvironmentSetup` re-enters here,
+      // which is why the event itself is once-per-launch.
+      _trackAppOpened();
     }
+  }
+
+  bool _appOpenedTracked = false;
+
+  /// `app_opened`, once, with the answer bootstrap actually reached. Sent from
+  /// here rather than from the first frame because `signed_in` is not known
+  /// until the CLI has been asked, and a first-frame event would report every
+  /// launch as signed out.
+  void _trackAppOpened() {
+    if (_appOpenedTracked) return;
+    _appOpenedTracked = true;
+    analytics.appOpened(signedIn: status == AppStatus.authenticated);
   }
 
   /// Runs before we invoke a single Harness subcommand. A fresh mac used to
@@ -540,6 +560,10 @@ class AppNotifier extends ChangeNotifier {
         },
       );
       environmentReadiness = result;
+      analytics.environmentPrepared(
+        ready: result.isReady,
+        grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
+      );
       if (!result.isReady) {
         status = AppStatus.preparingEnvironment;
         notifyListeners();
@@ -605,7 +629,14 @@ class AppNotifier extends ChangeNotifier {
     }
     try {
       final me = await api.me();
-      if (me != null) currentUser = CurrentUserProfile.fromMe(me);
+      if (me != null) {
+        final profile = CurrentUserProfile.fromMe(me);
+        currentUser = profile;
+        // Every event from here on is filed under the account, including ones
+        // queued while this call was still in flight — the queue reads the
+        // account per event, not per launch.
+        analyticsAccount.set(id: profile.id, email: profile.email);
+      }
     } catch (error) {
       debugPrint('bootstrap: profile unavailable: $error');
     }
@@ -778,9 +809,18 @@ class AppNotifier extends ChangeNotifier {
         },
       );
       await _finishBootstrapSignedIn();
+      analytics.signedIn();
     } catch (error) {
       status = AppStatus.unauthenticated;
       _lastError = error.toString();
+      // A short code, never `error.toString()` — a CLI failure carries paths
+      // and host names, and this stream is not the place for them. Only the
+      // two the TYPE can tell apart: a cancelled sign-in and a refused one both
+      // arrive as a `StateError` differing in message text, and matching on
+      // English sentences is how a stream starts lying after a copy edit.
+      analytics.signInFailed(
+        error is CliNotAvailableException ? 'cli_missing' : 'failed',
+      );
     } finally {
       pendingAuthorizeUrl = null;
     }
@@ -811,6 +851,8 @@ class AppNotifier extends ChangeNotifier {
     expandedMachines.clear();
     selectedMachineId = null;
     status = AppStatus.unauthenticated;
+    analytics.signedOut();
+    analyticsAccount.clear();
     notifyListeners();
   }
 
@@ -1808,7 +1850,8 @@ class AppNotifier extends ChangeNotifier {
       // A refusal the CLI MEANT arrives as a thrown WsRequestFailure, never as an `error` key on a
       // reply that was returned — see that class. This used to be a branch on `result['error']`
       // below, which could not run, so the user got the wire code in place of the sentence.
-      return failure.code == 'UNSUPPORTED_ON_REMOTE' || failure.code == 'UNSUPPORTED'
+      return failure.code == 'UNSUPPORTED_ON_REMOTE' ||
+              failure.code == 'UNSUPPORTED'
           ? 'Update the harness CLI on this machine to use New Agent'
           : 'Create agent failed: ${failure.detail ?? failure.code}';
     } catch (error) {
@@ -1820,6 +1863,16 @@ class AppNotifier extends ChangeNotifier {
     // Idempotent on agent.id — safe even if the CLI's own agent_synced push for this session
     // arrives separately (it's fire-and-forget on the CLI side and unordered relative to this reply).
     _upsertAgent(machine, agent);
+    // Only when a grid was actually picked: an agent on the engine's own login
+    // is the old behaviour, and counting it here would make the grid funnel
+    // report every agent this app has ever created.
+    if (grid != null) {
+      analytics.gridAgentLaunched(
+        engine: engine,
+        model: grid.model,
+        networkId: grid.networkId,
+      );
+    }
     notifyListeners();
     await selectAgent(machineId, agent.id);
     return null;
@@ -1842,6 +1895,12 @@ class AppNotifier extends ChangeNotifier {
   ) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
+    // Read before the move: on success the agent list is reloaded, and a lookup
+    // afterwards would be racing the answer it depends on.
+    final engine = machine.agents
+        .where((agent) => agent.id == agentId)
+        .map((agent) => agent.engine)
+        .firstOrNull;
     try {
       // The reply's body says only `{retargeted: true}`; a refusal throws. Nothing here reads it.
       await _conn(machineId).request(
@@ -1850,10 +1909,28 @@ class AppNotifier extends ChangeNotifier {
         timeout: const Duration(seconds: 20),
       );
     } on WsRequestFailure catch (failure) {
+      // The CLI's own code, not the sentence built from it: `UNSUPPORTED` (a
+      // published CLI that predates agent_retarget) and a genuine refusal have
+      // to stop looking like one number.
+      analytics.gridAgentRetargeted(
+        outcome: failure.code,
+        engine: engine,
+        model: grid?.model,
+      );
       return retargetMessage(failure.code, failure.detail);
     } catch (error) {
+      analytics.gridAgentRetargeted(
+        outcome: 'error',
+        engine: engine,
+        model: grid?.model,
+      );
       return 'Move failed: $error';
     }
+    analytics.gridAgentRetargeted(
+      outcome: 'ok',
+      engine: engine,
+      model: grid?.model,
+    );
     // The pane now runs a different process, and its grid is re-read by the CLI's next discovery
     // pass. Ask for the list rather than guessing here: this method must not be the second place
     // that has an opinion about which grid an agent is on.
@@ -1894,7 +1971,8 @@ class AppNotifier extends ChangeNotifier {
     if (error == 'AGENT_BUSY') {
       return 'It is running a turn. Move it when the turn finishes.';
     }
-    const update = 'Update the harness CLI on this machine to move running agents.';
+    const update =
+        'Update the harness CLI on this machine to move running agents.';
     // UNSUPPORTED_ON_REMOTE is the handler being unwired; a bare UNSUPPORTED is the CLI not knowing
     // the frame AT ALL — a build that predates agent_retarget, which is what a stock release still is.
     // Same sentence: the way out of both is the same update.
@@ -2686,7 +2764,8 @@ class AppNotifier extends ChangeNotifier {
             // original clock in that case: this is the same wait continuing,
             // and restarting it would make a long block look new.
             final known = machine.blockedAgents[agentId];
-            machine.blockedAgents[agentId] = known != null && known.sameAs(asked)
+            machine.blockedAgents[agentId] =
+                known != null && known.sameAs(asked)
                 ? asked.withSince(known.since)
                 : asked;
           }

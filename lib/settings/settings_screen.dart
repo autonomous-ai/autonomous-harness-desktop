@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../analytics/analytics.dart';
 import '../grid/grid_networks_controller.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
@@ -87,12 +88,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
       widget.gridNetworks ?? GridNetworksController();
 
   @override
+  void initState() {
+    super.initState();
+    // The pane Settings opens on is a screen view like any other — without it
+    // the section a user lands on is the one section the stream never sees.
+    analytics.screenView(_screenName(_section));
+  }
+
+  @override
   void dispose() {
     // Only the one this screen made — an injected controller belongs to whoever
     // passed it in.
     if (widget.gridNetworks == null) _gridNetworks.dispose();
     super.dispose();
   }
+
+  void _show(SettingsSection target) {
+    if (target == _section) return;
+    analytics.screenView(_screenName(target));
+    setState(() => _section = target);
+  }
+
+  /// The section's stable name, never its label: labels are rewritten and a
+  /// renamed label would read as a new screen. `SettingsSection.grid` becomes
+  /// `settings_grid`, so a settings pane cannot collide with a top-level screen
+  /// that happens to share a word.
+  static String _screenName(SettingsSection section) =>
+      'settings_${section.name}';
 
   @override
   Widget build(BuildContext context) {
@@ -106,10 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SettingsNav(
-            section: _section,
-            onSelect: (target) => setState(() => _section = target),
-          ),
+          SettingsNav(section: _section, onSelect: _show),
           VerticalDivider(width: 1, color: grid.AppPalette.divider),
           Expanded(
             child: Column(

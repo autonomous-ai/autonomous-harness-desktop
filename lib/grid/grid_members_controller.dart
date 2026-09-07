@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../analytics/analytics.dart';
 import 'grid_api_client.dart';
 import 'managed_network_member.dart';
 
@@ -66,14 +67,43 @@ class GridMembersController extends ChangeNotifier {
   Future<String?> invite({
     required String email,
     required ManagedMemberRole role,
-  }) => _write(email, () => _api.addMember(
-    networkId,
-    email: email,
-    roles: [role.wire],
-  ));
+  }) async {
+    // Asked BEFORE the write: `_write` reloads the roster on success, so after
+    // it every invite would look like somebody who was already there. One
+    // endpoint upserts both, and this is the only place that can still tell
+    // "a new person joined" from "an existing grant changed" apart.
+    final held = _holds(email);
+    final failure = await _write(
+      email,
+      () => _api.addMember(networkId, email: email, roles: [role.wire]),
+    );
+    if (failure != null) return failure;
+    if (held) {
+      analytics.gridMemberRoleChanged(role: role.wire, networkId: networkId);
+    } else {
+      analytics.gridMemberInvited(role: role.wire, networkId: networkId);
+    }
+    return null;
+  }
 
-  Future<String?> remove(String email) =>
-      _write(email, () => _api.removeMember(networkId, email: email));
+  Future<String?> remove(String email) async {
+    final failure = await _write(
+      email,
+      () => _api.removeMember(networkId, email: email),
+    );
+    if (failure == null) analytics.gridMemberRemoved(networkId: networkId);
+    return failure;
+  }
+
+  /// Whether the roster already carries [email]. False while it has not loaded,
+  /// which reads an unknown as an invite — the commoner of the two, and the
+  /// sheet cannot show a role menu for a row it has not drawn.
+  bool _holds(String email) {
+    final roster = members;
+    if (roster == null) return false;
+    final needle = email.trim().toLowerCase();
+    return roster.any((member) => member.email.trim().toLowerCase() == needle);
+  }
 
   /// One write, with this address marked busy for its duration and the roster
   /// reloaded after it lands.
