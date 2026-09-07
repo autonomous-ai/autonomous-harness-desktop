@@ -12,11 +12,13 @@ import '../auth/cli_link.dart';
 import '../auth/cli_login.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
+import '../core/engine_availability.dart';
 import '../core/models.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
 import '../settings/config_store.dart';
 import '../terminal/terminal_session.dart';
+import '../widgets/engine_identity.dart' show allEngines;
 import 'pane_layout_store.dart';
 import 'terminal_pane.dart';
 import '../terminal/terminal_binary.dart';
@@ -108,6 +110,11 @@ class MachineState {
   bool terminalCapabilityLoaded = false;
   bool terminalCapabilityAvailable = false;
   String? terminalCapabilityError;
+  // Which engines this machine actually has, as this machine answered it. Kept
+  // on MachineState rather than globally because that is the whole point: two
+  // machines on one account hold different engines, and the Docker rig holds
+  // exactly one. See `engines_probe` in the CLI's backendSocket.
+  final MachineEngines engines = MachineEngines();
   // Adapter/manager presence for this machine, from `node_status` pushes —
   // distinct from `connectionStatus`, which only reflects OUR websocket to
   // the backend. null = not seen yet (initial connect).
@@ -1677,6 +1684,65 @@ class AppNotifier extends ChangeNotifier {
       _autoPickedAgent = true;
       unawaited(selectAgent(target.machine.machineId, agent.id));
       return;
+    }
+  }
+
+  /// Ask a machine which engines it has.
+  ///
+  /// Called when the New Agent dialog opens, not at connect: the answer costs
+  /// one interactive shell per engine on the far side, and it is only ever
+  /// looked at in that dialog.
+  ///
+  /// That caller passes [force], and should: engines come and go through a
+  /// terminal this app never sees, and an install the dialog itself started
+  /// invalidates the stored answer as it finishes. Without it the app probes
+  /// once per run and then insists, for the rest of the session, on what was
+  /// true when it started. The cache is here to collapse a re-open into one
+  /// sweep, not to spare the machine the question.
+  ///
+  /// Deduplicated on [MachineEngines.inFlight] so opening the dialog twice, or
+  /// reopening it mid-probe, does not start a second sweep. Never throws — a
+  /// machine that cannot answer leaves every engine unknown, and unknown is
+  /// rendered as the dialog behaved before this existed.
+  Future<void> probeEngines(String machineId, {bool force = false}) {
+    final machine = machineStates[machineId];
+    if (machine == null) return Future.value();
+    final existing = machine.engines.inFlight;
+    if (existing != null) return existing;
+    if (machine.engines.loaded && !force) return Future.value();
+    final work = _probeEngines(machine);
+    machine.engines.inFlight = work;
+    notifyListeners();
+    return work;
+  }
+
+  Future<void> _probeEngines(MachineState machine) async {
+    try {
+      final result = await _conn(machine.machine.machineId).request(
+        'engines_probe',
+        // The engine list travels so a machine only pays for what the dialog
+        // shows. An older CLI that does not know this request answers with an
+        // error, which lands in the catch below as "unknown" — never as a wrong
+        // "not installed", because a CLI predating the feature would otherwise
+        // report every engine missing and offer to install the ones already
+        // there.
+        payload: {'engines': allEngines.map((e) => e.id).toList()},
+        timeout: const Duration(seconds: 30),
+      );
+      final raw = result['engines'];
+      if (raw is! List) throw const FormatException('engines_probe: no list');
+      machine.engines.replace(
+        raw.map(EngineAvailability.fromJson).whereType<EngineAvailability>(),
+      );
+    } catch (error) {
+      // A CLI that predates `engines_probe` refuses it by code; `detail` already
+      // reads as a sentence when the peer sends one, so prefer it verbatim.
+      machine.engines.error = error is WsRequestFailure
+          ? (error.detail?.isNotEmpty == true ? error.detail : error.code)
+          : 'This machine could not report its engines';
+    } finally {
+      machine.engines.inFlight = null;
+      notifyListeners();
     }
   }
 
