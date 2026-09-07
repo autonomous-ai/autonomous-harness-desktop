@@ -23,6 +23,8 @@ import '../update/manual_update_check.dart';
 import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
+import 'pane_splits.dart';
+import 'pending_question.dart';
 
 enum AppStatus {
   bootstrapping,
@@ -112,6 +114,10 @@ class MachineState {
   // opening a terminal stream against an unavailable node.
   String? pendingOfflineAgentId;
   final Set<String> processingAgentIds = {};
+  /// Agents on this machine that have stopped to ask something, by agentId.
+  /// At most one per agent: a pane shows one dialog at a time, and the daemon
+  /// re-announces the same open question rather than queueing a second.
+  final Map<String, PendingQuestion> blockedAgents = {};
   final Map<String, String> sessionAgentIds = {};
   // Turn events can arrive while the initial agents_list RPC is still in
   // flight. Retain session correlation until that snapshot binds the row.
@@ -199,6 +205,27 @@ class AppNotifier extends ChangeNotifier {
   /// no pointer behind it: the dial's scroll and focus frames, and which agent
   /// the rail draws as current.
   int? focusedPaneId;
+
+  /// Divider positions, keyed by how many panes are on the grid. Empty means
+  /// every divider is centred, which is also what a first run looks like.
+  final Map<int, PaneSplits> paneSplits = {};
+
+  PaneSplits splitsFor(int paneCount) =>
+      paneSplits[paneCount] ?? const PaneSplits();
+
+  /// Move one divider and remember it.
+  ///
+  /// Keyed by pane count so the 3-pane and 4-pane grids keep their own
+  /// dividers: they are different shapes, and reusing a fraction across them
+  /// would move a boundary the user never dragged.
+  void setSplits(int paneCount, PaneSplits next) {
+    if (paneCount < 2 || paneCount > maxPanes) return;
+    if (splitsFor(paneCount) == next) return;
+    paneSplits[paneCount] = next;
+    notifyListeners();
+    final store = _paneLayout;
+    if (store != null) unawaited(store.saveSplits(paneSplits));
+  }
 
   int _nextPaneId = 1;
 
@@ -353,6 +380,35 @@ class AppNotifier extends ChangeNotifier {
           .sendTerminalFrame('app_focus', {'agentId': agentId})
           .catchError((_) => false),
     );
+  }
+
+  /// Tell the daemon which agents have a tile on the grid, so the dial can stay
+  /// quiet about a turn that finished in front of the person.
+  ///
+  /// An OPEN tile counts as seen. Not a focused one: with four tiles all four
+  /// are on screen, and the window has no honest way to say which the eye is
+  /// on. Nor is the window's own focus consulted — a decision, not an
+  /// oversight: it means a turn that lands while the app is behind a browser
+  /// stays silent, and the alternative is a dial that beeps about tiles you are
+  /// looking straight at.
+  ///
+  /// Sent to EVERY connected daemon, with the full list across all machines.
+  /// The dial belongs to whichever daemon owns the cable, and only a complete
+  /// roster lets that one judge; the others store a list they never use, which
+  /// costs nothing and saves the window from having to know which is which.
+  void _announceOpenPanesToDial() {
+    final pool = _pool;
+    if (pool == null) return;
+    final agentIds = <String>[for (final pane in panes) ?pane.agentId];
+    for (final machineId in machineStates.keys) {
+      final connection = pool[machineId];
+      if (connection == null) continue;
+      unawaited(
+        connection
+            .sendTerminalFrame('app_panes', {'agentIds': agentIds})
+            .catchError((_) => false),
+      );
+    }
   }
 
   /// Machines whose link prompt the user has waved away.
@@ -794,6 +850,11 @@ class AppNotifier extends ChangeNotifier {
         if (nextStatus == ConnectionStatus.connected) {
           machine.needsLink = false;
           _stopLinkRetry(machineId);
+          // A daemon that just came up — first connect, or a reconnect after it
+          // restarted — has never been told what is on the grid. Without this
+          // the dial goes back to beeping about tiles in plain sight until the
+          // next time a pane happens to change.
+          _announceOpenPanesToDial();
           // The local CLI never hands back `connected` until it has terminated E2EE (or confirmed
           // none is needed, for its own machine) — every machine's data is ready to load right away,
           // with no separate app-side readiness gate to wait on anymore.
@@ -1616,11 +1677,27 @@ class AppNotifier extends ChangeNotifier {
     });
   }
 
+  // ── blocked agents ────────────────────────────────────────────────────────
+
+  /// The question this agent stopped on, if it is waiting for one.
+  ///
+  /// Read by the tile, which rings itself while its agent is blocked. That ring
+  /// is the whole surface: an agent asking something is a fact about the pane
+  /// you are looking at, not a queue to be worked through somewhere else.
+  PendingQuestion? questionFor(String machineId, String agentId) =>
+      machineStates[machineId]?.blockedAgents[agentId];
+
   void _cancelTurnActivity(String machineId, String agentId) {
     _turnActivityWatchdogs
         .remove(_turnActivityKey(machineId, agentId))
         ?.cancel();
-    machineStates[machineId]?.processingAgentIds.remove(agentId);
+    final machine = machineStates[machineId];
+    machine?.processingAgentIds.remove(agentId);
+    // A question cannot outlive its own turn — the daemon's watcher says the
+    // same thing from the other end, tearing down and announcing a close when
+    // the turn ends. Clearing here as well means the row cannot survive a close
+    // frame that was dropped, and this is also the path a deleted agent takes.
+    machine?.blockedAgents.remove(agentId);
   }
 
   void _clearMachineActivity(MachineState machine) {
@@ -1629,6 +1706,7 @@ class AppNotifier extends ChangeNotifier {
     }
     machine.processingAgentIds.clear();
     machine.pendingProcessingSessions.clear();
+    machine.blockedAgents.clear();
   }
 
   void _clearAllTurnActivity() {
@@ -1639,6 +1717,7 @@ class AppNotifier extends ChangeNotifier {
     for (final machine in machineStates.values) {
       machine.processingAgentIds.clear();
       machine.pendingProcessingSessions.clear();
+      machine.blockedAgents.clear();
     }
   }
 
@@ -2305,6 +2384,11 @@ class AppNotifier extends ChangeNotifier {
   }
 
   void _persistLayout() {
+    // The roster and the saved layout describe the same fact — which agents are
+    // on the grid — so they are announced and written from the same place.
+    // Before the early return below: a window with no layout store still has
+    // tiles, and the dial still has to know about them.
+    _announceOpenPanesToDial();
     final store = _paneLayout;
     if (store == null) return;
     unawaited(
@@ -2331,11 +2415,18 @@ class AppNotifier extends ChangeNotifier {
   /// side does not decide, a restored grid commonly spans two of them, and one
   /// being slow or offline must not hold the others blank.
   Future<void> _restorePaneLayout() async {
-    if (panes.isNotEmpty) return;
     final store = _paneLayout;
     if (store == null) return;
+    // Read before the guards below: the dividers are remembered even for a
+    // grid this run has not restored any agents into, so a window that opens
+    // empty and is then filled by hand still comes up the shape it was left.
+    paneSplits.addAll(await store.loadSplits());
+    if (panes.isNotEmpty) return;
     final entries = await store.load();
-    if (entries.isEmpty) return;
+    if (entries.isEmpty) {
+      if (paneSplits.isNotEmpty) notifyListeners();
+      return;
+    }
     for (final entry in entries) {
       panes.add(
         TerminalPane(
@@ -2547,6 +2638,49 @@ class AppNotifier extends ChangeNotifier {
           unawaited(_loadMachineData(machine, force: true));
         }
         break;
+      // An agent stopped and is waiting on the person. Ignored by this window
+      // until now, even though the daemon had already shaped the question for
+      // the dial — `sendCommander` is device-only, so it never came down this
+      // wire at all.
+      case 'commander_question':
+        final agentId = _eventAgentId(machine, event, payload);
+        if (agentId != null) {
+          final asked = PendingQuestion.fromPayload(
+            machineId: machineId,
+            agentId: agentId,
+            payload: payload,
+            now: DateTime.now(),
+          );
+          if (asked != null) {
+            // The daemon re-announces an open question after a reconnect, and
+            // on attaching to a turn that was already mid-dialog. Keep the
+            // original clock in that case: this is the same wait continuing,
+            // and restarting it would make a long block look new.
+            final known = machine.blockedAgents[agentId];
+            machine.blockedAgents[agentId] = known != null && known.sameAs(asked)
+                ? asked.withSince(known.since)
+                : asked;
+          }
+        }
+        break;
+      // It stopped being on screen — answered here, in the pane by hand, on
+      // another window, or on the dial. Whoever got there first, everyone else
+      // is told to stop drawing it.
+      case 'commander_question_close':
+        final agentId = _eventAgentId(machine, event, payload);
+        final requestId = payload['requestId'];
+        if (agentId != null) {
+          final open = machine.blockedAgents[agentId];
+          // Only if it is the one being closed: a stale close must not wipe the
+          // question that replaced it when a dialog advanced to its next page.
+          if (open != null &&
+              (requestId is! String ||
+                  requestId.isEmpty ||
+                  open.requestId == requestId)) {
+            machine.blockedAgents.remove(agentId);
+          }
+        }
+        break;
       case 'turn_started':
       case 'turn_heartbeat':
         final agentId = _eventAgentId(machine, event, payload);
@@ -2573,6 +2707,17 @@ class AppNotifier extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// Feed one machine event straight into the dispatcher.
+  ///
+  /// The frames worth testing here have no terminal to route through and no
+  /// socket to arrive on — what they exercise is the bookkeeping either side of
+  /// that, which is exactly what a live socket makes hard to reach.
+  @visibleForTesting
+  Future<void> handleMachineEventForTest(
+    String machineId,
+    Map<String, dynamic> event,
+  ) => _handleEvent(machineId, event);
 
   /// Put an already-built session on the grid.
   ///

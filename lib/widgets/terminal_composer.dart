@@ -38,6 +38,7 @@ class _TerminalComposerState extends State<TerminalComposer> {
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
+    widget.focusNode.addListener(_onFocusChanged);
     terminalFontStore.addListener(_onFontChanged);
   }
 
@@ -51,11 +52,16 @@ class _TerminalComposerState extends State<TerminalComposer> {
       // one, and silently sending it to its replacement would be worse than losing it.
       _controller.clear();
     }
+    if (!identical(oldWidget.focusNode, widget.focusNode)) {
+      oldWidget.focusNode.removeListener(_onFocusChanged);
+      widget.focusNode.addListener(_onFocusChanged);
+    }
   }
 
   @override
   void dispose() {
     widget.session.removeListener(_onSessionChanged);
+    widget.focusNode.removeListener(_onFocusChanged);
     terminalFontStore.removeListener(_onFontChanged);
     _controller.dispose();
     super.dispose();
@@ -68,6 +74,13 @@ class _TerminalComposerState extends State<TerminalComposer> {
 
   /// Keeps this box's face in step with the terminal above it — see the `style:` comment below.
   void _onFontChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// The composer is the primary input on a remote terminal. Its surface stays
+  /// visible at rest, then the rim and prompt glyph take the accent when the
+  /// keyboard lands here so the destination of typing is unmistakable.
+  void _onFocusChanged() {
     if (mounted) setState(() {});
   }
 
@@ -107,71 +120,118 @@ class _TerminalComposerState extends State<TerminalComposer> {
 
   @override
   Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
     final enabled = widget.session.acceptsInput;
+    final focused = widget.focusNode.hasFocus;
+    final terminalStyle = terminalFontStore.value;
     // No top border of its own: [ComposerGrip] is the line between this and the terminal.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
-      // ⚠️ The composer belongs to the TERMINAL, not to the app's chrome, so it
-      // is held out of the app-wide UI text scale twice over — once for its
-      // type here, and once for its BOX below. Both are needed, and for
-      // different reasons.
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      // ⚠️ The composer belongs to the TERMINAL, not to the app's chrome, so it is held out of
+      // the app-wide UI text scale twice over — once for its TYPE here, and once for its BOX
+      // below. Both are needed, and for different reasons.
       //
-      // This half keeps the typed text at the terminal's own size. What is
-      // typed here lands over there, so it has to look like it.
+      // This half keeps everything inside the surface at the terminal's own size: the typed text,
+      // the hint, and the `›`. What is typed here lands over there, so it has to look like it.
       child: MediaQuery.withNoTextScaling(
-        child: Focus(
-          onKeyEvent: _onKeyEvent,
-          child: TextField(
-            controller: _controller,
-            focusNode: widget.focusNode,
-            enabled: enabled,
-            minLines: 1,
-            maxLines: 6,
-            // The message is going to a terminal, so it is shown in the terminal's own face: what
-            // is typed here should look like what will land over there.
-            style: TextStyle(
-              color: grid.AppPalette.textPrimary,
-              fontFamily: terminalFontStore.value.fontFamily,
-              fontFamilyFallback: terminalFontStore.value.fontFamilyFallback,
-              fontSize: terminalFontStore.value.fontSize,
+        child: AnimatedContainer(
+          key: const ValueKey('terminal-composer-surface'),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          constraints: const BoxConstraints(minHeight: 48),
+          decoration: BoxDecoration(
+            color: enabled
+                ? grid.AppGlass.surfaceFill
+                : grid.AppGlass.surfaceFill.withValues(alpha: 0.66),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: focused
+                  ? grid.AppPalette.accentOnSurface
+                  : grid.AppGlass.lift,
+              width: focused ? 1.5 : 1,
             ),
-            textInputAction: TextInputAction.newline,
-            keyboardType: TextInputType.multiline,
-            decoration: InputDecoration(
-              // ⚠️ THE BOX, pinned explicitly — and `withNoTextScaling` above
-              // does NOT cover this.
-              //
-              // `inputDecorationTheme` sizes every field from
-              // `AppControl.heightFieldScaled` and a padding multiplied by
-              // `AppFont.uiScale` — a plain static, not a MediaQuery, so no
-              // scaling scope can hold it back. Left inherited, raising the UI
-              // size grows this box (36 → 48.9 at the top of the range), which
-              // shrinks the Expanded holding the terminal, which drops a row,
-              // which sends a `terminal_resize` to the remote agent. The
-              // composer only appears for REMOTE machines, so that is the only
-              // case where it would ever have bitten.
-              //
-              // These two lines are the app's own resting values, stated rather
-              // than derived, so the pane's row count cannot move with a
-              // setting that has nothing to do with the terminal.
-              isDense: true,
-              constraints: const BoxConstraints(minHeight: 36),
-              // 9.225 is not a taste — it is `(36 - 13 * 1.35) / 2`, exactly
-              // what `inputDecorationTheme` derives at `uiScale == 1`
-              // (app_theme.dart:1100-1106). Stated rather than inherited, so
-              // this box renders identically to today and cannot drift with a
-              // setting that has nothing to do with the terminal.
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 9.225,
-              ),
-              hintText: enabled
-                  // Says what the box is FOR, not just how it works: that it is the fast path,
-                  // and that the terminal above is still there for selecting and copying. ⇧⏎ is
-                  // left unadvertised on purpose — it is the one a user stumbles into anyway, and
-                  // the room buys the selection hint, which nobody guesses.
-                  ? 'Fast input · ⏎ send · select in the terminal above'
-                  : 'Terminal is not accepting input',
+            boxShadow: focused
+                ? grid.AppSurface.composerShadow
+                : grid.AppGlass.shadow,
+          ),
+          child: Focus(
+            onKeyEvent: _onKeyEvent,
+            child: Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 14, right: 10),
+                  child: AnimatedDefaultTextStyle(
+                    key: const ValueKey('terminal-composer-prompt-style'),
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOut,
+                    style: terminalStyle
+                        .toTextStyle(
+                          color: focused
+                              ? grid.AppPalette.accentOnSurface
+                              : grid.AppPalette.textSecondary,
+                          bold: true,
+                        )
+                        .copyWith(letterSpacing: 0),
+                    child: const Text(
+                      '›',
+                      key: ValueKey('terminal-composer-prompt'),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: widget.focusNode,
+                    enabled: enabled,
+                    minLines: 1,
+                    maxLines: 6,
+                    // The message is going to a terminal, so it is shown in the terminal's own face:
+                    // what is typed here should look like what will land over there.
+                    style: terminalStyle
+                        .toTextStyle(color: grid.AppPalette.textPrimary)
+                        .copyWith(letterSpacing: 0),
+                    textInputAction: TextInputAction.newline,
+                    keyboardType: TextInputType.multiline,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: false,
+                      // ⚠️ THE BOX, unpinned from the theme — and `withNoTextScaling` above does
+                      // NOT reach it. `inputDecorationTheme` gives every field a minimum of
+                      // `AppControl.heightFieldScaled` and a padding multiplied by
+                      // `AppFont.uiScale` — a plain static, not a MediaQuery, so no scaling scope
+                      // can hold it back. Left inherited, raising the UI size grows this field
+                      // (36 → 48.9 at the top of the range) past the surface's own 48, which
+                      // shrinks the Expanded holding the terminal, which drops a row, which sends a
+                      // `terminal_resize` to the remote agent. The composer only appears for REMOTE
+                      // machines, so that is the only case where it would ever have bitten.
+                      //
+                      // The surface above owns this box's height now, so the field asks for no
+                      // minimum of its own — and `contentPadding` below is stated rather than
+                      // inherited for the same reason. Measured by
+                      // `terminal_ui_scale_isolation_test.dart`.
+                      constraints: const BoxConstraints(minHeight: 0),
+                      hintText: enabled
+                          ? 'Message agent…  ·  ↵ send'
+                          : 'Connecting to terminal…',
+                      // InputDecorator merges this with the app-wide field hint
+                      // style. Set tracking explicitly so the UI-control font's
+                      // letter spacing cannot leak into terminal typography.
+                      hintStyle: terminalStyle
+                          .toTextStyle(
+                            color: enabled
+                                ? grid.AppPalette.textSecondary
+                                : grid.AppPalette.textFaint,
+                          )
+                          .copyWith(letterSpacing: 0),
+                      contentPadding: const EdgeInsets.fromLTRB(0, 12, 14, 12),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

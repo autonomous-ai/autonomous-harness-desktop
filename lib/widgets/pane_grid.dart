@@ -4,7 +4,9 @@ import 'package:window_manager/window_manager.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
+import '../state/pane_splits.dart';
 import '../state/terminal_pane.dart';
+import '../terminal/terminal_font_store.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
 import 'harness_join_guide_screen.dart';
@@ -17,6 +19,10 @@ import 'terminal_panel.dart';
 /// ordering, a serialised shape — only once the count is open-ended. Capped at
 /// four, every arrangement anyone would build by hand is already one of the
 /// four below, and none of that machinery has to exist or be maintained.
+///
+/// The shapes are fixed; the DIVIDERS are not. Each one can be dragged and its
+/// position is remembered per pane count (see [PaneSplits]) — which is the part
+/// of a split tree people actually reach for, without the tree.
 class PaneGrid extends StatelessWidget {
   const PaneGrid({super.key, required this.notifier});
 
@@ -55,14 +61,22 @@ class PaneGrid extends StatelessWidget {
               child: const _AddSlot(),
             ),
         ];
-        return _arrange(cells);
+        return _arrange(cells, interactive: dragging == null);
       },
     );
   }
 
   /// Row-major, and the odd count spans rather than leaving a hole: three tiles
   /// are two over one, not two over one-and-a-gap.
-  static Widget _arrange(List<Widget> cells) {
+  ///
+  /// Keyed on the number of CELLS, not of panes: mid-drag an extra drop slot
+  /// joins them, and the grid on screen is the one the dividers have to match.
+  /// Those dividers are inert while an agent is being dragged — one pointer
+  /// cannot mean both things.
+  Widget _arrange(List<Widget> cells, {required bool interactive}) {
+    final splits = notifier.splitsFor(cells.length);
+    void put(PaneSplits next) => notifier.setSplits(cells.length, next);
+
     switch (cells.length) {
       case 1:
         return cells[0];
@@ -75,57 +89,229 @@ class PaneGrid extends StatelessWidget {
             final side = constraints.maxWidth >= constraints.maxHeight
                 ? Axis.horizontal
                 : Axis.vertical;
-            return side == Axis.horizontal
-                ? Row(
-                    children: [
-                      Expanded(child: cells[0]),
-                      Expanded(child: cells[1]),
-                    ],
-                  )
-                : Column(
-                    children: [
-                      Expanded(child: cells[0]),
-                      Expanded(child: cells[1]),
-                    ],
-                  );
+            return _Split(
+              axis: side,
+              fraction: splits.col,
+              onFraction: interactive
+                  ? (v) => put(splits.copyWith(col: v))
+                  : null,
+              first: cells[0],
+              second: cells[1],
+            );
           },
         );
       case 3:
-        return Column(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(child: cells[0]),
-                  Expanded(child: cells[1]),
-                ],
-              ),
-            ),
-            Expanded(child: cells[2]),
-          ],
+        return _Split(
+          axis: Axis.vertical,
+          fraction: splits.row,
+          onFraction: interactive ? (v) => put(splits.copyWith(row: v)) : null,
+          first: _Split(
+            axis: Axis.horizontal,
+            fraction: splits.col,
+            onFraction: interactive
+                ? (v) => put(splits.copyWith(col: v))
+                : null,
+            first: cells[0],
+            second: cells[1],
+          ),
+          second: cells[2],
         );
       default:
-        return Column(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(child: cells[0]),
-                  Expanded(child: cells[1]),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(child: cells[2]),
-                  Expanded(child: cells[3]),
-                ],
-              ),
-            ),
-          ],
+        return _Split(
+          axis: Axis.vertical,
+          fraction: splits.row,
+          onFraction: interactive ? (v) => put(splits.copyWith(row: v)) : null,
+          // BOTH rows read and write the same fraction, so the column is one
+          // line down the whole grid and dragging it anywhere moves all of it —
+          // the same way the row divider already spans the full width. Per-row
+          // columns were tried first and read as a staircase: moving one
+          // boundary left the tile under it behind, and the second drag existed
+          // only to undo the damage of the first.
+          first: _Split(
+            axis: Axis.horizontal,
+            fraction: splits.col,
+            onFraction: interactive
+                ? (v) => put(splits.copyWith(col: v))
+                : null,
+            first: cells[0],
+            second: cells[1],
+          ),
+          second: _Split(
+            axis: Axis.horizontal,
+            fraction: splits.col,
+            onFraction: interactive
+                ? (v) => put(splits.copyWith(col: v))
+                : null,
+            first: cells[2],
+            second: cells[3],
+          ),
         );
     }
+  }
+}
+
+/// The smallest a tile may be dragged to, in pixels.
+///
+/// MEASURED, not guessed, and it is the whole reason a divider clamps at all:
+/// both ends already floor a terminal at 40 columns and 12 rows, and the daemon
+/// applies that floor SILENTLY (`boundedSize` in tmuxStream.ts). Drag a tile
+/// narrower than 40 columns and nothing reports it — the pane simply shows a
+/// grid wider than the space it has, clipped, with nothing on screen saying
+/// why. So the divider stops where the terminal does.
+///
+/// The font is one process-wide setting, so one measurement serves every tile.
+class _MinTile {
+  static double _forSize = -1;
+  static Size _cached = Size.zero;
+
+  static Size of() {
+    final style = terminalFontStore.value;
+    if (style.fontSize == _forSize) return _cached;
+    // The renderer measures its cell by laying out ten 'm' and dividing; do the
+    // same here rather than inventing a second idea of how wide a column is.
+    final painter = TextPainter(
+      text: TextSpan(
+        text: 'mmmmmmmmmm',
+        style: TextStyle(
+          fontFamily: style.fontFamily,
+          fontFamilyFallback: style.fontFamilyFallback,
+          fontSize: style.fontSize,
+          height: style.height,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final cellW = painter.width / 10;
+    final cellH = painter.height;
+    _forSize = style.fontSize;
+    // 46 is the pane header, which is chrome the terminal never gets.
+    _cached = Size(40 * cellW + 16, 46 + 12 * cellH + 8);
+    return _cached;
+  }
+}
+
+/// Two children and a draggable boundary between them.
+///
+/// `onFraction == null` means the boundary is drawn but inert — used while an
+/// agent is being dragged across the grid.
+class _Split extends StatelessWidget {
+  const _Split({
+    required this.axis,
+    required this.first,
+    required this.second,
+    required this.fraction,
+    required this.onFraction,
+  });
+
+  final Axis axis;
+  final Widget first;
+  final Widget second;
+  final double fraction;
+  final ValueChanged<double>? onFraction;
+
+  /// 1px of line, 9px of grab. A boundary you have to hit exactly is a
+  /// boundary people give up on, and the extra 8px sit over tile edges where
+  /// there is nothing else to press.
+  static const double _grab = 9;
+
+  @override
+  Widget build(BuildContext context) {
+    final minTile = _MinTile.of();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontal = axis == Axis.horizontal;
+        final total = horizontal ? constraints.maxWidth : constraints.maxHeight;
+        final minEach = horizontal ? minTile.width : minTile.height;
+        final available = total - _grab;
+
+        // Too small to honour both floors: centre it and refuse the drag. The
+        // alternative is a boundary that can be moved but never obeyed.
+        if (!available.isFinite || available <= minEach * 2) {
+          return Flex(
+            direction: axis,
+            children: [
+              Expanded(child: first),
+              _Divider(axis: axis, grab: _grab, onDelta: null),
+              Expanded(child: second),
+            ],
+          );
+        }
+
+        final firstExtent = (available * fraction).clamp(
+          minEach,
+          available - minEach,
+        );
+
+        return Flex(
+          direction: axis,
+          children: [
+            SizedBox(
+              width: horizontal ? firstExtent : null,
+              height: horizontal ? null : firstExtent,
+              child: first,
+            ),
+            _Divider(
+              axis: axis,
+              grab: _grab,
+              onDelta: onFraction == null
+                  ? null
+                  : (delta) => onFraction!(
+                      ((firstExtent + delta) / available).clamp(0.0, 1.0),
+                    ),
+              onReset: onFraction == null ? null : () => onFraction!(0.5),
+            ),
+            Expanded(child: second),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _Divider extends StatelessWidget {
+  const _Divider({
+    required this.axis,
+    required this.grab,
+    required this.onDelta,
+    this.onReset,
+  });
+
+  final Axis axis;
+  final double grab;
+  final ValueChanged<double>? onDelta;
+  final VoidCallback? onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final horizontal = axis == Axis.horizontal;
+    final line = ColoredBox(
+      color: AppColors.border,
+      child: SizedBox(
+        width: horizontal ? 1 : double.infinity,
+        height: horizontal ? double.infinity : 1,
+      ),
+    );
+    final bar = SizedBox(
+      width: horizontal ? grab : null,
+      height: horizontal ? null : grab,
+      child: Center(child: line),
+    );
+    if (onDelta == null) return bar;
+    return MouseRegion(
+      cursor: horizontal
+          ? SystemMouseCursors.resizeColumn
+          : SystemMouseCursors.resizeRow,
+      child: GestureDetector(
+        // Opaque: the grab strip lies over the tiles either side, and a drag
+        // that started on it must not also reach the terminal underneath.
+        behavior: HitTestBehavior.opaque,
+        onDoubleTap: onReset,
+        onHorizontalDragUpdate: horizontal ? (d) => onDelta!(d.delta.dx) : null,
+        onVerticalDragUpdate: horizontal ? null : (d) => onDelta!(d.delta.dy),
+        child: bar,
+      ),
+    );
   }
 }
 
@@ -147,6 +333,10 @@ class _PaneCell extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final focused = notifier.isPaneFocused(pane.id);
+    final agentId = pane.agentId;
+    final blocked =
+        agentId != null &&
+        notifier.questionFor(pane.machineId, agentId) != null;
     return Listener(
       // Translucent so the press still reaches the renderer underneath: on
       // macOS the terminal is a WebView and AppKit gives it first responder on
@@ -168,6 +358,18 @@ class _PaneCell extends StatelessWidget {
             width: 1,
           ),
         ),
+        // Attention, drawn OVER the terminal and inside the border above, so a
+        // pane can carry both at once — this one is blocked AND focused is a
+        // normal state, not a conflict to resolve. It is amber and 2px against
+        // the border's 1px accent precisely so the two never read as each
+        // other. Unlike focus, it shows on a single pane too: with one tile
+        // there is nowhere else focus could be, but there is very much a
+        // question waiting.
+        foregroundDecoration: blocked
+            ? BoxDecoration(
+                border: Border.all(color: grid.AppPalette.warn, width: 2),
+              )
+            : null,
         // Keeps a terminal's constant repainting inside its own layer instead
         // of dirtying the whole grid. No key: nothing reads this boundary, it
         // only has to exist.
@@ -201,12 +403,6 @@ class _PaneCell extends StatelessWidget {
   }
 }
 
-/// Everything a tile can be, decided per tile.
-///
-/// This chain used to live in HomeScreen and decide the WHOLE content area from
-/// the one selected machine. That is wrong the moment tiles can come from
-/// different machines: one machine needing a link would blank three working
-/// terminals belonging to two other machines.
 class _PaneContent extends StatelessWidget {
   const _PaneContent({
     required this.notifier,

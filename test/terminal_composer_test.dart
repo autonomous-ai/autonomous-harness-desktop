@@ -9,9 +9,11 @@ import 'package:harness/core/models.dart';
 import 'package:harness/shared/theme/app_theme.dart' as grid;
 import 'package:harness/state/app_state.dart';
 import 'package:harness/theme/app_theme.dart';
+
 import 'dart:convert';
 
 import 'package:harness/terminal/terminal_binary.dart';
+import 'package:harness/terminal/terminal_font_store.dart';
 import 'package:harness/terminal/terminal_session.dart';
 import 'package:harness/widgets/terminal_composer.dart';
 import 'package:harness/widgets/terminal_panel.dart';
@@ -139,18 +141,149 @@ void main() {
     app.dispose();
   });
 
-  testWidgets('a pane on THIS computer does not — typing there is already fast', (
+  testWidgets('the main composer stays visually distinct in both themes', (
     tester,
   ) async {
-    final app = _notifier(local: true);
+    final original = grid.AppTheme.brightness.value;
+    addTearDown(() => grid.AppTheme.brightness.value = original);
+
+    for (final brightness in [Brightness.light, Brightness.dark]) {
+      grid.AppTheme.brightness.value = brightness;
+      final app = _notifier(local: false);
+      final session = await _liveSession([]);
+      await tester.pumpWidget(_host(app, session));
+      await tester.pump();
+
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.decoration?.hintText, 'Message agent…  ·  ↵ send');
+      expect(
+        find.byKey(const ValueKey('terminal-composer-prompt')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('terminal-composer-surface')))
+            .height,
+        greaterThanOrEqualTo(48),
+      );
+
+      // The remote composer receives focus when its pane is selected.
+      var surface = tester.widget<AnimatedContainer>(
+        find.byKey(const ValueKey('terminal-composer-surface')),
+      );
+      var decoration = surface.decoration! as BoxDecoration;
+      var border = decoration.border! as Border;
+      expect(border.top.color, grid.AppPalette.accentOnSurface);
+      expect(border.top.width, 1.5);
+      expect(decoration.boxShadow, grid.AppSurface.composerShadow);
+
+      field.focusNode!.unfocus();
+      await tester.pump();
+      surface = tester.widget<AnimatedContainer>(
+        find.byKey(const ValueKey('terminal-composer-surface')),
+      );
+      decoration = surface.decoration! as BoxDecoration;
+      border = decoration.border! as Border;
+      expect(border.top.color, grid.AppGlass.lift);
+      expect(border.top.width, 1);
+      expect(decoration.boxShadow, grid.AppGlass.shadow);
+
+      session.dispose();
+      app.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('the composer follows terminal font settings live', (
+    tester,
+  ) async {
+    final original = terminalFontStore.value;
+    addTearDown(() => terminalFontStore.value = original);
+
+    final app = _notifier(local: false);
     final session = await _liveSession([]);
+    terminalFontStore.value = original.copyWith(
+      fontFamily: 'Menlo',
+      fontFamilyFallback: const ['Monaco', 'monospace'],
+      fontSize: 18,
+    );
     await tester.pumpWidget(_host(app, session));
     await tester.pump();
 
-    expect(find.byType(TerminalComposer), findsNothing);
+    void expectTypography(String family, double size) {
+      final field = tester.widget<TextField>(find.byType(TextField));
+      final renderedHintStyle = tester
+          .widget<Text>(find.text('Message agent…  ·  ↵ send'))
+          .style!;
+      final promptStyle = tester
+          .widget<AnimatedDefaultTextStyle>(
+            find.byKey(const ValueKey('terminal-composer-prompt-style')),
+          )
+          .style;
+
+      expect(field.style?.fontFamily, family);
+      expect(field.style?.fontSize, size);
+      expect(field.style?.letterSpacing, 0);
+      expect(field.decoration?.hintStyle?.fontFamily, family);
+      expect(field.decoration?.hintStyle?.fontSize, size);
+      expect(field.decoration?.hintStyle?.letterSpacing, 0);
+      expect(renderedHintStyle.fontFamily, family);
+      expect(renderedHintStyle.fontSize, size);
+      expect(renderedHintStyle.letterSpacing, 0);
+      expect(promptStyle.fontFamily, family);
+      expect(promptStyle.fontSize, size);
+      expect(promptStyle.letterSpacing, 0);
+    }
+
+    expectTypography('Menlo', 18);
+
+    // Settings can change while the pane is already open. The composer listens
+    // to the same notifier as the terminal, so neither needs a reload.
+    terminalFontStore.value = original.copyWith(
+      fontFamily: 'Monaco',
+      fontFamilyFallback: const ['Menlo', 'monospace'],
+      fontSize: 15,
+    );
+    await tester.pump();
+    expectTypography('Monaco', 15);
+
     session.dispose();
     app.dispose();
   });
+
+  testWidgets('the composer remains recognizable while attaching', (
+    tester,
+  ) async {
+    final app = _notifier(local: false);
+    final session = await _liveSession([], live: false);
+    await tester.pumpWidget(_host(app, session));
+    await tester.pump();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.enabled, isFalse);
+    expect(field.decoration?.hintText, 'Connecting to terminal…');
+    expect(
+      find.byKey(const ValueKey('terminal-composer-surface')),
+      findsOneWidget,
+    );
+
+    session.dispose();
+    app.dispose();
+  });
+
+  testWidgets(
+    'a pane on THIS computer does not — typing there is already fast',
+    (tester) async {
+      final app = _notifier(local: true);
+      final session = await _liveSession([]);
+      await tester.pumpWidget(_host(app, session));
+      await tester.pump();
+
+      expect(find.byType(TerminalComposer), findsNothing);
+      session.dispose();
+      app.dispose();
+    },
+  );
 
   testWidgets('toggling it off hides the box on a remote pane', (tester) async {
     final app = _notifier(local: false);
@@ -179,7 +312,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 12));
 
     expect(outbound, ['deploy it']);
-    expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, '');
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      '',
+    );
     session.dispose();
     app.dispose();
   });
@@ -218,32 +354,33 @@ void main() {
     session.dispose();
     app.dispose();
   });
-  testWidgets('the grip stays reachable once the box is gone, and gives its rows back', (
-    tester,
-  ) async {
-    final app = _notifier(local: false);
-    final session = await _liveSession([]);
+  testWidgets(
+    'the grip stays reachable once the box is gone, and gives its rows back',
+    (tester) async {
+      final app = _notifier(local: false);
+      final session = await _liveSession([]);
 
-    await tester.pumpWidget(_host(app, session));
-    await tester.pump();
-    expect(find.byType(ComposerGrip), findsOneWidget);
-    final expandedSpot = tester.getCenter(find.byType(ComposerGrip));
+      await tester.pumpWidget(_host(app, session));
+      await tester.pump();
+      expect(find.byType(ComposerGrip), findsOneWidget);
+      final expandedSpot = tester.getCenter(find.byType(ComposerGrip));
 
-    // Collapsed, the grip is the ONLY way back — a control that hid with the box would strand it.
-    await tester.pumpWidget(_host(app, session, visible: false));
-    await tester.pump();
-    expect(find.byType(TerminalComposer), findsNothing);
-    expect(find.byType(ComposerGrip), findsOneWidget);
+      // Collapsed, the grip is the ONLY way back — a control that hid with the box would strand it.
+      await tester.pumpWidget(_host(app, session, visible: false));
+      await tester.pump();
+      expect(find.byType(TerminalComposer), findsNothing);
+      expect(find.byType(ComposerGrip), findsOneWidget);
 
-    // It rides DOWN with the drawer it belongs to, by exactly the height the terminal just got
-    // back. That movement is the point of collapsing, not a flaw in it — pinning the grip would
-    // mean reserving the space it was supposed to free.
-    final collapsedSpot = tester.getCenter(find.byType(ComposerGrip));
-    expect(collapsedSpot.dy, greaterThan(expandedSpot.dy));
-    expect(collapsedSpot.dx, expandedSpot.dx);
-    session.dispose();
-    app.dispose();
-  });
+      // It rides DOWN with the drawer it belongs to, by exactly the height the terminal just got
+      // back. That movement is the point of collapsing, not a flaw in it — pinning the grip would
+      // mean reserving the space it was supposed to free.
+      final collapsedSpot = tester.getCenter(find.byType(ComposerGrip));
+      expect(collapsedSpot.dy, greaterThan(expandedSpot.dy));
+      expect(collapsedSpot.dx, expandedSpot.dx);
+      session.dispose();
+      app.dispose();
+    },
+  );
 
   testWidgets('tapping the grip asks for the toggle', (tester) async {
     var toggled = 0;
@@ -313,24 +450,26 @@ void main() {
     session.dispose();
     app.dispose();
   });
-  testWidgets('selecting a remote agent puts the caret in the box, not the terminal', (
-    tester,
-  ) async {
-    final app = _notifier(local: false);
-    final session = await _liveSession([]);
-    await tester.pumpWidget(_host(app, session));
-    await tester.pump();
+  testWidgets(
+    'selecting a remote agent puts the caret in the box, not the terminal',
+    (tester) async {
+      final app = _notifier(local: false);
+      final session = await _liveSession([]);
+      await tester.pumpWidget(_host(app, session));
+      await tester.pump();
 
-    final field = tester.widget<TextField>(find.byType(TextField));
-    expect(
-      field.focusNode?.hasFocus,
-      isTrue,
-      reason: 'the box is the whole point of a remote pane — it should not be '
-          'the second thing the user has to click',
-    );
-    session.dispose();
-    app.dispose();
-  });
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(
+        field.focusNode?.hasFocus,
+        isTrue,
+        reason:
+            'the box is the whole point of a remote pane — it should not be '
+            'the second thing the user has to click',
+      );
+      session.dispose();
+      app.dispose();
+    },
+  );
 
   testWidgets('a local pane still lands in the terminal', (tester) async {
     final app = _notifier(local: true);
