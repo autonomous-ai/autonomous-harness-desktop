@@ -10,6 +10,7 @@ import '../terminal/terminal_font_store.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
 import 'harness_join_guide_screen.dart';
+import 'new_agent_dialog.dart';
 import 'terminal_panel.dart';
 
 /// The terminals, as up to four tiles.
@@ -39,7 +40,7 @@ class PaneGrid extends StatelessWidget {
             notifier: notifier,
             paneId: null,
             dragging: dragging,
-            child: const _EmptyGrid(),
+            child: _EmptyGrid(notifier: notifier),
           );
         }
         final cells = <Widget>[
@@ -858,11 +859,31 @@ class _AddSlot extends StatelessWidget {
 }
 
 class _EmptyGrid extends StatelessWidget {
-  const _EmptyGrid();
+  const _EmptyGrid({required this.notifier});
+
+  final AppNotifier notifier;
+
+  /// Which machine a new agent would be started on.
+  ///
+  /// [AppNotifier.activeMachineState] answers for every case that has one —
+  /// an open terminal, a selected machine, the first expanded one. It reads
+  /// null only before any machine has been touched, which on a single-machine
+  /// install (this Mac, and nothing linked yet) is exactly the first launch
+  /// this button exists for; hence the fallback. With several machines and none
+  /// picked there is no honest answer, so the button is not drawn and the rail's
+  /// per-machine `+` stays the way in — a create that guessed the wrong machine
+  /// is worse than one more click.
+  String? get _machineId {
+    final active = notifier.activeMachineState;
+    if (active != null) return active.machine.machineId;
+    final states = notifier.machineStates.values;
+    return states.length == 1 ? states.first.machine.machineId : null;
+  }
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final machineId = _machineId;
     return ColoredBox(
       color: grid.AppPalette.windowBg,
       child: Center(
@@ -877,6 +898,19 @@ class _EmptyGrid extends StatelessWidget {
                 fontSize: 12,
               ),
             ),
+            // Selecting and dragging both need an agent to already exist. On a
+            // first launch none does, so the two sentences around this button
+            // are a dead end without it.
+            if (machineId != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                key: const ValueKey('empty-grid-new-agent'),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('New agent'),
+                onPressed: () =>
+                    showNewAgentDialog(context, notifier, machineId),
+              ),
+            ],
             const SizedBox(height: 8),
             // The empty pane is the one screen a new user is guaranteed to
             // look at, and it is doing nothing else. A sheet behind a key

@@ -1567,28 +1567,110 @@ class _EmptyAgents extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(38, 2, 8, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'no running agents',
-              style: TextStyle(
-                color: grid.AppPalette.textFaint,
-                fontFamily: grid.AppFont.sans,
-                fontSize: 13.5,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(38, 2, 8, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'no running agents',
+                  style: TextStyle(
+                    color: grid.AppPalette.textFaint,
+                    fontFamily: grid.AppFont.sans,
+                    fontSize: 13.5,
+                  ),
+                ),
               ),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 14),
+                color: grid.AppPalette.textSecondary,
+                tooltip: 'Reload agents',
+                onPressed: () =>
+                    notifier.reloadMachineData(state.machine.machineId),
+              ),
+            ],
+          ),
+        ),
+        // The machine row's `+` is hover-revealed, so on a first launch — the
+        // one moment the rail is empty — there is nothing on screen that says
+        // an agent can be started at all. This says it, and starts the same
+        // dialog for the same machine.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
+          child: _EmptyNewAgentButton(
+            onPressed: () => showNewAgentDialog(
+              context,
+              notifier,
+              state.machine.machineId,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh, size: 14),
-            color: grid.AppPalette.textSecondary,
-            tooltip: 'Reload agents',
-            onPressed: () =>
-                notifier.reloadMachineData(state.machine.machineId),
+        ),
+      ],
+    );
+  }
+}
+
+/// The empty rail's one call to action.
+///
+/// Washed in the accent rather than drawn as a button ([AppSurface.accentWash]
+/// is the token for exactly this — the rail's primary action), because the rail
+/// holds no other framed control and one would sit oddly among the plain rows.
+class _EmptyNewAgentButton extends StatefulWidget {
+  const _EmptyNewAgentButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_EmptyNewAgentButton> createState() => _EmptyNewAgentButtonState();
+}
+
+class _EmptyNewAgentButtonState extends State<_EmptyNewAgentButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          key: const ValueKey('empty-new-agent'),
+          duration: grid.AppMotion.hover,
+          curve: grid.AppMotion.curve,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? grid.AppSurface.accentWashHover
+                : grid.AppSurface.accentWash,
+            borderRadius: BorderRadius.circular(grid.AppControl.menuRadius),
           ),
-        ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                LucideIcons.plus300,
+                size: 13,
+                color: grid.AppPalette.accentOnSurface,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'New agent',
+                style: TextStyle(
+                  color: grid.AppPalette.accentOnSurface,
+                  fontFamily: grid.AppFont.sans,
+                  fontSize: 12.5,
+                  fontWeight: grid.AppFont.semibold,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
