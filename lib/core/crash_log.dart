@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../logging/app_log.dart';
 import 'harness_file_store.dart';
 
 /// Where a released build writes the errors nobody would otherwise see.
@@ -21,6 +22,20 @@ class CrashLog {
       File('${HarnessFileStore.defaultDirectoryPath()}/errors.log');
 
   static void record(Object error, StackTrace? stackTrace, {String? context}) {
+    // Mirrored into the day's app log as well, and the two are not redundant:
+    // errors.log answers "what threw" for all time, while the daily log puts the
+    // same failure back among the lines that led to it. A crash whose stack
+    // names a line still needs its ten preceding lines to be explicable.
+    // FileAppLog's burst filter is what keeps a per-frame exception from
+    // fsyncing the UI isolate to a halt; this file's own truncation is not
+    // enough for that, which is why the mirror goes through appLog rather than
+    // the other way round.
+    appLog.failure(
+      context ?? 'crash',
+      'uncaught',
+      error: error,
+      stackTrace: stackTrace,
+    );
     try {
       final file = _file;
       // The directory may not exist yet, and the first run is exactly when this

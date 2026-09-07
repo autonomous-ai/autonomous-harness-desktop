@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../logging/app_log.dart';
+import '../logging/redact.dart';
 import '../core/models.dart';
 
 typedef AccessTokenProvider = Future<String> Function(
@@ -257,6 +259,10 @@ class WsConn {
       }
       return;
     }
+    final eventType = message['type'];
+    if (eventType is String && _worthLogging(eventType)) {
+      appLog.debug('ws', '↓ $eventType ${summariseForLog(payload)}');
+    }
     await onEvent({...message, 'payload': payload});
   }
 
@@ -264,6 +270,26 @@ class WsConn {
     final decrypted = await onE2eeFrame!(frame);
     if (decrypted != null) await _dispatch(decrypted);
   }
+
+  /// Frame types deliberately kept OUT of the log.
+  ///
+  /// Terminal traffic is the overwhelming majority of what crosses this socket
+  /// and none of it is diagnostic — it is somebody's screen. Logging it would
+  /// bury every frame that matters, cost an fsync per keystroke, and write the
+  /// contents of their editor to disk. The hardware dial's events are dropped
+  /// for the volume alone.
+  static const _unlogged = {
+    'terminal_output',
+    'terminal_input',
+    'terminal_resize',
+    'terminal_sync',
+    'dial_scroll',
+    'dial_focus',
+    'ping',
+    'pong',
+  };
+
+  static bool _worthLogging(String type) => !_unlogged.contains(type);
 
   Future<Map<String, dynamic>> request(
     String type, {
@@ -283,6 +309,16 @@ class WsConn {
       }
     });
     _pending[requestId] = _PendingRpc(completer, timer);
+    if (_worthLogging(type)) {
+      appLog.debug('ws', '→ $type ${summariseForLog(payload)}');
+      // A second listener on the same future purely to record how it ended. It
+      // handles its own error, so the caller's handling is unchanged and nothing
+      // becomes an unhandled rejection.
+      completer.future.then(
+        (value) => appLog.debug('ws', '← $type ${summariseForLog(value)}'),
+        onError: (Object error) => appLog.warn('ws', '← $type failed', error: error),
+      );
+    }
     final frame = {
       'type': type,
       'payload': {...payload, 'requestId': requestId},
