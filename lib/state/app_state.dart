@@ -674,8 +674,9 @@ class AppNotifier extends ChangeNotifier {
   /// still has its own button, and says why when it cannot.
   Future<void> _ensureGridSession() async {
     try {
-      await gridSessionStore.load();
-      if (gridSessionStore.signedIn) return;
+      // `signIn` is "make sure there is one" — it re-reads and returns early on
+      // a machine that already has a session, so the guard lives in one place
+      // rather than once here and once in the pane's button.
       final failure = await gridSessionStore.signIn();
       if (failure != null) debugPrint('grid sign-in skipped: $failure');
     } catch (error) {

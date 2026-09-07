@@ -205,24 +205,42 @@ name = "A Grid"
 
   // --- signing in exactly once ---------------------------------------------
 
-  test(
-    'a session that already exists is left alone, whoever it belongs to',
-    () async {
-      final file = File('${scratch.path}/credentials.toml')
-        ..writeAsStringSync(_realShape);
-      final runner = FakeCliRunner(exited(0));
-      final store = GridSessionStore(file: file, runner: runner);
-      await store.load();
+  test('signIn over a live session runs no CLI at all', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final runner = FakeCliRunner(exited(0));
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
 
-      // What `AppNotifier._ensureGridSession` does, and the guard that is the
-      // whole design: every run mints a fresh 365-day session and revokes
-      // nothing, so signing in over a live one piles sessions onto the account.
-      if (!store.signedIn) await store.signIn();
+    // The guard that is the whole design, and it lives in the STORE rather than
+    // at each caller: every run mints a fresh 365-day session and revokes
+    // nothing.
+    final failure = await store.signIn();
 
-      expect(runner.calls, isEmpty);
-      expect(store.value?.token, 'session-abc');
-    },
-  );
+    expect(failure, isNull);
+    expect(runner.calls, isEmpty);
+    expect(store.value?.token, 'session-abc');
+  });
+
+  test('signIn re-reads before deciding, so two callers cannot race', () async {
+    final file = File('${scratch.path}/credentials.toml');
+    final runner = FakeCliRunner(exited(0));
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
+    expect(store.signedIn, isFalse, reason: 'it saw an empty machine');
+
+    // Somebody signed in between that read and this call — the bootstrap
+    // winning its race with the pane's button, or a terminal.
+    file.writeAsStringSync(_realShape);
+    final failure = await store.signIn();
+
+    expect(failure, isNull);
+    expect(
+      runner.calls,
+      isEmpty,
+      reason: 'a stale "signed out" must not mint a second session',
+    );
+  });
 
   // --- what the client does with it ---------------------------------------
 
@@ -236,6 +254,35 @@ name = "A Grid"
 
     await expectLater(client.me(), throwsA(isA<GridSignedOutException>()));
   });
+
+  test(
+    'a late session un-sticks a pane that already said signed out',
+    () async {
+      final file = File('${scratch.path}/credentials.toml');
+      final store = GridSessionStore(
+        file: file,
+        runner: FakeCliRunner(exited(0)),
+      );
+      await store.load();
+      final controller = GridNetworksController(
+        client: GridApiClient(session: store),
+        session: store,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.refresh();
+      expect(controller.state, isA<GridNetworksSignedOut>());
+
+      // The bootstrap sign-in lands a moment later. `ensureLoaded` only fetches
+      // from Idle, so without the store being watched the pane would sit on its
+      // sign-in card for the life of the screen.
+      file.writeAsStringSync(_realShape);
+      await store.load();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state, isNot(isA<GridNetworksSignedOut>()));
+    },
+  );
 
   test('a signed-out client is a state the pane can offer a fix for', () async {
     final store = GridSessionStore(

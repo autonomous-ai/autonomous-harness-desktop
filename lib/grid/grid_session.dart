@@ -90,7 +90,16 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// `grid login` in a terminal, a `grid logout`, or our own [signIn].
   Future<void> refresh() => load();
 
-  /// Signs in through `harness grid login --json`.
+  /// Makes sure this computer has a Grid session, signing in through
+  /// `harness grid login --json` when it has none.
+  ///
+  /// "Make sure", not "run the login": the check is HERE rather than at each
+  /// caller because every run mints a fresh 365-day session and revokes
+  /// nothing, and there are two callers — the bootstrap and the pane's button —
+  /// that can race each other on a fresh machine. A button pressed a moment
+  /// after the bootstrap won its race would otherwise mint a second session for
+  /// a machine that already had one, which is the pile-up this whole design
+  /// exists to avoid.
   ///
   /// Returns null on success and a sentence to show otherwise. Nothing throws:
   /// every caller is a button, and none of them has anywhere to put an
@@ -101,6 +110,10 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// rather than re-worded here — this app is not the second place that has an
   /// opinion about why a sign-in did not happen.
   Future<String?> signIn() async {
+    // Re-read first: something may have signed in since we last looked — the
+    // bootstrap, a `grid login` in a terminal, or the other caller.
+    await load();
+    if (signedIn) return null;
     final ProcessResult result;
     try {
       result = await _runner.run(['grid', 'login', '--json']);

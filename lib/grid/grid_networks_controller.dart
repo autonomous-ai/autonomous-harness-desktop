@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../analytics/analytics.dart';
+import 'grid_session.dart';
 import 'grid_api_client.dart';
 import 'grid_network.dart';
 
@@ -51,10 +52,17 @@ class GridNetworksFailed extends GridNetworksState {
 /// mounts and unmounts panes as you move between them, so a controller living
 /// in the pane would refetch every time the user came back to it.
 class GridNetworksController extends ChangeNotifier {
-  GridNetworksController({GridApiClient? client})
-    : _client = client ?? GridApiClient();
+  GridNetworksController({GridApiClient? client, GridSessionStore? session})
+    : _client = client ?? GridApiClient(),
+      _session = session ?? gridSessionStore {
+    _session.addListener(_onSession);
+  }
 
   final GridApiClient _client;
+
+  /// Watched, not merely read: this controller's answer DEPENDS on the session,
+  /// and it is the only thing holding a stale one when a sign-in lands late.
+  final GridSessionStore _session;
 
   GridNetworksState _state = const GridNetworksIdle();
   GridNetworksState get state => _state;
@@ -65,6 +73,16 @@ class GridNetworksController extends ChangeNotifier {
   /// on every rebuild and only the first one does anything.
   void ensureLoaded() {
     if (_state is GridNetworksIdle) refresh();
+  }
+
+  /// A session arrived after this answered "signed out".
+  ///
+  /// That answer is now stale and nothing else will ask again: [ensureLoaded]
+  /// only fetches from Idle, so the pane would sit on its sign-in card for the
+  /// life of the screen. It is a real race on a fresh machine — the bootstrap
+  /// sign-in takes a moment, and Settings can be open before it lands.
+  void _onSession() {
+    if (_state is GridNetworksSignedOut && _session.signedIn) refresh();
   }
 
   /// Loads again, whatever the current state — the refresh button.
@@ -100,6 +118,9 @@ class GridNetworksController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    // The store outlives every controller — it is a singleton — so a listener
+    // left on it is a leak that also revives a disposed notifier.
+    _session.removeListener(_onSession);
     super.dispose();
   }
 }
