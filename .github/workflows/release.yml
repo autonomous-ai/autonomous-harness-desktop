@@ -1,0 +1,242 @@
+name: Release
+
+# Cut a release by pushing a tag:  git tag v1.3.0 && git push origin v1.3.0
+#
+# The tag IS the version — CI never auto-bumps. scripts/upload-desktop*.sh bump by reading the
+# current version out of the remote metadata.json, so three jobs left to bump on their own would
+# read the same number and publish three different versions under one tag. Here it is resolved
+# once and passed to every script explicitly.
+#
+# Publishes to the public GCS bucket running apps poll (lib/update/desktop_updater.dart):
+# desktop-macos + desktop-macos-dmg, desktop-linux-x64, desktop-linux-arm64. A MINOR bump
+# (1.2.x -> 1.3.1) is a forced update — running apps block until it is installed. See RELEASE.md.
+#
+# Dry run first: Actions -> Release -> Run workflow, with metadata_path = harness/desktop/
+# metadata-test.json. Nothing a real app polls is touched, and there is no undo on the real
+# manifest — the updater refuses to move backwards, so a bad release can only be rolled back by
+# publishing a HIGHER version containing the older code.
+#
+# metadata_path moves the MANIFEST only. The scripts' GCS_PATH still defaults to
+# harness/desktop/<version>/, so a dry run uploads real artifacts there — harmless, since no
+# live manifest references them, but delete gs://<bucket>/harness/desktop/<dry-run-version>/
+# afterwards. Do NOT try to redirect them by exporting GCS_PATH: it is a single object path, so
+# the two architectures of the `linux` matrix would overwrite each other.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (X.Y.Z)'
+        required: true
+      metadata_path:
+        description: 'Manifest to write. Leave as-is for a real release; metadata-test.json for a dry run.'
+        required: false
+        default: harness/desktop/metadata.json
+
+permissions:
+  contents: read
+  id-token: write   # only used by the Workload Identity Federation variant of the auth step below
+
+concurrency:
+  # Two releases overlapping would interleave their read-modify-write of metadata.json.
+  # Never cancelled in progress: a half-published release leaves the manifest describing one
+  # platform's new build and another's old one.
+  group: desktop-release
+  cancel-in-progress: false
+
+env:
+  GCS_BUCKET: s3-autonomous-upgrade-3   # the release scripts read this too — one place, not four
+
+jobs:
+  # Resolve and validate BEFORE spending macOS runner minutes (billed at 10x Linux). A malformed
+  # tag fails here in seconds instead of 25 minutes into a notarized build.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      metadata_path: ${{ steps.resolve.outputs.metadata_path }}
+    steps:
+      - id: resolve
+        # Through env, never `${{ }}` inline in run:. Git permits quotes, backticks and $() in a
+        # ref name, so interpolating one into the shell would let a tag name execute as code.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_METADATA_PATH: ${{ inputs.metadata_path }}
+        run: |
+          ver="${INPUT_VERSION:-${REF_NAME#v}}"
+          if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version '$ver' must look like X.Y.Z — tag as vX.Y.Z"
+            exit 1
+          fi
+          meta="${INPUT_METADATA_PATH:-harness/desktop/metadata.json}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "metadata_path=$meta" >> "$GITHUB_OUTPUT"
+          echo "Publishing **$ver** to \`$meta\`" >> "$GITHUB_STEP_SUMMARY"
+
+  tests:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  macos:
+    needs: [version, tests]
+    runs-on: macos-15
+    timeout-minutes: 60   # two notarization submissions per release (zip, then dmg) — see RELEASE.md
+    env:
+      METADATA_PATH: ${{ needs.version.outputs.metadata_path }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Through $GITHUB_ENV, not a job-level `env:`: the `runner` context does not exist at job
+      # level and $RUNNER_TEMP is not expanded there, so either spelling would silently yield
+      # "/harness-signing.keychain-db" and fail on permissions.
+      - name: Pin the signing keychain path
+        run: echo "KEYCHAIN_PATH=$RUNNER_TEMP/harness-signing.keychain-db" >> "$GITHUB_ENV"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.tests.outputs.flutter-version }}
+          channel: stable
+          cache: true
+
+      # SPM must be on BEFORE pub get: the generated FlutterGeneratedPluginSwiftPackage only lists
+      # the plugin dependencies when it is enabled at `pub get` time, and with it off the build
+      # falls back to CocoaPods and rewrites tracked files under macos/. See CLAUDE.md.
+      - name: Enable Swift Package Manager
+        run: flutter config --enable-swift-package-manager
+
+      - run: flutter pub get
+
+      - name: Import the Developer ID certificate into a throwaway keychain
+        env:
+          CERT_B64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$CERT_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # The default is a 5-minute idle lock, which expires mid-notarization and turns the next
+          # codesign into a password prompt no runner can answer.
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$CERT_PW" \
+            -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/xcrun
+          # Without this the first codesign raises a GUI "allow access" dialog and the job hangs
+          # until its timeout — the classic silent CI signing failure.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          # Prepend rather than replace: dropping the login keychain off the search list breaks
+          # other tooling on the runner.
+          security list-keychains -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      # scripts/upload-desktop.sh calls `notarytool submit --keychain-profile harness-notarize`,
+      # so that profile has to exist. It goes in the throwaway keychain the step above put on the
+      # search list, so the app-specific password never touches the default keychain, and never an
+      # argv that outlives the job.
+      - name: Store the notarytool profile
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          xcrun notarytool store-credentials harness-notarize \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH"
+
+      # Swap these two inputs for the keyless variant once a Workload Identity pool exists:
+      #   workload_identity_provider: projects/<n>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+      #   service_account: harness-desktop-ci@<project>.iam.gserviceaccount.com
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # The upload is the LAST thing the script does, after ~25 minutes of building and notarizing.
+      # Proving write access now means a credential problem costs seconds, not a whole run.
+      - name: Verify GCS write access
+        run: |
+          set -euo pipefail
+          probe="gs://${GCS_BUCKET}/harness/desktop/.ci-preflight/${GITHUB_RUN_ID}-macos"
+          echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
+          gsutil rm "$probe"
+
+      - name: Build, sign, notarize and publish macOS
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          bash scripts/upload-desktop.sh "$VERSION"
+
+      # Free on an ephemeral runner; the whole point the day this moves to a self-hosted Mac.
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_PATH" || true
+
+  # Both architectures in one job, run ONE AT A TIME. The scripts download-merge-reupload
+  # metadata.json, so two writers racing means whichever lands last drops the other's key — which
+  # is also why this waits on `macos` instead of running beside it.
+  linux:
+    needs: [version, tests, macos]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          # flutter build linux cannot cross-compile — each architecture needs its own host.
+          # The arm64 runner image is the one leg never exercised here yet: check the SDK setup
+          # step's log on the first dry run before trusting a real tag to it.
+          - { runner: ubuntu-24.04, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    env:
+      METADATA_PATH: ${{ needs.version.outputs.metadata_path }}
+      TARGET_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Linux desktop toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ needs.tests.outputs.flutter-version }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify GCS write access
+        run: |
+          set -euo pipefail
+          probe="gs://${GCS_BUCKET}/harness/desktop/.ci-preflight/${GITHUB_RUN_ID}-${TARGET_ARCH}"
+          echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
+          gsutil rm "$probe"
+
+      - name: Build and publish linux-${{ matrix.arch }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash scripts/upload-desktop-linux.sh "$VERSION"
