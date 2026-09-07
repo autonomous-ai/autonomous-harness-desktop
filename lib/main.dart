@@ -15,7 +15,6 @@ import 'shared/theme/appearance_prefs_store.dart';
 import 'shared/theme/theme_mode_store.dart';
 import 'terminal/terminal_font_store.dart';
 import 'widgets/layout_palette.dart';
-import 'widgets/awaiting_browser_login_screen.dart';
 import 'widgets/environment_setup_screen.dart';
 import 'widgets/flash_firmware_dialog.dart';
 import 'core/startup.dart';
@@ -203,8 +202,21 @@ class _RootShellState extends ConsumerState<RootShell> {
         } else {
           switch (app.status) {
             case AppStatus.bootstrapping:
-              screen = app.pendingAuthorizeUrl != null
-                  ? AwaitingBrowserLoginScreen(onCancel: app.cancelLogin)
+              // `bootstrapping` covers two unrelated moments: the app starting
+              // cold, and a sign-in the user just began. The second keeps
+              // LoginScreen, which carries the wait as a state of its own
+              // button; swapping the window for a separate screen there was a
+              // hard cut in the middle of a flow, and it is why that button's
+              // spinner was almost never seen.
+              //
+              // ⚠️ Keyed on `signingIn`, NOT on `pendingAuthorizeUrl`. The URL
+              // only exists for the middle stretch of the flow — the CLI has to
+              // start before it can print one, and it is cleared again while
+              // the post-login restore is still running — so keying on it blew
+              // the user's own screen away twice per sign-in: once on the click
+              // and again on success.
+              screen = app.signingIn
+                  ? LoginScreen(notifier: app)
                   : const Scaffold(
                       body: Center(child: CircularProgressIndicator()),
                     );

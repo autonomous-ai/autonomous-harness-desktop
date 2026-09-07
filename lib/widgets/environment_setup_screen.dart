@@ -111,7 +111,7 @@ class _StepRow extends StatelessWidget {
       ),
     };
     final label = switch (step) {
-      EnvironmentStep.node => 'Node.js runtime',
+      EnvironmentStep.node => 'Managed Node runtime',
       EnvironmentStep.harness => 'Harness CLI',
       EnvironmentStep.tmux => 'tmux terminal support',
       EnvironmentStep.grid => 'Grid CLI for Share Intelligence',
