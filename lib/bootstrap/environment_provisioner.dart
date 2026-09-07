@@ -381,19 +381,35 @@ echo 'tmux is ready. Return to Harness.'
       return script;
     }
     final script = File('${directory.path}/install-tmux.sh');
-    await script.writeAsString('''#!/bin/bash
-set -e
+    await script.writeAsString(r'''#!/bin/bash
+set -eu
+
+finish() {
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    echo 'tmux is ready. Return to Harness and click Retry.'
+  else
+    echo
+    echo 'tmux installation failed. Review the error above, then try again.'
+    read -r -p 'Press Enter to close this window…' || true
+  fi
+  return "$status"
+}
+trap finish EXIT
+
 if command -v apt-get >/dev/null 2>&1; then
   echo 'Installing tmux (you may be asked for your password)…'
-  sudo apt-get update
+  # Installing one package does not require refreshing every configured apt
+  # source first. An error in any source would otherwise abort this repair
+  # before apt ever reached the tmux install.
   sudo apt-get install -y tmux
+  command -v tmux >/dev/null 2>&1
+  tmux -V
 else
   echo 'Automatic tmux install only supports apt-based distributions (Ubuntu/Debian).'
   echo "Install tmux with your distribution's package manager, then return to Harness and click Retry."
-  read -r -p 'Press Enter to close this window…'
-  exit 0
+  exit 1
 fi
-echo 'tmux is ready. Return to Harness.'
 ''', flush: true);
     await _run('/bin/chmod', ['700', script.path]);
     return script;

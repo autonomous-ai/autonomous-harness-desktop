@@ -120,10 +120,29 @@ void main() {
     expect(terminalScript, isNotNull);
     // Linux never shells out to Homebrew.
     expect(shellCommands.any((c) => c.contains('brew')), isFalse);
-    expect(
-      await File(terminalScript!).readAsString(),
-      contains('apt-get install -y tmux'),
+    final script = await File(terminalScript!).readAsString();
+    expect(script, contains('apt-get install -y tmux'));
+    expect(script, isNot(contains('sudo apt-get update')));
+    expect(script, contains('tmux -V'));
+    expect(script, contains('tmux installation failed'));
+    expect(script, contains('Press Enter to close this window'));
+
+    // Execute the generated script with a failing fake sudo. The old `set -e`
+    // script disappeared as soon as apt failed, hiding the reason from the
+    // person repairing the app.
+    final fakeBin = Directory('${scratch.path}/bin')..createSync();
+    final fakeApt = File('${fakeBin.path}/apt-get')
+      ..writeAsStringSync('#!/bin/sh\nexit 0\n');
+    final fakeSudo = File('${fakeBin.path}/sudo')
+      ..writeAsStringSync('#!/bin/sh\nexit 42\n');
+    await Process.run('/bin/chmod', ['700', fakeApt.path, fakeSudo.path]);
+    final attempted = await Process.run(
+      '/bin/bash',
+      [terminalScript!],
+      environment: {'PATH': '${fakeBin.path}:/usr/bin:/bin'},
     );
+    expect(attempted.exitCode, 42);
+    expect(attempted.stdout, contains('tmux installation failed'));
   });
 
   test('opens Terminal when tmux and Homebrew are unavailable', () async {
