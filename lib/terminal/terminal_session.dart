@@ -67,6 +67,11 @@ class TerminalSession extends ChangeNotifier {
   late Terminal terminal;
   TerminalSessionStatus status = TerminalSessionStatus.closed;
   String? streamId;
+  /// 'p2p' or 'relay' — how this pane's terminal bytes are currently reaching it. Only ever set for a
+  /// `harness link connect`-linked remote machine (the CLI never sends this frame for a local machine's
+  /// own terminal, which has no such distinction), and reset alongside [streamId] so a stale mode can
+  /// never survive into the next stream.
+  String? linkMode;
   String? errorCode;
   String? errorMessage;
   int cols = 80;
@@ -142,6 +147,7 @@ class TerminalSession extends ChangeNotifier {
   }) async {
     _cancelTimers();
     streamId = null;
+    linkMode = null;
     errorCode = null;
     errorMessage = null;
     _expectedSeq = null;
@@ -285,6 +291,14 @@ class TerminalSession extends ChangeNotifier {
           'Harness sent terminal bulk data as JSON',
         );
         return true;
+      case 'terminal_link_mode':
+        if (!_matchesStream(payload)) return true;
+        final mode = payload['mode']?.toString();
+        if (mode == 'p2p' || mode == 'relay') {
+          linkMode = mode;
+          notifyListeners();
+        }
+        return true;
       case 'terminal_closed':
         if (!_matchesStream(payload)) return true;
         _cancelTimers();
@@ -298,6 +312,7 @@ class TerminalSession extends ChangeNotifier {
             ? 'Another client connected to this terminal.'
             : payload['reason']?.toString();
         streamId = null;
+        linkMode = null;
         notifyListeners();
         return true;
       case 'terminal_error':
@@ -850,6 +865,7 @@ class TerminalSession extends ChangeNotifier {
     _cancelTimers();
     _inputBytes.clear();
     streamId = null;
+    linkMode = null;
     status = TerminalSessionStatus.closed;
     notifyListeners();
     if (closingStream != null) {
@@ -864,6 +880,7 @@ class TerminalSession extends ChangeNotifier {
     _cancelTimers();
     _inputBytes.clear();
     streamId = null;
+    linkMode = null;
     status = TerminalSessionStatus.error;
     errorCode = 'TERMINAL_DISCONNECTED';
     errorMessage = message;
@@ -874,6 +891,7 @@ class TerminalSession extends ChangeNotifier {
     _cancelTimers();
     _inputBytes.clear();
     streamId = null;
+    linkMode = null;
     status = TerminalSessionStatus.error;
     errorCode = code;
     errorMessage = message;
