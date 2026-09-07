@@ -55,6 +55,8 @@ enum ShortcutAction {
   closePane,
   newAgent,
   reload,
+  showLayout,
+  pinPane,
   showShortcuts,
 }
 
@@ -211,6 +213,19 @@ const List<AppShortcut> kAppShortcuts = [
     activator: SingleActivator(LogicalKeyboardKey.keyR, meta: true),
     label: 'Reload machines and agents',
     group: ShortcutGroup.actions,
+  ),
+  AppShortcut(
+    action: ShortcutAction.pinPane,
+    activator: SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+    label: 'Hold this pane in its slot',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.showLayout,
+    // "Layout". Free on this OS and on this list.
+    activator: SingleActivator(LogicalKeyboardKey.keyL, meta: true),
+    label: 'Choose the grid layout',
+    group: ShortcutGroup.panes,
   ),
   AppShortcut(
     action: ShortcutAction.showShortcuts,

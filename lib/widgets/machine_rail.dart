@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'window_chrome.dart';
@@ -828,7 +829,23 @@ class _AgentRowState extends State<_AgentRow> {
           selected: selected,
           enabled: enabled,
           dimmed: !visuallyEnabled,
-          onTap: () => notifier.selectAgent(state.machine.machineId, agent.id),
+          // ⌘-click opens a NEW tile, the same meaning it has on a link in
+          // every browser. A plain click stays navigation — it replaces the
+          // focused tile — because that rule is what keeps four glances at the
+          // rail from becoming four terminals. But until this existed, ADDING a
+          // tile was only possible by dragging a row onto the grid, so the
+          // ceiling of nine was unreachable for anyone who did not know the
+          // drag: a cap nobody can climb to is the same as no cap being raised.
+          onTap: () {
+            final machineId = state.machine.machineId;
+            if (HardwareKeyboard.instance.isMetaPressed &&
+                notifier.canAddPane &&
+                notifier.paneOfAgent(machineId, agent.id) == null) {
+              unawaited(notifier.assignAgentToPane(null, machineId, agent.id));
+              return;
+            }
+            unawaited(notifier.selectAgent(machineId, agent.id));
+          },
           // The same "Edit name" the row's own menu opens — a double click is
           // just the shorter way to it, and the place a hand reaches first.
           onDoubleTap: _showRenameDialog,

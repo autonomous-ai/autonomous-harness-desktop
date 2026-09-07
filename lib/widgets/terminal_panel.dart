@@ -28,6 +28,11 @@ class TerminalPanel extends StatefulWidget {
   /// where there is nothing to close it back to.
   final VoidCallback? onClose;
 
+  /// Whether this tile keeps its slot when the grid moves under it, and the
+  /// control that changes that. Null where there is no grid to hold a slot in.
+  final bool pinned;
+  final VoidCallback? onTogglePin;
+
   /// This native terminal took the keyboard, so its grid tile becomes focused.
   final VoidCallback? onRendererFocus;
 
@@ -52,6 +57,8 @@ class TerminalPanel extends StatefulWidget {
     this.composerVisible = true,
     this.onToggleComposer,
     this.onClose,
+    this.pinned = false,
+    this.onTogglePin,
     this.onRendererFocus,
     this.paneDrag,
   });
@@ -454,6 +461,8 @@ class _TerminalPanelState extends State<TerminalPanel>
             notifier: widget.notifier,
             session: session,
             onClose: widget.onClose,
+            pinned: widget.pinned,
+            onTogglePin: widget.onTogglePin,
             paneDrag: widget.paneDrag,
           ),
 
@@ -525,6 +534,8 @@ class _TerminalHeader extends StatelessWidget {
   final AppNotifier notifier;
   final TerminalSession session;
   final VoidCallback? onClose;
+  final bool pinned;
+  final VoidCallback? onTogglePin;
 
   /// This strip's drag gesture, or null when there is nothing to drag.
   ///
@@ -540,6 +551,8 @@ class _TerminalHeader extends StatelessWidget {
     required this.notifier,
     required this.session,
     this.onClose,
+    this.pinned = false,
+    this.onTogglePin,
     this.paneDrag,
   });
 
@@ -648,6 +661,11 @@ class _TerminalHeader extends StatelessWidget {
                   ),
                 ),
               ),
+            // Before the close button: pinning is the rarer act, and a control
+            // that appears to the LEFT of the one people aim for by muscle
+            // memory cannot shift it under their pointer.
+            if (onTogglePin case final toggle?)
+              PanePinButton(pinned: pinned, onPressed: toggle),
             if (onClose != null) PaneCloseButton(onPressed: onClose!),
           ],
         ),

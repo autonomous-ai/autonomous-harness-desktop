@@ -150,7 +150,7 @@ class MainFlutterWindow: NSWindow {
   /// never fire once this exists, so there is exactly one implementation, not two.
   private func installViewMenuItems() {
     guard let viewMenu = NSApp.mainMenu?.item(withTitle: "View")?.submenu else { return }
-    guard viewMenu.indexOfItem(withTag: resetFontMenuItemTag) == -1 else { return }
+    guard viewMenu.indexOfItem(withTag: layoutMenuItemTag) == -1 else { return }
 
     // Terminal.app's own View menu keeps its font-size trio well above Enter Full Screen, in its
     // own bracketed section. The nib's "Enter Full Screen" must stay LAST — appending after it
@@ -173,6 +173,26 @@ class MainFlutterWindow: NSWindow {
     }
     var at = fullScreenIndex ?? viewMenu.numberOfItems
 
+    // The grid's shape, and the only way to it with a mouse. It was reachable
+    // by ⌘L alone at first, which is the same mistake the shortcut sheet's own
+    // comment describes above: a command nobody can see is a command nobody
+    // uses — and worse here, the native terminal holds the keyboard, so the
+    // Dart-side binding does not even fire while a pane has focus. As a native
+    // key equivalent it is handled by the responder chain first, so it works
+    // wherever the focus happens to be.
+    viewMenu.insertItem(
+      menuItem(
+        title: "Layout…",
+        action: #selector(showLayout(_:)),
+        symbol: "square.grid.2x2",
+        tag: layoutMenuItemTag,
+        keyEquivalent: "l"
+      ),
+      at: at
+    )
+    at += 1
+    viewMenu.insertItem(NSMenuItem.separator(), at: at)
+    at += 1
     viewMenu.insertItem(
       menuItem(
         title: "Default Font Size",
@@ -254,6 +274,7 @@ class MainFlutterWindow: NSWindow {
   private var resetFontMenuItemTag: Int { 7304 }
   private var biggerFontMenuItemTag: Int { 7305 }
   private var smallerFontMenuItemTag: Int { 7306 }
+  private var layoutMenuItemTag: Int { 7307 }
 
   @objc private func checkForUpdates(_ sender: Any?) {
     menuChannel?.invokeMethod("checkForUpdates", arguments: nil)
@@ -261,6 +282,10 @@ class MainFlutterWindow: NSWindow {
 
   @objc private func flashFirmware(_ sender: Any?) {
     menuChannel?.invokeMethod("flashFirmware", arguments: nil)
+  }
+
+  @objc private func showLayout(_ sender: Any?) {
+    menuChannel?.invokeMethod("showLayout", arguments: nil)
   }
 
   @objc private func showShortcuts(_ sender: Any?) {

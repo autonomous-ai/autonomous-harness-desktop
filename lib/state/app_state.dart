@@ -22,6 +22,7 @@ import '../update/manual_update_check.dart';
 import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
+import 'pane_preset.dart';
 import 'pane_splits.dart';
 import 'pending_question.dart';
 
@@ -113,6 +114,7 @@ class MachineState {
   // opening a terminal stream against an unavailable node.
   String? pendingOfflineAgentId;
   final Set<String> processingAgentIds = {};
+
   /// Agents on this machine that have stopped to ask something, by agentId.
   /// At most one per agent: a pane shows one dialog at a time, and the daemon
   /// re-announces the same open question rather than queueing a second.
@@ -211,6 +213,30 @@ class AppNotifier extends ChangeNotifier {
 
   PaneSplits splitsFor(int paneCount) =>
       paneSplits[paneCount] ?? const PaneSplits();
+
+  /// The chosen shape for a grid of this size, or the shipped one.
+  final Map<int, PanePreset> panePresets = {};
+
+  PanePreset? presetFor(int paneCount) =>
+      panePresets[paneCount] ?? PanePreset.defaultFor(paneCount);
+
+  /// Choose a shape. Keyed by tile COUNT, like the dividers: three tiles and
+  /// four tiles are different shapes and one choice cannot speak for both.
+  void setPreset(int paneCount, PanePreset preset) {
+    if (!PanePreset.forCount(paneCount).contains(preset)) return;
+    if (presetFor(paneCount) == preset) return;
+    panePresets[paneCount] = preset;
+    // The dividers described the OLD shape's boundaries. Keeping them would
+    // move a line the user never touched — the same reason a count change
+    // drops them.
+    paneSplits.remove(paneCount);
+    notifyListeners();
+    final store = _paneLayout;
+    if (store != null) {
+      unawaited(store.saveSplits(paneSplits));
+      unawaited(store.savePresets(panePresets));
+    }
+  }
 
   /// Move one divider and remember it.
   ///
@@ -1849,16 +1875,18 @@ class AppNotifier extends ChangeNotifier {
   /// confirmed, so this upserts from the reply directly — idempotent on `agent.id`, same as
   /// [createAgent], and safe even if the CLI's own `agent_synced` push for the restart arrives
   /// separately (fire-and-forget on the CLI side, unordered relative to this reply).
-  Future<RestartAgentResult> restartAgent(String machineId, String agentId) async {
+  Future<RestartAgentResult> restartAgent(
+    String machineId,
+    String agentId,
+  ) async {
     final machine = machineStates[machineId];
     if (machine == null) {
       return const RestartAgentResult(error: 'Machine not found');
     }
     Map<String, dynamic> result;
     try {
-      result = await _conn(
-        machineId,
-      ).request('agent_restart', payload: {'agentId': agentId});
+      result = await _conn(machineId)
+          .request('agent_restart', payload: {'agentId': agentId});
     } catch (error) {
       return RestartAgentResult(error: 'Restart failed: $error');
     }
@@ -2208,6 +2236,12 @@ class AppNotifier extends ChangeNotifier {
     final moved = panes[from];
     panes[from] = panes[to];
     panes[to] = moved;
+    // The pin follows the hand. A pinned tile dragged elsewhere is someone
+    // saying "here now", and a pinned tile displaced by another drag was still
+    // put there deliberately — bouncing either back would make the drag look
+    // broken while the state was in fact correct.
+    if (panes[to].isPinned) panes[to].pinnedSlot = to;
+    if (panes[from].isPinned) panes[from].pinnedSlot = from;
     _persistLayout();
     notifyListeners();
   }
@@ -2226,10 +2260,49 @@ class AppNotifier extends ChangeNotifier {
     reorderPane(id, panes[to].id);
   }
 
+  /// Pin this tile to the slot it is in, or let it go.
+  ///
+  /// Pinning records the CURRENT slot rather than asking for one: the tile the
+  /// user is looking at is the answer they mean, and a dialog asking "which
+  /// number?" would be arithmetic about a thing they can already see.
+  void togglePinPane(int paneId) {
+    final index = panes.indexWhere((pane) => pane.id == paneId);
+    if (index == -1) return;
+    final pane = panes[index];
+    pane.pinnedSlot = pane.isPinned ? null : index;
+    _persistLayout();
+    notifyListeners();
+  }
+
+  /// Put pinned tiles back in their slots after the list moved under them.
+  ///
+  /// Lifted rather than swapped: after a close everyone has slid up one, and
+  /// lifting the pinned tile back into its slot leaves that slide intact for
+  /// every other tile. A swap would instead fling whichever tile inherited the
+  /// slot to the far end of the grid — one close, two tiles moved, and only one
+  /// of them explicable.
+  ///
+  /// A pin past the end of a shrunken grid is HELD, not dropped: the tiles that
+  /// closed can come back, and forgetting the pin the moment the grid got small
+  /// would quietly undo a choice the user never revisited.
+  void _settlePins() {
+    final pinned = panes.where((pane) => pane.isPinned).toList()
+      ..sort((a, b) => a.pinnedSlot!.compareTo(b.pinnedSlot!));
+    for (final pane in pinned) {
+      final want = pane.pinnedSlot!;
+      if (want >= panes.length) continue;
+      final at = panes.indexOf(pane);
+      if (at == want) continue;
+      panes.removeAt(at);
+      panes.insert(want, pane);
+    }
+  }
+
   Future<void> closePane(int paneId, {bool persist = true}) async {
     final index = panes.indexWhere((pane) => pane.id == paneId);
     if (index == -1) return;
     final pane = panes.removeAt(index);
+    _settlePins();
     await _detachSession(pane, sendClose: true);
     if (focusedPaneId == paneId) {
       focusedPaneId = panes.isEmpty
@@ -2269,6 +2342,7 @@ class AppNotifier extends ChangeNotifier {
               machineId: pane.machineId,
               agentId: agentId,
               composerVisible: pane.composerVisible,
+              pinnedSlot: pane.pinnedSlot,
             ),
       ]),
     );
@@ -2288,10 +2362,11 @@ class AppNotifier extends ChangeNotifier {
     // grid this run has not restored any agents into, so a window that opens
     // empty and is then filled by hand still comes up the shape it was left.
     paneSplits.addAll(await store.loadSplits());
+    panePresets.addAll(await store.loadPresets());
     if (panes.isNotEmpty) return;
     final entries = await store.load();
     if (entries.isEmpty) {
-      if (paneSplits.isNotEmpty) notifyListeners();
+      if (paneSplits.isNotEmpty || panePresets.isNotEmpty) notifyListeners();
       return;
     }
     for (final entry in entries) {
@@ -2300,9 +2375,15 @@ class AppNotifier extends ChangeNotifier {
           id: _nextPaneId++,
           machineId: entry.machineId,
           agentId: entry.agentId,
-        )..composerVisible = entry.composerVisible,
+        )
+          ..composerVisible = entry.composerVisible
+          ..pinnedSlot = entry.pinnedSlot,
       );
     }
+    // The saved order already puts everything where it was left, so this is
+    // only a repair: a layout whose file was hand-edited, or trimmed by the
+    // pane ceiling on the way in, can arrive with a pinned tile off its slot.
+    _settlePins();
     focusedPaneId = panes.first.id;
     // A restored grid IS the choice of what to open, so the first-run
     // convenience must not also fire and add a fifth agent nobody asked for.
@@ -2524,7 +2605,8 @@ class AppNotifier extends ChangeNotifier {
             // original clock in that case: this is the same wait continuing,
             // and restarting it would make a long block look new.
             final known = machine.blockedAgents[agentId];
-            machine.blockedAgents[agentId] = known != null && known.sameAs(asked)
+            machine.blockedAgents[agentId] =
+                known != null && known.sameAs(asked)
                 ? asked.withSince(known.since)
                 : asked;
           }
