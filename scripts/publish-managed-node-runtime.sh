@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Publish the two macOS Node archives consumed by Harness Desktop's first-run
-# provisioner. The desktop app trusts the sha256 in this manifest, never a
-# downloaded checksum file at install time.
+# Publish the macOS and Linux Node archives consumed by Harness Desktop's
+# first-run provisioner. The desktop app trusts the sha256 in this manifest,
+# never a downloaded checksum file at install time.
 #
 # Usage: bash scripts/publish-managed-node-runtime.sh 22.16.0
 set -euo pipefail
@@ -32,9 +32,13 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 curl -fsSL "$NODE_BASE/SHASUMS256.txt" -o "$WORK_DIR/SHASUMS256.txt"
 
 declare -a ENTRIES=()
-for pair in "arm64:darwin-arm64" "x64:darwin-x64"; do
-  IFS=: read -r upstream_arch manifest_arch <<< "$pair"
-  archive="node-v${VERSION}-darwin-${upstream_arch}.tar.gz"
+for pair in \
+  "darwin:arm64:darwin-arm64" \
+  "darwin:x64:darwin-x64" \
+  "linux:arm64:linux-arm64" \
+  "linux:x64:linux-x64"; do
+  IFS=: read -r platform upstream_arch manifest_arch <<< "$pair"
+  archive="node-v${VERSION}-${platform}-${upstream_arch}.tar.gz"
   archive_path="$WORK_DIR/$archive"
   curl -fsSL "$NODE_BASE/$archive" -o "$archive_path"
   expected="$(awk -v name="$archive" '$2 == name { print $1 }' "$WORK_DIR/SHASUMS256.txt")"
@@ -54,7 +58,7 @@ for pair in "arm64:darwin-arm64" "x64:darwin-x64"; do
   echo ">> uploading $archive ($size bytes)"
   gsutil -h 'Cache-Control:public, max-age=31536000, immutable' cp \
     "$archive_path" "gs://${GCS_BUCKET}/${object_path}"
-  ENTRIES+=("$manifest_arch|v$VERSION|$url|$actual|$size|node-v${VERSION}-darwin-${upstream_arch}")
+  ENTRIES+=("$manifest_arch|v$VERSION|$url|$actual|$size|node-v${VERSION}-${platform}-${upstream_arch}")
 done
 
 if ! gsutil cp "gs://${GCS_BUCKET}/${METADATA_PATH}" "$SRC" 2>/dev/null; then

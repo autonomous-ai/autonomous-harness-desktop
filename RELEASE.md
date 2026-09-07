@@ -15,8 +15,9 @@ make upload-desktop ARGS="--no-build"   # upload the existing build/ artifact as
 ## Managed Node runtime
 
 The first-run desktop bootstrap installs Node under `~/.harness/runtime`; it does not alter the
-user's system Node, Homebrew, nvm, or shell PATH. Publish both macOS architectures before releasing
-a desktop build that requires a new Node version:
+user's system Node, Homebrew, nvm, or shell PATH. Publish macOS and Linux archives for both ARM64
+and x64 (including machines where `uname -m` reports `amd64`) before releasing a desktop build that
+requires a new Node version:
 
 ```bash
 make upload-node-runtime ARGS="22.16.0"

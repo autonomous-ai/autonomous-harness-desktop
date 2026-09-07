@@ -420,7 +420,11 @@ class EnvironmentProvisioner {
       }
       final raw = root[platformKey];
       if (raw is! Map) {
-        throw StateError('No managed Node runtime for $platformKey');
+        // The managed channel can be rolled out one platform at a time. Its
+        // presence must not make a newly supported architecture unusable
+        // while its archive is still being published: the build carries a
+        // checksum-pinned official Node fallback for exactly that case.
+        return ManagedNodeArtifact.officialFallback(platformKey);
       }
       return ManagedNodeArtifact.fromJson(Map<String, dynamic>.from(raw));
     } on DioException catch (error) {
