@@ -586,6 +586,12 @@ void main() {
       expect(session.errorCode, 'TERMINAL_TAKEN_OVER');
       expect(session.errorMessage, contains('Another client'));
       expect(session.terminal.buffer.getText(), contains('last screen'));
+
+      // A WS hiccup on this machine (node offline/online) must not turn a takeover into a plain
+      // `error`, which auto-reattach would then silently reopen — re-stealing the terminal back
+      // from whoever took it over.
+      session.transportLost('Harness reconnected; restoring terminal…');
+      expect(session.status, TerminalSessionStatus.takenOver);
     },
   );
 

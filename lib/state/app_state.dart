@@ -2299,7 +2299,13 @@ class AppNotifier extends ChangeNotifier {
         final session = pane.session;
         if (session == null) continue;
         machine.activeAgentId ??= session.agentId;
-        machine.pendingOfflineAgentId ??= session.agentId;
+        // A pane someone else already took over must stay frozen until the user retries it
+        // themselves (see `_paneNeedsAttach`) — recording it here would have `_recoverPendingAgent`
+        // call `selectAgent` on reconnect and silently win it back the moment the connection
+        // returns, fighting whichever machine holds it now.
+        if (session.status != TerminalSessionStatus.takenOver) {
+          machine.pendingOfflineAgentId ??= session.agentId;
+        }
         // Do not send terminal_close: the adapter is already gone and the
         // next client attachment should be the only stream that owns the pane.
         session.transportLost(message);
