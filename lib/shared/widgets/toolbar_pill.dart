@@ -18,6 +18,7 @@ class ToolbarPill extends StatefulWidget {
     required this.onTap,
     this.tinted = false,
     this.active = false,
+    this.rimmed = false,
   });
 
   /// What the pill says. Its colours are the caller's — [tint] is the one to
@@ -34,6 +35,15 @@ class ToolbarPill extends StatefulWidget {
 
   /// Drawn as though hovered — for a pill with its menu open under it.
   final bool active;
+
+  /// Carries a hairline rim at rest, so the control is legible as a control before it is hovered.
+  ///
+  /// The default pill is deliberately quiet — it lives in a strip of its peers, where a rim on each
+  /// would draw a row of boxes. A pill that sits ALONE among plain labels has the opposite problem:
+  /// with no fill and no rim it is indistinguishable from the text beside it, and its affordance
+  /// only arrives once the pointer is already on it. [AppPalette.divider] is the same hairline the
+  /// app's outlined button wears, so a rimmed pill and a secondary button read as one language.
+  final bool rimmed;
 
   /// The ink a pill of this kind carries: accent when it is the action, the
   /// ordinary text colour otherwise, and faint when it can't be pressed.
@@ -72,6 +82,9 @@ class _ToolbarPillState extends State<ToolbarPill> {
           padding: const EdgeInsets.symmetric(horizontal: 9),
           decoration: BoxDecoration(
             color: _fill(lit),
+            border: widget.rimmed
+                ? Border.all(color: AppPalette.divider)
+                : null,
             borderRadius: BorderRadius.circular(AppControl.radius),
           ),
           // No `Center` around it: the height is already tight, so a row inside

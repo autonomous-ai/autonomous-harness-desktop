@@ -23,6 +23,8 @@ import '../grid/grid_models_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_menu.dart';
+import '../shared/widgets/skeleton.dart';
+import '../shared/widgets/toolbar_pill.dart';
 import '../state/app_state.dart';
 
 /// The three states an agent can be in, as the header prints them.
@@ -126,15 +128,31 @@ class AgentModelMenu extends StatefulWidget {
   final String engine;
 
   @override
-  State<AgentModelMenu> createState() => _AgentModelMenuState();
+  State<AgentModelMenu> createState() => AgentModelMenuState();
 }
 
-class _AgentModelMenuState extends State<AgentModelMenu> {
+/// Public only for [debugSetPending] — a widget test cannot reach a private State to put this
+/// control in flight, and driving it there for real means an HTTP round trip.
+class AgentModelMenuState extends State<AgentModelMenu> {
   final _controller = MenuController();
 
   // True while a pick is in flight, so a second tap cannot fire a second restart on top of the
   // first one before the CLI has answered.
   bool _pending = false;
+
+  /// Puts the control into its in-flight state without a network round trip.
+  ///
+  /// Picking for real goes through `resolveGridAgentOverride`, which mints a relay key over HTTP —
+  /// a widget test that drove the menu would be asserting against Dio's timers rather than against
+  /// what the header draws. This is the same seam the app's other widgets expose for exactly this
+  /// (see `AppNotifier.handleEventForTest`).
+  @visibleForTesting
+  void debugSetPending(bool value) => setState(() => _pending = value);
+
+  // Drawn as hovered while the panel hangs off it, so the control does not go quiet under its own
+  // open menu — [MenuAnchor] gives no state for this, and without it the pill loses its fill the
+  // moment the pointer moves off the button and onto the list it just opened.
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
@@ -173,32 +191,86 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
                 // [AppMenuNote.panelWidth].
                 style: grid.AppMenu.style(maxWidth: _panelMaxWidth),
                 onOpen: () {
+                  setState(() => _open = true);
                   final networkId = selection.networkId;
                   if (networkId != null) {
                     gridModelsController.ensureLoadedFor(networkId);
                   }
                 },
+                onClose: () {
+                  // Guarded: the menu closes on route teardown too, after this State is gone.
+                  if (mounted) setState(() => _open = false);
+                },
                 menuChildren: _rows(currentValue),
-                builder: (context, controller, _) => GestureDetector(
-                  behavior: HitTestBehavior.opaque,
+                builder: (context, controller, _) => ToolbarPill(
+                  active: _open,
+                  // Rimmed whenever this engine could use the menu at all — including mid-restart,
+                  // when `enabled` is briefly false because a second tap must not land. The pill
+                  // sits alone among plain labels in the pane header, so at rest it needs the rim
+                  // to read as pressable; dropping it for the moment the model is changing would
+                  // blink the one box on the strip. A rim on an engine that can NEVER open the
+                  // menu would draw a box around something inert, so that case keeps none.
+                  rimmed: capable && selection.hasGrid,
                   onTap: enabled
-                      ? () => controller.isOpen ? controller.close() : controller.open()
+                      ? () => controller.isOpen
+                            ? controller.close()
+                            : controller.open()
                       : null,
-                  child: Opacity(
-                    opacity: enabled ? 1 : 0.55,
-                    child: _pending
-                        ? const SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 1.6),
-                          )
-                        : Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: grid.AppFont.codeStyle(color: grid.AppPalette.textFaint),
-                          ),
-                  ),
+                  child: _pending
+                      // A skeleton, not a spinner: the shape is already known — the same one line
+                      // of mono type, about to say a different model — so the pill keeps its
+                      // metrics and nothing jumps when the answer lands. (The spinner here was
+                      // also drawn 12x24: ToolbarPill's box is a fixed 26px tall, which hands its
+                      // single child a tight height, and a bare SizedBox took it instead of
+                      // shrinking — a Row escapes that with mainAxisSize.min, a SizedBox cannot.)
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SkeletonText(
+                              style: grid.AppFont.codeStyle(),
+                              // Held at the label's own width so the strip does not resize under
+                              // the pointer mid-restart, and the rim stays where it was.
+                              width: _labelWidth(context, label),
+                            ),
+                            // The chevron's slot, kept empty rather than collapsed: it is dropped
+                            // while `enabled` is false, and letting the pill lose that width for
+                            // the length of a restart is the same jump the skeleton prevents.
+                            const SizedBox(
+                              width: 4 + grid.AppControl.iconSizeChip,
+                            ),
+                          ],
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Flexible, not bare: the pill hugs its label, but a long grid model id
+                            // in a narrow pane has to ellipsize inside it rather than overflow it.
+                            Flexible(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: grid.AppFont.codeStyle(
+                                  color: ToolbarPill.tint(
+                                    tinted: false,
+                                    enabled: enabled,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // The affordance the control was missing: this restarts the agent, and
+                            // a bare label gave no sign it could be pressed at all. Dropped when
+                            // disabled — there is nothing to open, so a chevron would lie.
+                            if (enabled) ...[
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.expand_more_rounded,
+                                size: grid.AppControl.iconSizeChip,
+                                color: grid.AppPalette.textFaint,
+                              ),
+                            ],
+                          ],
+                        ),
                 ),
               ),
             );
@@ -206,6 +278,30 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
         );
       },
     );
+  }
+
+  /// The width the label is currently drawn at, so the skeleton standing in for it holds the
+  /// pill's size steady.
+  ///
+  /// Measured rather than guessed: the model id is whatever the grid serves, the mono face is the
+  /// user's own (Settings ▸ Terminal), and a placeholder that does not match is the jump a skeleton
+  /// exists to prevent. Deliberately uncapped — the header already bounds this control, and a cap
+  /// here made the pill shrink the moment a restart began and spring back when it ended.
+  double _labelWidth(BuildContext context, String label) {
+    // Measured exactly the way SkeletonText measures its own line: the ambient DefaultTextStyle
+    // merged in first, then the context's scaler. Skipping the merge is a few pixels out, which is
+    // enough to see the pill twitch as the placeholder swaps in.
+    final resolved = DefaultTextStyle.of(context).style
+        .merge(grid.AppFont.codeStyle());
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: resolved),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width;
   }
 
   /// The panel's width, stated once — read by [AppMenu.style] and by the note
@@ -250,7 +346,8 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
       } catch (error) {
         if (!mounted) return;
         setState(() => _pending = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
         return;
       }
     }
@@ -263,7 +360,8 @@ class _AgentModelMenuState extends State<AgentModelMenu> {
     if (!mounted) return;
     setState(() => _pending = false);
     if (message != null && message != AppNotifier.agentVanished) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }
