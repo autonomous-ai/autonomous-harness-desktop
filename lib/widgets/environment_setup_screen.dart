@@ -111,8 +111,9 @@ class _StepRow extends StatelessWidget {
       ),
     };
     final label = switch (step) {
-      EnvironmentStep.node => 'Managed Node runtime',
-      EnvironmentStep.harness => 'Harness CLI',
+      // One step, and it owns the CLI AND the Node it runs on: install.sh brings
+      // its own runtime, so there is nothing separate left to show.
+      EnvironmentStep.harness => 'Harness CLI & runtime',
       EnvironmentStep.tmux => 'tmux terminal support',
       EnvironmentStep.grid => 'Grid CLI for Share Intelligence',
     };

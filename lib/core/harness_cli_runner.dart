@@ -4,8 +4,8 @@ import 'dart:io';
 /// terminal shell, its rc files, or Finder's inherited PATH.
 ///
 /// The normal path is the managed tier: `~/.harness/runtime/current-node` — a
-/// private, checksum-verified Node that `EnvironmentProvisioner` owns and
-/// rewrites on every boot — paired with the `~/.harness/cli/cli.js` bundle,
+/// private, checksum-verified Node that the `harness` installer provisions and
+/// records — paired with the `~/.harness/cli/cli.js` bundle,
 /// invoked as `<node> <cli.js> …` with no shell in between. Because both are
 /// absolute paths beneath [harnessHome], launching Harness from Finder and from
 /// Terminal have identical runtime behavior; PATH never enters into it.

@@ -14,10 +14,14 @@ make upload-desktop ARGS="--no-build"   # upload the existing build/ artifact as
 
 ## Managed Node runtime
 
-The first-run desktop bootstrap installs Node under `~/.harness/runtime`; it does not alter the
-user's system Node, Homebrew, nvm, or shell PATH. That is the point of it — the CLI launcher is
-written against that exact binary, so a Finder launch (where PATH is launchd's bare
-`/usr/bin:/bin:/usr/sbin:/sbin`) and a Terminal launch behave identically. Publish macOS and Linux
+Node lives under `~/.harness/runtime` and does not alter the user's system Node, Homebrew, nvm, or
+shell PATH. That is the point of it — the CLI launcher is written against that exact binary, so a
+Finder launch (where PATH is launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`) and a Terminal launch
+behave identically.
+
+**The desktop app no longer installs it; the `harness` installer does** — for the app's first run and
+for a terminal install alike. This repo still owns the *publishing*, so the command below is unchanged
+and still has to be run before a release needs a newer Node. Publish macOS and Linux
 archives for both ARM64 and x64 (including machines where `uname -m` reports `amd64`) before
 releasing a desktop build that requires a new Node version:
 
