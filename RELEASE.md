@@ -43,16 +43,44 @@ for publishing the managed runtime channel before release.
    publishing anything.
 4. Packages the `.app` with `ditto -c -k --sequesterRsrc --keepParent` (keeps the bundle structure and
    extended attributes intact — a plain `zip` does not).
-5. Uploads the zip with `Cache-Control: no-cache`.
-6. Download-merge-reuploads `metadata.json`, touching only the `desktop-macos` key.
+5. Notarizes the zip, staples the ticket into the `.app`, re-zips from the stapled bundle, and
+   asserts Gatekeeper accepts it (`spctl`).
+6. Packages a `.dmg` from that same stapled bundle — a staging folder holding `Harness.app` plus an
+   `/Applications` symlink, imaged with `hdiutil` — then signs, notarizes and staples the image too.
+7. Uploads **both** artifacts with `Cache-Control: no-cache`.
+8. Download-merge-reuploads `metadata.json` in a single write, touching only `desktop-macos` (zip) and
+   `desktop-macos-dmg` (dmg).
 
 A failed build stops the release; nothing is uploaded and no version is consumed.
+
+### One build, two artifacts, and why the dmg is separate
+
+There is one `flutter build` and one signature per release. The dmg is cut from the bundle the zip was
+cut from, after stapling — an app stapled afterwards would leave the image carrying an unstapled copy
+that Gatekeeper can only clear by calling Apple on first launch.
+
+The two artifacts serve different jobs and must not be merged:
+
+- **zip / `desktop-macos`** — what `DesktopUpdater` consumes. It unpacks with `ditto -x -k` and then
+  `mv`s the running bundle in place. It has no code path for a disk image, and a mounted dmg volume is
+  read-only, so it could not host the app it is asked to replace.
+- **dmg / `desktop-macos-dmg`** — what a person downloads from the website and drags into Applications.
+  Nothing in the app ever reads this key.
+
+Expect **two notarization submissions** per release. They cannot be collapsed: stapling only attaches a
+ticket to the exact artifact submitted, so the zip's ticket does not cover the image. The second pass is
+usually quick because Apple has already seen that app's cdhash.
+
+Publishing also refreshes the public download link with no web deploy: `harness.autonomous.ai/desktop/download`
+(in `autonomous-code`, `apps/web/src/app/desktop/download/`) resolves `desktop-macos-dmg` from this same
+manifest on every request, so the new version is live the moment step 8 lands.
 
 ## GCS layout
 
 ```
 gs://s3-autonomous-upgrade-3/harness/desktop/metadata.json
 gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.zip
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.dmg
 ```
 
 ```json
@@ -62,6 +90,12 @@ gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.zip
     "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-macos.zip",
     "sha256": "<64 hex>",
     "size": 45231920
+  },
+  "desktop-macos-dmg": {
+    "version": "1.2.4",
+    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-macos.dmg",
+    "sha256": "<64 hex>",
+    "size": 47118336
   }
 }
 ```
