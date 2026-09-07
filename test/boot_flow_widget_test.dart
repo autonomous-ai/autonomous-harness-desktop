@@ -142,9 +142,14 @@ void main() {
         child: const DesktopApp(),
       ),
     );
-    await tester.pumpAndSettle();
+    // `pump`, not `pumpAndSettle`: the sign-in screen's diagram and aurora
+    // animate forever by design, so settling never arrives. See
+    // `login_screen_test.dart` for the full note.
+    await tester.pump(const Duration(milliseconds: 200));
 
-    expect(find.text('Harness'), findsOneWidget);
+    // The card leads with what the app does for you, not with its own name —
+    // the wordmark left when the screen stopped being a logo over a button.
+    expect(find.text('All your agents, on one screen'), findsOneWidget);
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.byIcon(Icons.login), findsOneWidget);
   });
@@ -313,7 +318,8 @@ void main() {
         child: const DesktopApp(),
       ),
     );
-    await tester.pumpAndSettle();
+    // Endless animation on the sign-in screen underneath; pump instead.
+    await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.text('Harness 1.2.3 is available'), findsOneWidget);
     expect(find.byKey(const Key('install-update-button')), findsOneWidget);
