@@ -39,7 +39,10 @@ Future<(List<int>, String)> _fakeArchiveBytes(String version) async {
 /// Builds a real, tiny `.app`-shaped bundle at [dir]/Harness.app with the given version stamped into
 /// its Info.plist, zips it with the same `ditto` invocation the upload script uses, and returns
 /// (zipBytes, sha256Hex).
-Future<(List<int>, String)> _buildFakeBundleZip(Directory dir, String version) async {
+Future<(List<int>, String)> _buildFakeBundleZip(
+  Directory dir,
+  String version,
+) async {
   final bundle = Directory('${dir.path}/Harness.app/Contents')
     ..createSync(recursive: true);
   File('${bundle.path}/Info.plist').writeAsStringSync('''
@@ -54,8 +57,12 @@ Future<(List<int>, String)> _buildFakeBundleZip(Directory dir, String version) a
 ''');
   final zipPath = '${dir.path}/Harness-macos.zip';
   final result = await Process.run('/usr/bin/ditto', [
-    '-c', '-k', '--sequesterRsrc', '--keepParent',
-    'Harness.app', 'Harness-macos.zip',
+    '-c',
+    '-k',
+    '--sequesterRsrc',
+    '--keepParent',
+    'Harness.app',
+    'Harness-macos.zip',
   ], workingDirectory: dir.path);
   expect(result.exitCode, 0, reason: 'ditto failed: ${result.stderr}');
   final bytes = File(zipPath).readAsBytesSync();
@@ -71,11 +78,13 @@ Future<(List<int>, String)> _buildFakeLinuxBundleTarGz(
   String version,
 ) async {
   final bundle = Directory('${dir.path}/Harness')..createSync(recursive: true);
-  File('${bundle.path}/harness').writeAsStringSync('#!/bin/sh\necho fake harness\n');
+  File('${bundle.path}/harness')
+      .writeAsStringSync('#!/bin/sh\necho fake harness\n');
   File('${bundle.path}/version.txt').writeAsStringSync(version);
   final tarPath = '${dir.path}/Harness-linux-x64.tar.gz';
   final result = await Process.run('/usr/bin/tar', [
-    '-czf', 'Harness-linux-x64.tar.gz',
+    '-czf',
+    'Harness-linux-x64.tar.gz',
     'Harness',
   ], workingDirectory: dir.path);
   expect(result.exitCode, 0, reason: 'tar failed: ${result.stderr}');
@@ -117,14 +126,16 @@ void main() {
     server!.listen((request) async {
       if (request.uri.path == '/metadata.json') {
         request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode({
-          'desktop-macos': {
-            'version': manifestVersion,
-            'url': '$base/Harness-macos.zip',
-            'sha256': shaOverride ?? zipSha,
-            'size': sizeOverride ?? zipBytes.length,
-          },
-        }));
+        request.response.write(
+          jsonEncode({
+            'desktop-macos': {
+              'version': manifestVersion,
+              'url': '$base/Harness-macos.zip',
+              'sha256': shaOverride ?? zipSha,
+              'size': sizeOverride ?? zipBytes.length,
+            },
+          }),
+        );
       } else if (request.uri.path == '/Harness-macos.zip') {
         request.response.add(zipBytes);
       } else {
@@ -135,20 +146,32 @@ void main() {
     return '$base/metadata.json';
   }
 
-  test('checkOnce returns the entry when the manifest is strictly newer', () async {
-    final url = await serveMetadataAndZip(manifestVersion: newVersion);
-    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
-    final info = await updater.checkOnce(currentVersion: '1.0.0');
-    expect(info, isNotNull);
-    expect(info!.version, newVersion);
-    expect(info.sha256, zipSha);
-    expect(info.size, zipBytes.length);
-  });
+  test(
+    'checkOnce returns the entry when the manifest is strictly newer',
+    () async {
+      final url = await serveMetadataAndZip(manifestVersion: newVersion);
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        isLinux: false,
+        metadataUrl: url,
+        releaseMode: true,
+      );
+      final info = await updater.checkOnce(currentVersion: '1.0.0');
+      expect(info, isNotNull);
+      expect(info!.version, newVersion);
+      expect(info.sha256, zipSha);
+      expect(info.size, zipBytes.length);
+    },
+  );
 
   test('checkOnce never reports an update outside release mode (debug/profile builds)', () async {
     final url = await serveMetadataAndZip(manifestVersion: newVersion);
     // No releaseMode override — defaults to kReleaseMode, which is false under `flutter test`.
-    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url);
+    final updater = DesktopUpdater(
+      dio: Dio(),
+      isLinux: false,
+      metadataUrl: url,
+    );
     expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
 
     final explicitlyOff = DesktopUpdater(
@@ -160,29 +183,31 @@ void main() {
     expect(await explicitlyOff.checkOnce(currentVersion: '1.0.0'), isNull);
   });
 
-  test(
-    'checkOnce marks a major/minor bump forced, and a same-major.minor patch bump forced past the drift limit',
-    () async {
-      final url = await serveMetadataAndZip(manifestVersion: newVersion); // 9.9.9
-      final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
+  test('checkOnce marks a major/minor bump forced, and a same-major.minor patch bump forced past the drift limit', () async {
+    final url = await serveMetadataAndZip(manifestVersion: newVersion); // 9.9.9
+    final updater = DesktopUpdater(
+      dio: Dio(),
+      isLinux: false,
+      metadataUrl: url,
+      releaseMode: true,
+    );
 
-      final minorBump = await updater.checkOnce(currentVersion: '9.8.9');
-      expect(minorBump, isNotNull);
-      expect(minorBump!.forced, isTrue);
+    final minorBump = await updater.checkOnce(currentVersion: '9.8.9');
+    expect(minorBump, isNotNull);
+    expect(minorBump!.forced, isTrue);
 
-      final majorBump = await updater.checkOnce(currentVersion: '8.9.9');
-      expect(majorBump, isNotNull);
-      expect(majorBump!.forced, isTrue);
+    final majorBump = await updater.checkOnce(currentVersion: '8.9.9');
+    expect(majorBump, isNotNull);
+    expect(majorBump!.forced, isTrue);
 
-      final withinDrift = await updater.checkOnce(currentVersion: '9.9.5');
-      expect(withinDrift, isNotNull);
-      expect(withinDrift!.forced, isFalse);
+    final withinDrift = await updater.checkOnce(currentVersion: '9.9.5');
+    expect(withinDrift, isNotNull);
+    expect(withinDrift!.forced, isFalse);
 
-      final beyondDrift = await updater.checkOnce(currentVersion: '9.9.3');
-      expect(beyondDrift, isNotNull);
-      expect(beyondDrift!.forced, isTrue);
-    },
-  );
+    final beyondDrift = await updater.checkOnce(currentVersion: '9.9.3');
+    expect(beyondDrift, isNotNull);
+    expect(beyondDrift!.forced, isTrue);
+  });
 
   test('isForcedUpdate is true for a major/minor difference', () {
     expect(isForcedUpdate('2.0.0', '1.9.9'), isTrue);
@@ -192,33 +217,41 @@ void main() {
     expect(isForcedUpdate('not-a-version', '1.0.0'), isFalse);
   });
 
-  test(
-    'isForcedUpdate is also true for a same-major.minor patch drift beyond 5, false at or under it',
-    () {
-      expect(isForcedUpdate('1.2.2', '1.2.2'), isFalse); // no drift
-      expect(isForcedUpdate('1.2.7', '1.2.2'), isFalse); // drift 5, at the limit — still optional
-      expect(isForcedUpdate('1.2.8', '1.2.2'), isTrue); // drift 6 — forced
-      // A major/minor difference already forces it regardless of how small the patch drift is.
-      expect(isForcedUpdate('1.3.0', '1.2.99'), isTrue);
-    },
-  );
+  test('isForcedUpdate is also true for a same-major.minor patch drift beyond 5, false at or under it', () {
+    expect(isForcedUpdate('1.2.2', '1.2.2'), isFalse); // no drift
+    expect(
+      isForcedUpdate('1.2.7', '1.2.2'),
+      isFalse,
+    ); // drift 5, at the limit — still optional
+    expect(isForcedUpdate('1.2.8', '1.2.2'), isTrue); // drift 6 — forced
+    // A major/minor difference already forces it regardless of how small the patch drift is.
+    expect(isForcedUpdate('1.3.0', '1.2.99'), isTrue);
+  });
 
   test('checkOnce returns null when the running version is already current or newer', () async {
     final url = await serveMetadataAndZip(manifestVersion: '1.0.0');
-    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
+    final updater = DesktopUpdater(
+      dio: Dio(),
+      isLinux: false,
+      metadataUrl: url,
+      releaseMode: true,
+    );
     expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
     expect(await updater.checkOnce(currentVersion: '2.0.0'), isNull);
   });
 
-  test('checkOnce returns null (not an error) when the manifest is unreachable', () async {
-    final updater = DesktopUpdater(
-      dio: Dio(),
-      isLinux: false,
-      metadataUrl: 'http://127.0.0.1:1/metadata.json', // nothing listens here
-      releaseMode: true,
-    );
-    expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
-  });
+  test(
+    'checkOnce returns null (not an error) when the manifest is unreachable',
+    () async {
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        isLinux: false,
+        metadataUrl: 'http://127.0.0.1:1/metadata.json', // nothing listens here
+        releaseMode: true,
+      );
+      expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
+    },
+  );
 
   test('checkOnce also treats unavailable package metadata as no update', () async {
     final updater = DesktopUpdater(
@@ -241,83 +274,93 @@ void main() {
     expect(semverGt('not-a-version', '1.0.0'), isFalse);
   });
 
-  test('startChecking calls onUpdateAvailable only when a newer build exists', () async {
-    final urlUpToDate = await serveMetadataAndZip(manifestVersion: '1.0.0');
-    final noUpdates = <UpdateInfo>[];
-    final t1 = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: urlUpToDate, releaseMode: true).startChecking(
-      interval: const Duration(days: 1),
-      currentVersion: '1.0.0',
-      onUpdateAvailable: noUpdates.add,
-    );
-    addTearDown(t1.cancel);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    expect(noUpdates, isEmpty);
+  test(
+    'startChecking calls onUpdateAvailable only when a newer build exists',
+    () async {
+      final urlUpToDate = await serveMetadataAndZip(manifestVersion: '1.0.0');
+      final noUpdates = <UpdateInfo>[];
+      final t1 =
+          DesktopUpdater(
+            dio: Dio(),
+            isLinux: false,
+            metadataUrl: urlUpToDate,
+            releaseMode: true,
+          ).startChecking(
+            interval: const Duration(days: 1),
+            currentVersion: '1.0.0',
+            onUpdateAvailable: noUpdates.add,
+          );
+      addTearDown(t1.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(noUpdates, isEmpty);
 
-    await server?.close(force: true);
-    server = null;
-    final urlNewer = await serveMetadataAndZip(manifestVersion: newVersion);
-    final found = <UpdateInfo>[];
-    final t2 = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: urlNewer, releaseMode: true).startChecking(
-      interval: const Duration(days: 1),
-      currentVersion: '1.0.0',
-      onUpdateAvailable: found.add,
-    );
-    addTearDown(t2.cancel);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    expect(found, hasLength(1));
-    expect(found.single.version, newVersion);
-  });
-
-  test('downloadAndStage verifies sha256 before trusting the download', () async {
-    await serveMetadataAndZip(manifestVersion: newVersion);
-    final updater = DesktopUpdater(dio: Dio(), isLinux: false);
-    final badInfo = UpdateInfo(
-      version: newVersion,
-      url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
-      sha256: '0' * 64,
-      size: zipBytes.length,
-    );
-    final staged = await updater.downloadAndStage(badInfo);
-    expect(staged, isNull);
-  });
+      await server?.close(force: true);
+      server = null;
+      final urlNewer = await serveMetadataAndZip(manifestVersion: newVersion);
+      final found = <UpdateInfo>[];
+      final t2 =
+          DesktopUpdater(
+            dio: Dio(),
+            isLinux: false,
+            metadataUrl: urlNewer,
+            releaseMode: true,
+          ).startChecking(
+            interval: const Duration(days: 1),
+            currentVersion: '1.0.0',
+            onUpdateAvailable: found.add,
+          );
+      addTearDown(t2.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(found, hasLength(1));
+      expect(found.single.version, newVersion);
+    },
+  );
 
   test(
-    'downloadAndStage unpacks and confirms the staged bundle really carries the advertised version',
+    'downloadAndStage verifies sha256 before trusting the download',
     () async {
       await serveMetadataAndZip(manifestVersion: newVersion);
       final updater = DesktopUpdater(dio: Dio(), isLinux: false);
-      final info = UpdateInfo(
+      final badInfo = UpdateInfo(
         version: newVersion,
         url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
-        sha256: zipSha,
+        sha256: '0' * 64,
         size: zipBytes.length,
       );
-      final staged = await updater.downloadAndStage(info);
-      expect(staged, isNotNull);
-      expect(staged!.version, newVersion);
-      expect(Directory(staged.bundlePath).existsSync(), isTrue);
-      await Directory(staged.stagingDirPath).delete(recursive: true);
-    },
-    skip: _macOnly,
-  );
-
-  test(
-    'downloadAndStage rejects a bundle whose Info.plist does not match the advertised version',
-    () async {
-      await serveMetadataAndZip(manifestVersion: newVersion);
-      final updater = DesktopUpdater(dio: Dio(), isLinux: false);
-      // Real zip on disk is stamped $newVersion — advertise a different one.
-      final mismatched = UpdateInfo(
-        version: '1.2.3',
-        url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
-        sha256: zipSha,
-        size: zipBytes.length,
-      );
-      final staged = await updater.downloadAndStage(mismatched);
+      final staged = await updater.downloadAndStage(badInfo);
       expect(staged, isNull);
     },
-    skip: _macOnly,
   );
+
+  test('downloadAndStage unpacks and confirms the staged bundle really carries the advertised version', () async {
+    await serveMetadataAndZip(manifestVersion: newVersion);
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false);
+    final info = UpdateInfo(
+      version: newVersion,
+      url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
+      sha256: zipSha,
+      size: zipBytes.length,
+    );
+    final staged = await updater.downloadAndStage(info);
+    expect(staged, isNotNull);
+    expect(staged!.version, newVersion);
+    expect(Directory(staged.bundlePath).existsSync(), isTrue);
+    await Directory(staged.stagingDirPath).delete(recursive: true);
+  }, skip: _macOnly);
+
+  test('downloadAndStage rejects a bundle whose Info.plist does not match the advertised version', () async {
+    await serveMetadataAndZip(manifestVersion: newVersion);
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false);
+    // Real zip on disk is stamped $newVersion — advertise a different one.
+    final mismatched = UpdateInfo(
+      version: '1.2.3',
+      url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
+      sha256: zipSha,
+      size: zipBytes.length,
+    );
+    final staged = await updater.downloadAndStage(mismatched);
+    expect(staged, isNull);
+  }, skip: _macOnly);
 
   test('applyStaged spawns a detached command and never launches a real process', () async {
     final calls = <String>[];
@@ -383,41 +426,53 @@ void main() {
     expect(currentBundlePath('/usr/local/bin/some-tool', false), isNull);
   });
 
-  test('currentBundlePath on Linux is just the executable\'s parent directory', () {
-    expect(
-      currentBundlePath(
-        '/home/user/.local/opt/Harness/harness',
-        true, // isLinux
-      ),
-      '/home/user/.local/opt/Harness',
-    );
-  });
+  test(
+    'currentBundlePath on Linux is just the executable\'s parent directory',
+    () {
+      expect(
+        currentBundlePath(
+          '/home/user/.local/opt/Harness/harness',
+          true, // isLinux
+        ),
+        '/home/user/.local/opt/Harness',
+      );
+    },
+  );
 
-  group('Linux packaging (desktop-linux-x64)', () {
+  group('Linux architecture packaging', () {
     late List<int> tarBytes;
     late String tarSha;
 
     setUp(() async {
-      final (bytes, sha) = await _buildFakeLinuxBundleTarGz(scratch, newVersion);
+      final (bytes, sha) = await _buildFakeLinuxBundleTarGz(
+        scratch,
+        newVersion,
+      );
       tarBytes = bytes;
       tarSha = sha;
     });
 
-    Future<String> serveLinuxMetadataAndTar({required String manifestVersion}) async {
+    Future<String> serveLinuxMetadataAndTar({
+      required String manifestVersion,
+      String architecture = 'x64',
+    }) async {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final base = 'http://127.0.0.1:${server!.port}';
+      final archive = 'Harness-linux-$architecture.tar.gz';
       server!.listen((request) async {
         if (request.uri.path == '/metadata.json') {
           request.response.headers.contentType = ContentType.json;
-          request.response.write(jsonEncode({
-            'desktop-linux-x64': {
-              'version': manifestVersion,
-              'url': '$base/Harness-linux-x64.tar.gz',
-              'sha256': tarSha,
-              'size': tarBytes.length,
-            },
-          }));
-        } else if (request.uri.path == '/Harness-linux-x64.tar.gz') {
+          request.response.write(
+            jsonEncode({
+              'desktop-linux-$architecture': {
+                'version': manifestVersion,
+                'url': '$base/$archive',
+                'sha256': tarSha,
+                'size': tarBytes.length,
+              },
+            }),
+          );
+        } else if (request.uri.path == '/$archive') {
           request.response.add(tarBytes);
         } else {
           request.response.statusCode = HttpStatus.notFound;
@@ -434,6 +489,7 @@ void main() {
         metadataUrl: url,
         releaseMode: true,
         isLinux: true,
+        linuxArchitecture: 'x64',
       );
       final info = await updater.checkOnce(currentVersion: '1.0.0');
       expect(info, isNotNull);
@@ -441,41 +497,61 @@ void main() {
       expect(info.sha256, tarSha);
     });
 
-    test(
-      'downloadAndStage untars and confirms the staged bundle carries the advertised version',
-      () async {
-        await serveLinuxMetadataAndTar(manifestVersion: newVersion);
-        final updater = DesktopUpdater(dio: Dio(), isLinux: true);
-        final info = UpdateInfo(
-          version: newVersion,
-          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
-          sha256: tarSha,
-          size: tarBytes.length,
-        );
-        final staged = await updater.downloadAndStage(info);
-        expect(staged, isNotNull);
-        expect(staged!.version, newVersion);
-        expect(staged.bundlePath, endsWith('/Harness'));
-        expect(File('${staged.bundlePath}/harness').existsSync(), isTrue);
-        await Directory(staged.stagingDirPath).delete(recursive: true);
-      },
-    );
+    test('checkOnce reads the desktop-linux-arm64 manifest entry', () async {
+      final url = await serveLinuxMetadataAndTar(
+        manifestVersion: newVersion,
+        architecture: 'arm64',
+      );
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        metadataUrl: url,
+        releaseMode: true,
+        isLinux: true,
+        linuxArchitecture: 'arm64',
+      );
+      final info = await updater.checkOnce(currentVersion: '1.0.0');
+      expect(info, isNotNull);
+      expect(info!.url, endsWith('/Harness-linux-arm64.tar.gz'));
+      expect(info.sha256, tarSha);
+    });
 
-    test(
-      'downloadAndStage rejects a Linux bundle whose version.txt does not match',
-      () async {
-        await serveLinuxMetadataAndTar(manifestVersion: newVersion);
-        final updater = DesktopUpdater(dio: Dio(), isLinux: true);
-        final mismatched = UpdateInfo(
-          version: '1.2.3',
-          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
-          sha256: tarSha,
-          size: tarBytes.length,
-        );
-        final staged = await updater.downloadAndStage(mismatched);
-        expect(staged, isNull);
-      },
-    );
+    test('downloadAndStage untars and confirms the staged bundle carries the advertised version', () async {
+      await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        isLinux: true,
+        linuxArchitecture: 'x64',
+      );
+      final info = UpdateInfo(
+        version: newVersion,
+        url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
+        sha256: tarSha,
+        size: tarBytes.length,
+      );
+      final staged = await updater.downloadAndStage(info);
+      expect(staged, isNotNull);
+      expect(staged!.version, newVersion);
+      expect(staged.bundlePath, endsWith('/Harness'));
+      expect(File('${staged.bundlePath}/harness').existsSync(), isTrue);
+      await Directory(staged.stagingDirPath).delete(recursive: true);
+    });
+
+    test('downloadAndStage rejects a Linux bundle whose version.txt does not match', () async {
+      await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        isLinux: true,
+        linuxArchitecture: 'x64',
+      );
+      final mismatched = UpdateInfo(
+        version: '1.2.3',
+        url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
+        sha256: tarSha,
+        size: tarBytes.length,
+      );
+      final staged = await updater.downloadAndStage(mismatched);
+      expect(staged, isNull);
+    });
 
     test(
       'applyStaged on Linux execs the binary directly instead of `open -n`',
@@ -483,6 +559,7 @@ void main() {
         final calls = <String>[];
         final updater = DesktopUpdater(
           isLinux: true,
+          linuxArchitecture: 'x64',
           launchDetached: (command) async => calls.add(command),
         );
         final staged = StagedUpdate(

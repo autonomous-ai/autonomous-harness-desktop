@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
@@ -14,14 +15,24 @@ const _defaultMetadataUrl =
 
 /// Override for testing against a scratch manifest without touching the real one — see RELEASE.md's
 /// "Rolling out safely" section. Empty (the default) means "use the real manifest".
-const _metadataUrlOverride = String.fromEnvironment('DESKTOP_UPDATE_METADATA_URL');
+const _metadataUrlOverride = String.fromEnvironment(
+  'DESKTOP_UPDATE_METADATA_URL',
+);
 
 /// Must match OTA_KEY in scripts/upload-desktop.sh / scripts/upload-desktop-linux.sh.
 const _otaKeyMacOS = 'desktop-macos';
-const _otaKeyLinux = 'desktop-linux-x64';
 
-String get _metadataUrl =>
-    _metadataUrlOverride.isNotEmpty ? _metadataUrlOverride : _defaultMetadataUrl;
+String _currentLinuxArchitecture() => switch (Abi.current()) {
+  Abi.linuxArm64 => 'arm64',
+  Abi.linuxX64 => 'x64',
+  _ => throw UnsupportedError(
+    'Harness Desktop updates do not support ${Abi.current()}',
+  ),
+};
+
+String get _metadataUrl => _metadataUrlOverride.isNotEmpty
+    ? _metadataUrlOverride
+    : _defaultMetadataUrl;
 
 class UpdateInfo {
   final String version;
@@ -119,11 +130,11 @@ String? currentBundlePath([String? executablePath, bool? isLinux]) {
 }
 
 Future<void> _defaultLaunchDetached(String command) async {
-  await Process.start(
-    Platform.isLinux ? '/bin/bash' : '/bin/zsh',
-    ['-l', '-c', command],
-    mode: ProcessStartMode.detached,
-  );
+  await Process.start(Platform.isLinux ? '/bin/bash' : '/bin/zsh', [
+    '-l',
+    '-c',
+    command,
+  ], mode: ProcessStartMode.detached);
 }
 
 /// Checks the public GCS manifest for a newer desktop build than the one currently running,
@@ -136,6 +147,7 @@ class DesktopUpdater {
   final String _metadataUrlForInstance;
   final bool _releaseMode;
   final bool _isLinux;
+  final String _linuxArchitecture;
 
   DesktopUpdater({
     Dio? dio,
@@ -151,6 +163,9 @@ class DesktopUpdater {
     // (tar/version.txt instead of ditto/plutil) from any host, since the actual archive tooling used
     // on that branch (tar) is present on every dev machine, unlike ditto/plutil on Linux.
     bool? isLinux,
+    // Linux artifacts are architecture-specific. Tests can override this to exercise both
+    // manifest keys on any host; production resolves it from the running Dart ABI.
+    String? linuxArchitecture,
   }) : _dio =
            dio ??
            Dio(
@@ -162,9 +177,15 @@ class DesktopUpdater {
        _launchDetached = launchDetached ?? _defaultLaunchDetached,
        _metadataUrlForInstance = metadataUrl ?? _metadataUrl,
        _releaseMode = releaseMode ?? kReleaseMode,
-       _isLinux = isLinux ?? Platform.isLinux;
+       _isLinux = isLinux ?? Platform.isLinux,
+       _linuxArchitecture =
+           linuxArchitecture ??
+           ((isLinux ?? Platform.isLinux)
+               ? _currentLinuxArchitecture()
+               : 'x64');
 
-  String get _otaKey => _isLinux ? _otaKeyLinux : _otaKeyMacOS;
+  String get _otaKey =>
+      _isLinux ? 'desktop-linux-$_linuxArchitecture' : _otaKeyMacOS;
 
   /// Fetches the manifest and returns the newer entry, or null if this app is already current (or
   /// the manifest/network is unavailable — treated the same as "nothing to do", never surfaced as an
@@ -177,7 +198,9 @@ class DesktopUpdater {
     if (!_releaseMode) return null;
     try {
       final running = currentVersion ?? await runningAppVersion();
-      final response = await _dio.get<Map<String, dynamic>>(_metadataUrlForInstance);
+      final response = await _dio.get<Map<String, dynamic>>(
+        _metadataUrlForInstance,
+      );
       final entry = response.data?[_otaKey];
       if (entry is! Map) return null;
       final version = entry['version'];
@@ -239,7 +262,9 @@ class DesktopUpdater {
       );
       final bytes = response.data;
       if (bytes == null || bytes.length != info.size) {
-        debugPrint('DesktopUpdater: unexpected download size for ${info.version}');
+        debugPrint(
+          'DesktopUpdater: unexpected download size for ${info.version}',
+        );
         return null;
       }
       final hash = await Sha256().hash(bytes);
@@ -255,7 +280,7 @@ class DesktopUpdater {
 
       stagingDir = await Directory.systemTemp.createTemp('harness-update-');
       final archivePath = _isLinux
-          ? '${stagingDir.path}/Harness-linux-x64.tar.gz'
+          ? '${stagingDir.path}/Harness-linux-$_linuxArchitecture.tar.gz'
           : '${stagingDir.path}/Harness-macos.zip';
       await File(archivePath).writeAsBytes(bytes, flush: true);
 
@@ -284,7 +309,9 @@ class DesktopUpdater {
           ? '${stagingDir.path}/Harness'
           : '${stagingDir.path}/Harness.app';
       if (!Directory(bundlePath).existsSync()) {
-        debugPrint('DesktopUpdater: no Harness bundle inside the downloaded archive');
+        debugPrint(
+          'DesktopUpdater: no Harness bundle inside the downloaded archive',
+        );
         await stagingDir.delete(recursive: true);
         return null;
       }
@@ -360,7 +387,8 @@ class DesktopUpdater {
     final relaunch = _isLinux
         ? 'nohup ${_singleQuote(executableInBundle)} >/dev/null 2>&1 & disown'
         : 'open -n ${_singleQuote(bundlePath)}';
-    final command = '''
+    final command =
+        '''
 while kill -0 $selfPid 2>/dev/null; do sleep 0.2; done
 rm -rf ${_singleQuote(prevPath)}
 mv ${_singleQuote(bundlePath)} ${_singleQuote(prevPath)}

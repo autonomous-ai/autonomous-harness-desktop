@@ -163,9 +163,9 @@ running app back.
 
 ## Linux
 
-`make upload-desktop-linux` (`scripts/upload-desktop-linux.sh`) is the Linux (x64) counterpart of
-`make upload-desktop`, publishing to the **same** `metadata.json` under a different key so both
-platforms share one version number by default:
+`make upload-desktop-linux` (`scripts/upload-desktop-linux.sh`) publishes architecture-specific
+Linux ARM64 and x64 releases to the **same** `metadata.json` as macOS. `amd64` and `x86_64` are
+accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`:
 
 ```bash
 make upload-desktop-linux                     # auto-bump, same version semantics as upload-desktop
@@ -173,10 +173,13 @@ make upload-desktop-linux ARGS="--force"      # mandatory update, same rule as m
 make upload-desktop-linux ARGS="1.3.0"        # explicit version
 make upload-desktop-linux ARGS="--no-bump"
 make upload-desktop-linux ARGS="--no-build"
+make upload-desktop-linux ARCH=arm64            # desktop-linux-arm64
+make upload-desktop-linux ARCH=amd64            # desktop-linux-x64
 ```
 
-Must run on an actual Ubuntu/Linux build host — `flutter build linux` cannot cross-compile a Linux
-bundle from macOS or Windows.
+With no `ARCH`, the command detects the host architecture. A build must run on a matching
+Ubuntu/Linux host because Flutter Linux desktop builds use the host architecture. `--no-build` can
+package and upload an already-built bundle for the selected architecture.
 
 **No signing/notarization step** — there is no Linux equivalent of Apple's Developer ID/notarization,
 and none is needed: the trust boundary is the same sha256-verified manifest entry `DesktopUpdater`
@@ -184,7 +187,7 @@ already checks on every platform.
 
 **No Info.plist-style version stamp.** `flutter build linux` has nowhere to stamp a version the way
 Xcode does into `Info.plist`, so the release script writes a plain `version.txt` into the built
-bundle (`build/linux/x64/release/bundle/version.txt`) and asserts it before packaging. Both
+bundle (`build/linux/<arm64|x64>/release/bundle/version.txt`) and asserts it before packaging. Both
 `lib/core/app_version.dart` (what Settings ▸ About shows) and `lib/update/desktop_updater.dart`'s
 `downloadAndStage()` (verifying a downloaded update) read this file back on Linux, falling through to
 `PackageInfo.fromPlatform()` (which would otherwise just return `pubspec.yaml`'s never-bumped
@@ -195,6 +198,7 @@ placeholder) everywhere else.
 ```
 gs://s3-autonomous-upgrade-3/harness/desktop/metadata.json          (shared with macOS, different key)
 gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-x64.tar.gz
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-arm64.tar.gz
 ```
 
 ```json
@@ -218,7 +222,8 @@ layout `apps/web/src/app/desktop/install.sh` (in `autonomous-code`) creates at
 
 Same shape as macOS (see above), with the platform-specific pieces:
 
-1. `DesktopUpdater` reads the `desktop-linux-x64` manifest entry instead of `desktop-macos`.
+1. `DesktopUpdater` reads the `desktop-linux-arm64` or `desktop-linux-x64` manifest entry for its
+   runtime architecture instead of `desktop-macos`.
 2. The downloaded archive is a `.tar.gz`, unpacked with `tar` instead of `ditto`.
 3. The staged bundle's version comes from its `version.txt`, not an `Info.plist` extraction.
 4. On restart, the detached helper `mv`s the install directory (`~/.local/opt/Harness` by default)
