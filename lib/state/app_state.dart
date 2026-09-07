@@ -1673,8 +1673,14 @@ class AppNotifier extends ChangeNotifier {
   ///
   /// Called when the New Agent dialog opens, not at connect: the answer costs
   /// one interactive shell per engine on the far side, and it is only ever
-  /// looked at in that dialog. [force] re-asks after an install, where the
-  /// stored answer is exactly one engine out of date.
+  /// looked at in that dialog.
+  ///
+  /// That caller passes [force], and should: engines come and go through a
+  /// terminal this app never sees, and an install the dialog itself started
+  /// invalidates the stored answer as it finishes. Without it the app probes
+  /// once per run and then insists, for the rest of the session, on what was
+  /// true when it started. The cache is here to collapse a re-open into one
+  /// sweep, not to spare the machine the question.
   ///
   /// Deduplicated on [MachineEngines.inFlight] so opening the dialog twice, or
   /// reopening it mid-probe, does not start a second sweep. Never throws — a

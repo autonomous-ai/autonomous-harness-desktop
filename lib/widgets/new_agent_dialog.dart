@@ -93,8 +93,16 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     // engine and is only ever read on this screen. Deferred a frame for the
     // same reason as the models load above: the probe's first notifyListeners()
     // must not land mid-build.
+    //
+    // `force`, every time this dialog opens. A cached answer is worth nothing
+    // here: engines arrive and leave through a terminal this app never sees —
+    // `npm i -g opencode-ai`, `npm uninstall -g`, a venv deleted out from under
+    // a symlink — and an install this very dialog started makes its own stored
+    // answer stale the moment it finishes. Re-asking is bounded (one sweep, on
+    // a deliberate user action) and the stored rows keep rendering until the new
+    // answer lands, so nothing blanks.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(widget.notifier.probeEngines(widget.machineId));
+      unawaited(widget.notifier.probeEngines(widget.machineId, force: true));
     });
   }
 
