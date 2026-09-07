@@ -11,6 +11,31 @@ Future<String> _sha256Hex(List<int> bytes) async {
   return hash.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
+/// Why the macOS half of this file is host-gated.
+///
+/// `ditto` is macOS-only, and so is the branch it stands in for: unpacking a
+/// `.app` and reading its Info.plist. A Linux host — the only host that can
+/// build a Linux release, so the one a Linux release is cut on — cannot build
+/// that archive at all. Rather than fail the whole file there (which is what it
+/// did: 21 of these, every Linux-packaging test included, died in the shared
+/// `setUp`), the macOS bundle is built only on macOS, the two tests that
+/// actually unpack one are skipped elsewhere, and everything that just needs
+/// *some* bytes with a known size and hash gets [_fakeArchiveBytes]. The rest
+/// names the branch it means (`isLinux:`) instead of inheriting the host's.
+final String? _macOnly = Platform.isMacOS
+    ? null
+    : 'needs a macOS host: `ditto` builds the .app archive this unpacks';
+
+/// Stand-in bytes for a host with no `ditto`.
+///
+/// Enough for anything that only serves the archive over HTTP and checks its
+/// length or sha256 — a manifest entry, a mismatched-hash rejection. Nothing
+/// unpacks it.
+Future<(List<int>, String)> _fakeArchiveBytes(String version) async {
+  final bytes = utf8.encode('not-a-real-bundle:$version\n' * 8);
+  return (bytes, await _sha256Hex(bytes));
+}
+
 /// Builds a real, tiny `.app`-shaped bundle at [dir]/Harness.app with the given version stamped into
 /// its Info.plist, zips it with the same `ditto` invocation the upload script uses, and returns
 /// (zipBytes, sha256Hex).
@@ -67,7 +92,9 @@ void main() {
 
   setUp(() async {
     scratch = await Directory.systemTemp.createTemp('desktop-updater-');
-    final (bytes, sha) = await _buildFakeBundleZip(scratch, newVersion);
+    final (bytes, sha) = Platform.isMacOS
+        ? await _buildFakeBundleZip(scratch, newVersion)
+        : await _fakeArchiveBytes(newVersion);
     zipBytes = bytes;
     zipSha = sha;
   });
@@ -110,7 +137,7 @@ void main() {
 
   test('checkOnce returns the entry when the manifest is strictly newer', () async {
     final url = await serveMetadataAndZip(manifestVersion: newVersion);
-    final updater = DesktopUpdater(dio: Dio(), metadataUrl: url, releaseMode: true);
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
     final info = await updater.checkOnce(currentVersion: '1.0.0');
     expect(info, isNotNull);
     expect(info!.version, newVersion);
@@ -121,11 +148,12 @@ void main() {
   test('checkOnce never reports an update outside release mode (debug/profile builds)', () async {
     final url = await serveMetadataAndZip(manifestVersion: newVersion);
     // No releaseMode override — defaults to kReleaseMode, which is false under `flutter test`.
-    final updater = DesktopUpdater(dio: Dio(), metadataUrl: url);
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url);
     expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
 
     final explicitlyOff = DesktopUpdater(
       dio: Dio(),
+      isLinux: false,
       metadataUrl: url,
       releaseMode: false,
     );
@@ -136,7 +164,7 @@ void main() {
     'checkOnce marks a major/minor bump forced, and a same-major.minor patch bump forced past the drift limit',
     () async {
       final url = await serveMetadataAndZip(manifestVersion: newVersion); // 9.9.9
-      final updater = DesktopUpdater(dio: Dio(), metadataUrl: url, releaseMode: true);
+      final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
 
       final minorBump = await updater.checkOnce(currentVersion: '9.8.9');
       expect(minorBump, isNotNull);
@@ -177,7 +205,7 @@ void main() {
 
   test('checkOnce returns null when the running version is already current or newer', () async {
     final url = await serveMetadataAndZip(manifestVersion: '1.0.0');
-    final updater = DesktopUpdater(dio: Dio(), metadataUrl: url, releaseMode: true);
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: url, releaseMode: true);
     expect(await updater.checkOnce(currentVersion: '1.0.0'), isNull);
     expect(await updater.checkOnce(currentVersion: '2.0.0'), isNull);
   });
@@ -185,6 +213,7 @@ void main() {
   test('checkOnce returns null (not an error) when the manifest is unreachable', () async {
     final updater = DesktopUpdater(
       dio: Dio(),
+      isLinux: false,
       metadataUrl: 'http://127.0.0.1:1/metadata.json', // nothing listens here
       releaseMode: true,
     );
@@ -194,6 +223,7 @@ void main() {
   test('checkOnce also treats unavailable package metadata as no update', () async {
     final updater = DesktopUpdater(
       dio: Dio(),
+      isLinux: false,
       metadataUrl: 'http://127.0.0.1:1/metadata.json',
       releaseMode: true,
     );
@@ -214,7 +244,7 @@ void main() {
   test('startChecking calls onUpdateAvailable only when a newer build exists', () async {
     final urlUpToDate = await serveMetadataAndZip(manifestVersion: '1.0.0');
     final noUpdates = <UpdateInfo>[];
-    final t1 = DesktopUpdater(dio: Dio(), metadataUrl: urlUpToDate, releaseMode: true).startChecking(
+    final t1 = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: urlUpToDate, releaseMode: true).startChecking(
       interval: const Duration(days: 1),
       currentVersion: '1.0.0',
       onUpdateAvailable: noUpdates.add,
@@ -227,7 +257,7 @@ void main() {
     server = null;
     final urlNewer = await serveMetadataAndZip(manifestVersion: newVersion);
     final found = <UpdateInfo>[];
-    final t2 = DesktopUpdater(dio: Dio(), metadataUrl: urlNewer, releaseMode: true).startChecking(
+    final t2 = DesktopUpdater(dio: Dio(), isLinux: false, metadataUrl: urlNewer, releaseMode: true).startChecking(
       interval: const Duration(days: 1),
       currentVersion: '1.0.0',
       onUpdateAvailable: found.add,
@@ -240,7 +270,7 @@ void main() {
 
   test('downloadAndStage verifies sha256 before trusting the download', () async {
     await serveMetadataAndZip(manifestVersion: newVersion);
-    final updater = DesktopUpdater(dio: Dio());
+    final updater = DesktopUpdater(dio: Dio(), isLinux: false);
     final badInfo = UpdateInfo(
       version: newVersion,
       url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
@@ -255,7 +285,7 @@ void main() {
     'downloadAndStage unpacks and confirms the staged bundle really carries the advertised version',
     () async {
       await serveMetadataAndZip(manifestVersion: newVersion);
-      final updater = DesktopUpdater(dio: Dio());
+      final updater = DesktopUpdater(dio: Dio(), isLinux: false);
       final info = UpdateInfo(
         version: newVersion,
         url: 'http://127.0.0.1:${server!.port}/Harness-macos.zip',
@@ -268,13 +298,14 @@ void main() {
       expect(Directory(staged.bundlePath).existsSync(), isTrue);
       await Directory(staged.stagingDirPath).delete(recursive: true);
     },
+    skip: _macOnly,
   );
 
   test(
     'downloadAndStage rejects a bundle whose Info.plist does not match the advertised version',
     () async {
       await serveMetadataAndZip(manifestVersion: newVersion);
-      final updater = DesktopUpdater(dio: Dio());
+      final updater = DesktopUpdater(dio: Dio(), isLinux: false);
       // Real zip on disk is stamped $newVersion — advertise a different one.
       final mismatched = UpdateInfo(
         version: '1.2.3',
@@ -285,11 +316,16 @@ void main() {
       final staged = await updater.downloadAndStage(mismatched);
       expect(staged, isNull);
     },
+    skip: _macOnly,
   );
 
   test('applyStaged spawns a detached command and never launches a real process', () async {
     final calls = <String>[];
     final updater = DesktopUpdater(
+      // The macOS relaunch, asked for by name rather than inherited from the
+      // host — the Linux one is the group at the bottom of this file, and both
+      // deserve to run wherever the suite does.
+      isLinux: false,
       launchDetached: (command) async => calls.add(command),
     );
     final staged = StagedUpdate(
@@ -316,6 +352,10 @@ void main() {
     () async {
       var called = false;
       final updater = DesktopUpdater(
+        // Same as above: the macOS "not inside a .app" branch. On Linux every
+        // executable has a parent directory, so the host's own answer would
+        // never be the null this is about.
+        isLinux: false,
         launchDetached: (command) async => called = true,
       );
       final staged = StagedUpdate(
@@ -334,10 +374,13 @@ void main() {
 
   test('currentBundlePath walks up to the enclosing .app', () {
     expect(
-      currentBundlePath('/Applications/Harness.app/Contents/MacOS/Harness'),
+      currentBundlePath(
+        '/Applications/Harness.app/Contents/MacOS/Harness',
+        false, // isLinux — the .app walk, on whatever host runs the suite
+      ),
       '/Applications/Harness.app',
     );
-    expect(currentBundlePath('/usr/local/bin/some-tool'), isNull);
+    expect(currentBundlePath('/usr/local/bin/some-tool', false), isNull);
   });
 
   test('currentBundlePath on Linux is just the executable\'s parent directory', () {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
+
+import 'window_chrome.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
 import '../shortcuts/app_shortcuts.dart';
@@ -669,7 +670,7 @@ class _PaneHeader extends StatelessWidget {
     grid.AppTheme.watch(context);
     // The pane's head is a drag handle too: with the title bar hidden it is
     // the top edge of the window.
-    return DragToMoveArea(
+    return WindowDragArea(
       child: SizedBox(
         height: 46,
         child: Padding(
@@ -863,34 +864,51 @@ class _EmptyGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return ColoredBox(
-      color: grid.AppPalette.windowBg,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Select an agent, or drag one in from the left.',
-              style: TextStyle(
-                color: AppColors.mutedStrong,
-                fontFamily: AppFonts.sans,
-                fontSize: 12,
+    // Holds the keyboard while there is no terminal to hold it.
+    //
+    // App shortcuts are bound above this screen (home_screen.dart) and, like
+    // every Flutter shortcut, they are delivered along the focus chain — from
+    // whatever has focus up through its ancestors. With no pane open nothing
+    // inside the screen has any, so the chain starts at the route's own scope,
+    // which sits ABOVE the bindings: ⌘\, ⌘N, ⌘R and ⌘/ all did nothing until
+    // the first terminal took focus. This is the state that tells the user to
+    // press ⌘/ two lines below, so it had better answer.
+    //
+    // Safe here in a way it is not on the screen's own scope: this widget
+    // exists only while there is no terminal, so it can never be the node that
+    // keeps a focused pane from opening its TextInput connection.
+    return Focus(
+      autofocus: true,
+      skipTraversal: true,
+      child: ColoredBox(
+        color: grid.AppPalette.windowBg,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Select an agent, or drag one in from the left.',
+                style: TextStyle(
+                  color: AppColors.mutedStrong,
+                  fontFamily: AppFonts.sans,
+                  fontSize: 12,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            // The empty pane is the one screen a new user is guaranteed to
-            // look at, and it is doing nothing else. A sheet behind a key
-            // nobody has been told about is a sheet nobody opens.
-            Text(
-              'Press ${shortcutHintFor(ShortcutAction.showShortcuts)} for '
-              'keyboard shortcuts',
-              style: TextStyle(
-                color: grid.AppPalette.textFaint,
-                fontFamily: AppFonts.sans,
-                fontSize: 11.5,
+              const SizedBox(height: 8),
+              // The empty pane is the one screen a new user is guaranteed to
+              // look at, and it is doing nothing else. A sheet behind a key
+              // nobody has been told about is a sheet nobody opens.
+              Text(
+                'Press ${shortcutHintFor(ShortcutAction.showShortcuts)} for '
+                'keyboard shortcuts',
+                style: TextStyle(
+                  color: grid.AppPalette.textFaint,
+                  fontFamily: AppFonts.sans,
+                  fontSize: 11.5,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

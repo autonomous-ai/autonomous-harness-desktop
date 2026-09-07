@@ -185,7 +185,11 @@ class _InitialMark extends StatelessWidget {
           identity.label.characters.first.toUpperCase(),
           style: TextStyle(
             color: identity.color,
-            fontFamily: 'Menlo',
+            // The app's mono stack, not a literal: `Menlo` names nothing on
+            // Linux, so this initial was drawn in the proportional default
+            // while every mark beside it was monospaced.
+            fontFamily: AppFonts.mono,
+            fontFamilyFallback: AppFonts.monoFallback,
             fontSize: size * 0.68,
             height: 1,
             fontWeight: FontWeight.w700,

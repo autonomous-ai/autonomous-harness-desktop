@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:window_manager/window_manager.dart';
+
+import 'window_chrome.dart';
 
 import '../core/models.dart';
 import '../shared/layouts/widgets/rail_section_header.dart';
@@ -111,7 +112,7 @@ class MachineRailState extends State<MachineRail> {
             // above the whole window and holds that row now, so keeping one
             // here pushed the wordmark down twice.
 
-            DragToMoveArea(
+            WindowDragArea(
               child: SizedBox(
                 // The same 46px strip the terminal panes draw, so the wordmark
                 // and a pane's title sit on one baseline.
@@ -743,7 +744,10 @@ class _AgentRowState extends State<_AgentRow> {
   // agent survives, resumed where possible — so unlike delete it fires straight away, no
   // confirmation dialog, and just surfaces a failure the same lightweight way.
   Future<void> _restartAgent() async {
-    final result = await notifier.restartAgent(state.machine.machineId, agent.id);
+    final result = await notifier.restartAgent(
+      state.machine.machineId,
+      agent.id,
+    );
     if (!mounted) return;
     final error = result.error;
     if (error != null) {

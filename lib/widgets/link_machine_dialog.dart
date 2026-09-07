@@ -112,7 +112,7 @@ class _LinkMachineDialogState extends State<_LinkMachineDialog> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear remote password'),
-        content: const SizedBox(
+        content: SizedBox(
           width: 360,
           child: Text(
             'Clear the remote password for this machine? Anyone using it to connect will lose '
@@ -450,7 +450,7 @@ class _RemotePasswordForm extends StatelessWidget {
           style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
           decoration: InputDecoration(
             hintText: 'New remote password',
-            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            hintStyle: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
             prefixIcon: const Icon(Icons.password, size: 17),
             suffixIcon: IconButton(
               icon: Icon(obscure ? Icons.visibility : Icons.visibility_off, size: 17),
@@ -466,7 +466,7 @@ class _RemotePasswordForm extends StatelessWidget {
           style: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
           decoration: InputDecoration(
             hintText: 'Confirm password',
-            hintStyle: const TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+            hintStyle: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
             prefixIcon: const Icon(Icons.password, size: 17),
           ),
           onSubmitted: (_) => onSubmit(),

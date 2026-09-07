@@ -246,18 +246,19 @@ void main() {
       expect(find.text('Diego'), findsOneWidget);
       expect(find.text('Sign out'), findsOneWidget);
       expect(find.byIcon(Icons.logout), findsOneWidget);
-      expect(find.text('v1.0.0'), findsOneWidget);
       expect(find.text('Remote into another machine…'), findsOneWidget);
 
+      // The running version is no longer a row in this menu: it moved to
+      // Settings ▸ About when Settings became a screen, and
+      // settings_screen_test is where it is asserted now. What this menu still
+      // owes is the order — what you can add, then the way out.
       final linkY = tester
           .getTopLeft(find.byKey(const Key('link-a-machine-menu-item')))
           .dy;
-      final versionY = tester.getTopLeft(find.text('v1.0.0')).dy;
       final signOutY = tester
           .getTopLeft(find.byKey(const Key('sign-out-menu-item')))
           .dy;
-      expect(linkY, lessThan(versionY));
-      expect(versionY, lessThan(signOutY));
+      expect(linkY, lessThan(signOutY));
     },
   );
 

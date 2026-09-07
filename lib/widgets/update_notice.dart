@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../core/app_version.dart';
@@ -72,7 +71,7 @@ class UpdateNotice extends StatelessWidget {
       message = 'Harness ${update.version} is available';
     }
 
-    return DragToMoveArea(
+    return WindowDragArea(
       child: Material(
         color: Colors.transparent,
         child: DecoratedBox(
@@ -220,7 +219,9 @@ class ForcedUpdateScreen extends StatelessWidget {
     final installing = notifier.isInstallingUpdate;
     final error = notifier.updateError;
     final failed = error != null && !installing;
-    final mark = failed ? grid.AppPalette.warn : grid.AppPalette.accentOnSurface;
+    final mark = failed
+        ? grid.AppPalette.warn
+        : grid.AppPalette.accentOnSurface;
 
     // Material, because this screen is handed to MaterialApp's home slot RAW while every one of its
     // siblings there brings its own — LoginScreen, HomeScreen and EnvironmentSetupScreen are Scaffolds

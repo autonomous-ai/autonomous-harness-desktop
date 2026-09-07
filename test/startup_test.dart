@@ -54,6 +54,6 @@ void main() {
     );
 
     expect(themeMode.value, ThemeMode.system);
-    expect(terminalFont.family, TerminalFontChoice.sfMono);
+    expect(terminalFont.family, TerminalFontChoice.defaultForPlatform);
   });
 }

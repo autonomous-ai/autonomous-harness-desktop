@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,7 +15,13 @@ void main() {
       LogicalKeyboardKey key, {
       bool shift = false,
       bool alt = false,
+      TargetPlatform? platform,
     }) async {
+      // Off by default, and worth naming when it matters: a widget test runs as
+      // Android unless told otherwise, so an Apple-gated branch in the terminal
+      // is invisible here — which is exactly how ⌘ came to be the app's
+      // modifier on macOS and the terminal's on Linux.
+      debugDefaultTargetPlatformOverride = platform;
       var fired = 0;
       final terminal = Terminal();
       await tester.pumpWidget(
@@ -40,6 +47,7 @@ void main() {
       if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
       await tester.pump();
+      debugDefaultTargetPlatformOverride = null;
       return fired;
     }
 
@@ -68,25 +76,38 @@ void main() {
       );
     });
 
-    testWidgets('⌘ + arrow does NOT — which is why none is bound', (
-      tester,
-    ) async {
-      // xterm turns every arrow into a terminal key and answers `handled`, so
-      // a binding on one would be dead on arrival and the agent would get
-      // cursor movement instead. Pinned so nobody adds an arrow shortcut and
-      // spends an afternoon on why it does nothing.
-      expect(
-        await pressWithTerminalFocused(tester, LogicalKeyboardKey.arrowRight),
-        0,
-      );
-      expect(
-        await pressWithTerminalFocused(
-          tester,
-          LogicalKeyboardKey.arrowLeft,
-          alt: true,
-        ),
-        0,
-      );
+    testWidgets('⌘ + arrow reaches it too, on either desktop', (tester) async {
+      // This used to read 0, with a note that xterm answers every arrow itself
+      // so an arrow binding would be dead on arrival. That was never true of
+      // the platform the app ships on: the terminal already let ⌘ chords go
+      // past on macOS, and only there — the 0 was the Linux behaviour, seen
+      // because a widget test runs as Android. Now the escape is uniform, so
+      // pin it on both, arrows included: with ⌘ held, nothing reaches the pty.
+      //
+      // Arrows still go unbound in kAppShortcuts ('no shortcut is bound to an
+      // arrow key' below), but that is now a choice about what the hand expects
+      // a terminal to do — not a limit on what can be bound.
+      for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+        expect(
+          await pressWithTerminalFocused(
+            tester,
+            LogicalKeyboardKey.arrowRight,
+            platform: platform,
+          ),
+          1,
+          reason: '⌘→ must not be answered by the terminal on $platform',
+        );
+        expect(
+          await pressWithTerminalFocused(
+            tester,
+            LogicalKeyboardKey.arrowLeft,
+            alt: true,
+            platform: platform,
+          ),
+          1,
+          reason: '⌘⌥← must not be answered by the terminal on $platform',
+        );
+      }
     });
 
     testWidgets('a bare key still goes to the terminal, not to a shortcut', (
@@ -125,10 +146,29 @@ void main() {
       }
     });
 
-    test('nothing is bound with Control, or with Option alone', () {
+    test('nothing is bound with Control but the tab pair, or with Option alone', () {
       // Ctrl belongs to tmux and the shell; Option alone is how a terminal
       // sends Meta, which is why ⌥⏎ reaches the engine.
+      //
+      // ⌃⇥ / ⇧⌃⇥ are the one exception, and a deliberate one: no shell or tmux
+      // binding uses that chord, the terminal is made to let exactly it past
+      // (terminal_view.dart), and it is the pair every tabbed app trains people
+      // to reach for. app_shortcuts.dart carries the full argument. Pinned as
+      // an exception rather than dropped, so a THIRD Ctrl chord still fails.
       for (final shortcut in kAppShortcuts) {
+        if (shortcut.activator.trigger == LogicalKeyboardKey.tab) {
+          expect(
+            shortcut.activator.control,
+            isTrue,
+            reason: '${shortcut.label} is only allowed here as a ⌃⇥ chord',
+          );
+          expect(
+            shortcut.activator.meta,
+            isFalse,
+            reason: '${shortcut.label} is the Ctrl twin of a ⌘ chord, not both',
+          );
+          continue;
+        }
         expect(
           shortcut.activator.control,
           isFalse,

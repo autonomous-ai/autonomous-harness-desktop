@@ -166,7 +166,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: EdgeInsets.zero,
                 dense: true,
-                title: const Text(
+                title: Text(
                   'Bypass permission prompts',
                   style: TextStyle(fontFamily: AppFonts.sans, fontSize: 13.5),
                 ),

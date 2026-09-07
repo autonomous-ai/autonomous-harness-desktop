@@ -154,7 +154,7 @@ class _LinkMachineScreenState extends State<LinkMachineScreen> {
                 ),
                 decoration: InputDecoration(
                   hintText: 'Remote password for $machineName',
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontFamily: AppFonts.mono,
                     fontSize: 12.5,
                   ),

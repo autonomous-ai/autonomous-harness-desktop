@@ -486,7 +486,28 @@ class TerminalViewState extends State<TerminalView> {
     // Let the native text input client process Backspace while editable. Some
     // IMEs emit it internally to replace an earlier committed letter (Telex
     // does this for transformations such as `u` to `ư`).
+    //
+    // ONLY WHERE THE EMBEDDER HOLDS UP ITS END. This hands the key to the
+    // platform and sends nothing, which is a bargain only Apple's embedder
+    // keeps: AppKit turns Backspace into `deleteBackward:` and ships the
+    // selector to Dart over `TextInputClient.performSelectors`, which
+    // CustomTextEdit answers (see its performSelector). The GTK embedder has
+    // no performSelectors channel method at all, and its key handler names
+    // GDK_KEY_BackSpace explicitly to do NOTHING with it — "already handled
+    // inside the framework in RenderEditable", which is true of an
+    // EditableText and false of the bare TextInputClient below. So on Linux
+    // the key was dropped here, dropped again by the engine, and no byte ever
+    // reached the pty: everything typed except Backspace.
+    //
+    // Everywhere else the key falls through to keyInput() at the bottom, where
+    // the keytab turns it into ^? (\x7f). Composition is not at risk either
+    // way — while an IME is composing, CustomTextEdit._onKeyEvent never calls
+    // this method.
+    final nativeClientOwnsBackspace =
+        defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS;
     if (key == TerminalKey.backspace &&
+        nativeClientOwnsBackspace &&
         !widget.hardwareKeyboardOnly &&
         !reservesTerminalKey) {
       return KeyEventResult.skipRemainingHandlers;
@@ -520,9 +541,13 @@ class TerminalViewState extends State<TerminalView> {
     // Returning `ignored` (not skipRemainingHandlers) is the point: the event
     // keeps travelling UP the focus chain to those Shortcuts. xterm's own
     // ⌘C/⌘V/⌘A are matched earlier, by the shortcut map, so they still work.
-    if ((defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.iOS) &&
-        HardwareKeyboard.instance.isMetaPressed) {
+    //
+    // Not gated on Apple: ⌘ is this app's modifier on every desktop it runs on
+    // (app_shortcuts.dart declares every one of them `meta: true`, which is
+    // the Super key on Linux). Gating it there meant a focused terminal on
+    // Linux swallowed Super+key — typing the bare letter into the shell — and
+    // the app's own Shortcuts never saw a single chord.
+    if (HardwareKeyboard.instance.isMetaPressed) {
       return KeyEventResult.ignored;
     }
 

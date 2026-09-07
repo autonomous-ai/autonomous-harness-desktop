@@ -4,6 +4,7 @@ import 'package:harness/core/models.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/terminal/terminal_session.dart';
 import 'package:harness/widgets/machine_rail.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/shared/theme/app_theme.dart';
@@ -314,7 +315,11 @@ void main() {
       ),
     );
     await tester.tap(find.text('backend-api'));
-    await tester.pump();
+    // Past the double-tap window, not just one frame: an agent row also takes a
+    // double click (rename), so its single tap is only resolved once the second
+    // one can no longer arrive. A bare pump() lands inside that window and sees
+    // a row that has apparently done nothing.
+    await tester.pump(kDoubleTapTimeout);
 
     expect(state.activeAgentId, 'parent');
     expect(state.pendingOfflineAgentId, 'parent');

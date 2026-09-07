@@ -99,7 +99,10 @@ void main() {
       find.byKey(const Key('terminal-font-family-dropdown')),
       findsOneWidget,
     );
-    expect(find.text(TerminalFontChoice.sfMono.label), findsOneWidget);
+    expect(
+      find.text(TerminalFontChoice.defaultForPlatform.label),
+      findsOneWidget,
+    );
     expect(find.text('13pt'), findsOneWidget);
     expect(find.byKey(const Key('terminal-font-size-decrease')), findsOneWidget);
     expect(find.byKey(const Key('terminal-font-size-increase')), findsOneWidget);
@@ -109,6 +112,20 @@ void main() {
     );
     // The Appearance control is gone with its pane.
     expect(find.text('System'), findsNothing);
+  });
+
+  testWidgets('About prints the running version', (tester) async {
+    await openSettings(tester);
+
+    await tester.tap(find.text('About'));
+    await tester.pumpAndSettle();
+
+    // The version the account menu used to carry. It reads the same
+    // runningAppVersion() a release does — on Linux that means version.txt
+    // beside the executable first, then package metadata (mocked above), which
+    // is why this passes on either build host.
+    expect(find.text('Version'), findsOneWidget);
+    expect(find.text('1.0.0'), findsOneWidget);
   });
 
   testWidgets('the rail filter narrows to matching rows, and says so when '

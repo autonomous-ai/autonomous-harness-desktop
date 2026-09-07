@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -455,7 +456,17 @@ void main() {
     expect(outbound, ['u', '\x7f', 'ư']);
   });
 
-  testWidgets('keeps Backspace as a terminal control key', (tester) async {
+  /// Backspace, on the platform whose embedder answers for it.
+  ///
+  /// macOS is handed the key rather than sent bytes, so that an IME can use it
+  /// internally (Telex types `ư` as `u` + backspace + `ư`). AppKit turns it
+  /// into `deleteBackward:` and ships the selector back over
+  /// `TextInputClient.performSelectors`, which is what this stands in for.
+  testWidgets('on macOS, Backspace is left to the native text input client', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+
     final terminal = Terminal(maxLines: 200, reflowEnabled: false)
       ..resize(80, 12);
     final outbound = <String>[];
@@ -488,12 +499,102 @@ void main() {
       platform: 'macos',
     );
 
-    expect(handled, isFalse);
-    tester
-        .state<CustomTextEditState>(find.byType(CustomTextEdit))
-        .performSelector('deleteBackward:');
+    // Nothing calls performSelector here on purpose: told the platform is
+    // macOS, the test harness delivers `deleteBackward:` itself, the way
+    // AppKit does. That IS the contract — the key is not answered by the
+    // terminal, and the byte arrives by the selector route instead.
     await tester.pump(const Duration(milliseconds: 1));
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(handled, isFalse, reason: 'the native client owns it on macOS');
     expect(outbound, ['u', '\x7f']);
+  });
+
+  /// The same key on a platform whose embedder does NOT answer for it.
+  ///
+  /// The GTK embedder has no `TextInputClient.performSelectors` method at all,
+  /// and its key handler names `GDK_KEY_BackSpace` explicitly in order to do
+  /// nothing with it — correct for an `EditableText`, wrong for xterm's bare
+  /// `TextInputClient`. Deferring there sent the key nowhere: everything typed
+  /// except Backspace. So off Apple the key must produce its byte from the key
+  /// event ALONE — no `performSelector` call anywhere in this test.
+  testWidgets('on Linux, Backspace sends DEL from the key event alone', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+    final terminal = Terminal(maxLines: 200, reflowEnabled: false)
+      ..resize(80, 12);
+    final outbound = <String>[];
+    terminal.onOutput = outbound.add;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 260,
+            child: TerminalView(terminal, autofocus: true),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final handled = await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.backspace,
+      character: '\b',
+      platform: 'linux',
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(handled, isTrue, reason: 'the terminal has to own the key here');
+    expect(outbound, ['\x7f']);
+  });
+
+  /// ⌘ is the app's modifier on every desktop, not just Apple's.
+  ///
+  /// Every shortcut in `lib/shortcuts/app_shortcuts.dart` is declared
+  /// `meta: true`, which is the Super key on Linux. While this was gated on
+  /// macOS/iOS a focused terminal answered Super+key itself — typing the bare
+  /// letter at the shell and stopping the chord from ever reaching the app's
+  /// Shortcuts, so every one of them was dead with a pane focused.
+  testWidgets('on Linux, a Meta chord is left for the app, not typed', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+    final terminal = Terminal(maxLines: 200, reflowEnabled: false)
+      ..resize(80, 12);
+    final outbound = <String>[];
+    terminal.onOutput = outbound.add;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 900,
+            height: 260,
+            child: TerminalView(terminal, autofocus: true),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta, platform: 'linux');
+    final handled = await tester.sendKeyDownEvent(
+      LogicalKeyboardKey.keyN,
+      platform: 'linux',
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyN, platform: 'linux');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta, platform: 'linux');
+    await tester.pump(const Duration(milliseconds: 1));
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(handled, isFalse, reason: 'the chord belongs to the app above');
+    expect(outbound, isEmpty, reason: 'and must not be typed at the shell');
   });
 
   testWidgets(

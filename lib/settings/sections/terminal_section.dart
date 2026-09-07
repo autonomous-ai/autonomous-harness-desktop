@@ -71,8 +71,13 @@ class _FamilyDropdown extends StatelessWidget {
       key: const Key('terminal-font-family-dropdown'),
       isExpanded: true,
       value: family,
+      // The faces this OS actually has, plus whatever is selected. The second
+      // half matters: DropdownButton asserts its `value` is among the items,
+      // and a `state.json` carried over from a Mac selects a face this list
+      // does not offer. Showing it (rather than asserting, or silently
+      // rewriting the user's choice) keeps the pane honest about what is on.
       items: [
-        for (final choice in TerminalFontChoice.values)
+        for (final choice in {...TerminalFontChoice.available, family})
           DropdownMenuItem(
             value: choice,
             child: Text(choice.label, style: const TextStyle(fontSize: 13.5)),

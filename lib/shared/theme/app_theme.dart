@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
 /// The app's live brightness — the single source of truth the color tokens below
@@ -1233,7 +1235,25 @@ abstract final class AppFont {
   /// the shipped value, still a const, and still what everything falls back to.
   static String get sans => _uiFamily ?? sansDefault;
 
-  static const String sansDefault = '.AppleSystemUIFont';
+  /// The shipped reading face, per platform.
+  ///
+  /// A getter now, because the shipped value is not one name: nothing in the
+  /// Apple stack resolves on Linux, so the app was drawn in the engine's own
+  /// default rather than a face anyone chose.
+  ///
+  /// `Ubuntu Sans` (25.04 and later) and `Ubuntu` (before it) lead because they
+  /// are what the desktop itself is set in. Measured on Ubuntu 26.04 they do
+  /// not currently resolve either — both are two-axis variable fonts
+  /// (`wdth,wght`) and measure identically to a family that does not exist,
+  /// while the single-axis `Ubuntu Sans Mono` resolves fine — so today the
+  /// effective face is `Noto Sans`, the next entry. They stay in front because
+  /// they cost nothing and are the right answer the moment the engine can
+  /// reach them; `Noto Sans` and `DejaVu Sans` are what actually carries it.
+  static String get sansDefault =>
+      Platform.isMacOS ? _macSansDefault : _linuxSansDefault;
+
+  static const String _macSansDefault = '.AppleSystemUIFont';
+  static const String _linuxSansDefault = 'Ubuntu Sans';
 
   /// The fallbacks behind [sans].
   ///
@@ -1244,12 +1264,22 @@ abstract final class AppFont {
   /// row of tofu boxes.
   static List<String> get sansFallback => _uiFamily == null
       ? _sansFallbackDefault
-      : const [sansDefault, ..._sansFallbackDefault];
+      : [sansDefault, ..._sansFallbackDefault];
 
-  static const List<String> _sansFallbackDefault = [
+  static List<String> get _sansFallbackDefault =>
+      Platform.isMacOS ? _macSansFallback : _linuxSansFallback;
+
+  static const List<String> _macSansFallback = [
     'SF Pro Text',
     'Helvetica Neue',
     'Arial',
+  ];
+
+  static const List<String> _linuxSansFallback = [
+    'Ubuntu',
+    'Noto Sans',
+    'DejaVu Sans',
+    'sans-serif',
   ];
 
   /// The copy-me stack: SF Mono, the system's own code face.
@@ -1268,7 +1298,16 @@ abstract final class AppFont {
   /// slashed zero.
   static String get mono => _codeFamily ?? monoDefault;
 
-  static const String monoDefault = '.AppleSystemUIFontMonospaced';
+  /// The shipped code face, per platform — same argument as [sansDefault], and
+  /// a worse failure when it is wrong: on Linux the whole Apple stack down to
+  /// `Courier New` resolved to a PROPORTIONAL face, so anything set in "mono"
+  /// was not monospaced at all. The Linux chain is the terminal's own default
+  /// (see `lib/terminal/terminal_typography.dart` for why DejaVu leads).
+  static String get monoDefault =>
+      Platform.isMacOS ? _macMonoDefault : _linuxMonoDefault;
+
+  static const String _macMonoDefault = '.AppleSystemUIFontMonospaced';
+  static const String _linuxMonoDefault = 'DejaVu Sans Mono';
 
   /// The fallbacks behind [mono]. The system's own mono goes in front of them
   /// once a family is chosen, for the reason given on [sansFallback] — and it
@@ -1276,12 +1315,22 @@ abstract final class AppFont {
   /// stops being a code block.
   static List<String> get monoFallback => _codeFamily == null
       ? _monoFallbackDefault
-      : const [monoDefault, ..._monoFallbackDefault];
+      : [monoDefault, ..._monoFallbackDefault];
 
-  static const List<String> _monoFallbackDefault = [
+  static List<String> get _monoFallbackDefault =>
+      Platform.isMacOS ? _macMonoFallback : _linuxMonoFallback;
+
+  static const List<String> _macMonoFallback = [
     'Menlo',
     'Monaco',
     'Courier New',
+    'monospace',
+  ];
+
+  static const List<String> _linuxMonoFallback = [
+    'Ubuntu Sans Mono',
+    'Noto Sans Mono',
+    'Liberation Mono',
     'monospace',
   ];
 

@@ -23,6 +23,12 @@ class CrashLog {
   static void record(Object error, StackTrace? stackTrace, {String? context}) {
     try {
       final file = _file;
+      // The directory may not exist yet, and the first run is exactly when this
+      // matters: an error thrown while the environment is still being
+      // provisioned lands before anything has written `~/.harness/desktop-app`.
+      // Without this the whole crash log silently did nothing on a fresh
+      // machine — the one machine whose crashes we most need the stack for.
+      file.parent.createSync(recursive: true);
       // Truncate rather than rotate: this is read by a person looking into a
       // fault that just happened, so the RECENT end is the valuable end, and a
       // second file to manage buys nothing.
