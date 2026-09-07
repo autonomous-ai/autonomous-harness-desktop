@@ -45,6 +45,12 @@ GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
 GCS_PUBLIC_BASE_URL="${GCS_PUBLIC_BASE_URL:-https://storage.googleapis.com/${GCS_BUCKET}}"
 METADATA_PATH="${METADATA_PATH:-harness/desktop/metadata.json}"
 OTA_KEY="${OTA_KEY:-desktop-macos}"   # must match _otaKey in lib/update/desktop_updater.dart
+# The .dmg is the FIRST-INSTALL artifact (download, drag to Applications) and rides a SEPARATE key on
+# purpose. DesktopUpdater only ever reads OTA_KEY, and it unpacks with `ditto -x -k` — it has no code
+# path for a disk image, and it `mv`s the running bundle in place, which a read-only DMG volume cannot
+# host. Keeping the two apart means publishing a DMG can never disturb self-update.
+DMG_KEY="${DMG_KEY:-desktop-macos-dmg}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
 
 next_desktop_version() {
   local current="$1" major minor patch
@@ -114,7 +120,7 @@ if [ "$DO_NOTARIZE" -eq 1 ]; then
   command -v xcrun >/dev/null 2>&1 || { echo "error: xcrun not found — install Xcode command line tools" >&2; exit 1; }
 fi
 
-cleanup() { rm -f "${SRC:-}" "${DST:-}"; }
+cleanup() { rm -f "${SRC:-}" "${DST:-}"; [ -n "${DMG_STAGE:-}" ] && rm -rf "$DMG_STAGE"; return 0; }
 trap cleanup EXIT
 
 # --- Step 1: resolve the version (source of truth = remote metadata.json) ---
@@ -208,17 +214,72 @@ else
   echo ">> skipping notarization (--no-notarize) — Developer ID signed only"
 fi
 
+# --- Step 3c: package the .dmg people actually download ---
+# Built from the SAME bundle the zip was built from — one `flutter build`, one signature, two
+# artifacts. It has to come AFTER stapling: an app stapled later would leave this image carrying an
+# unstapled copy, which Gatekeeper can only clear by asking Apple over the network on first launch.
+#
+# `hdiutil` rather than `create-dmg`: the latter is a dependency the release machine would have to
+# install, and all it buys here is window chrome. The `/Applications` symlink is what actually makes
+# the drag-to-install gesture obvious, and that is one line.
+DMG="$APP_DIR/build/Harness-macos-$VER.dmg"
+DMG_STAGE="$(mktemp -d)"   # removed by cleanup() on EXIT
+echo ">> packaging $DMG"
+rm -f "$DMG"
+cp -R "$APP_BUNDLE" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create -quiet -srcfolder "$DMG_STAGE" -volname "Harness" -fs HFS+ -format UDZO -ov "$DMG"
+
+# Sign the image itself. The app inside is already signed and stapled; this is about the FILE the
+# browser hands the user — an unsigned disk image is what turns a clean install into a scary one.
+echo ">> signing $DMG ($SIGN_IDENTITY)"
+codesign --sign "$SIGN_IDENTITY" --timestamp "$DMG"
+
+if [ "$DO_NOTARIZE" -eq 1 ]; then
+  # A second submission, and it cannot be avoided: stapling only attaches a ticket to the exact thing
+  # that was submitted, so the zip's ticket does not cover this image. Apple has already seen this
+  # app's cdhash from the first submission, so this pass is usually the quick one.
+  echo ">> submitting the dmg for notarization (keychain profile: $NOTARY_PROFILE)"
+  DMG_NOTARY_JSON="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json)"
+  echo "$DMG_NOTARY_JSON"
+  # Same trap as the zip above: `--wait` exits 0 on any TERMINAL status, "Invalid" included, so the
+  # verdict is read out of the JSON rather than inferred from $?.
+  DMG_NOTARY_STATUS="$(printf '%s' "$DMG_NOTARY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)"
+  DMG_NOTARY_ID="$(printf '%s' "$DMG_NOTARY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)"
+  if [ "$DMG_NOTARY_STATUS" != "Accepted" ]; then
+    echo "error: dmg notarization did not succeed (status: ${DMG_NOTARY_STATUS:-unknown}) — full reasons:" >&2
+    xcrun notarytool log "$DMG_NOTARY_ID" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+    exit 1
+  fi
+  echo ">> stapling notarization ticket to $DMG"
+  xcrun stapler staple "$DMG"
+  # Fails closed: this asserts the image passes the check a freshly DOWNLOADED copy will face.
+  spctl -a -vv -t open --context context:primary-signature "$DMG" || {
+    echo "error: Gatekeeper assessment failed on the dmg" >&2
+    exit 1
+  }
+else
+  echo ">> skipping dmg notarization (--no-notarize) — Developer ID signed only"
+fi
+
 # --- Step 4: upload the artifact + merge the manifest ---
 GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-macos.zip}"
 URL="${GCS_PUBLIC_BASE_URL%/}/${GCS_PATH#/}"
 SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
 SIZE="$(wc -c < "$ZIP" | tr -d ' ')"
 
-echo ">> uploading release $VER ($SIZE bytes, sha256=$SHA)"
-echo "   dest: gs://${GCS_BUCKET}/${GCS_PATH}"
-gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$ZIP" "gs://${GCS_BUCKET}/${GCS_PATH}"
+DMG_GCS_PATH="${DMG_GCS_PATH:-harness/desktop/${VER}/Harness-macos.dmg}"
+DMG_URL="${GCS_PUBLIC_BASE_URL%/}/${DMG_GCS_PATH#/}"
+DMG_SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+DMG_SIZE="$(wc -c < "$DMG" | tr -d ' ')"
 
-echo ">> merging manifest: gs://${GCS_BUCKET}/${METADATA_PATH}  (${OTA_KEY})"
+echo ">> uploading release $VER"
+echo "   zip: gs://${GCS_BUCKET}/${GCS_PATH}  ($SIZE bytes, sha256=$SHA)"
+gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$ZIP" "gs://${GCS_BUCKET}/${GCS_PATH}"
+echo "   dmg: gs://${GCS_BUCKET}/${DMG_GCS_PATH}  ($DMG_SIZE bytes, sha256=$DMG_SHA)"
+gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$DMG" "gs://${GCS_BUCKET}/${DMG_GCS_PATH}"
+
+echo ">> merging manifest: gs://${GCS_BUCKET}/${METADATA_PATH}  (${OTA_KEY}, ${DMG_KEY})"
 SRC="$(mktemp)"; DST="$(mktemp)"   # removed by cleanup() on EXIT
 if ! gsutil cp "gs://${GCS_BUCKET}/${METADATA_PATH}" "$SRC" 2>/dev/null; then
   echo "   (no existing metadata.json — creating a new one)"
@@ -226,9 +287,14 @@ if ! gsutil cp "gs://${GCS_BUCKET}/${METADATA_PATH}" "$SRC" 2>/dev/null; then
 fi
 # NOTE: pass paths/values via argv, NEVER pipe the existing JSON into this heredoc — the heredoc
 # claims stdin, so the pipe is silently dropped and every upload would blank metadata.json.
-python3 - "$SRC" "$DST" "$OTA_KEY" "$VER" "$URL" "$SHA" "$SIZE" <<'PY'
+# BOTH entries are written in ONE read-modify-write. Merging them in two passes would mean the
+# second read racing the first upload, and whichever landed last would drop the other key.
+python3 - "$SRC" "$DST" \
+  "$OTA_KEY" "$VER" "$URL" "$SHA" "$SIZE" \
+  "$DMG_KEY" "$VER" "$DMG_URL" "$DMG_SHA" "$DMG_SIZE" <<'PY'
 import json, sys
-src, dst, key, version, url, sha, size = sys.argv[1:8]
+src, dst = sys.argv[1:3]
+rest = sys.argv[3:]
 try:
     with open(src) as f:
         raw = f.read()
@@ -237,7 +303,10 @@ except (OSError, json.JSONDecodeError):
     data = {}
 if not isinstance(data, dict):
     data = {}
-data[key] = {"version": version, "url": url, "sha256": sha, "size": int(size)}
+# Remaining argv is groups of five: key, version, url, sha256, size.
+for i in range(0, len(rest), 5):
+    key, version, url, sha, size = rest[i:i + 5]
+    data[key] = {"version": version, "url": url, "sha256": sha, "size": int(size)}
 with open(dst, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
@@ -248,7 +317,9 @@ gsutil -h "Content-Type:application/json" \
 
 echo
 echo ">> published desktop app $VER"
-echo "   url:      $URL"
+echo "   zip:      $URL"
+echo "   dmg:      $DMG_URL"
+echo "   download: https://harness.autonomous.ai/desktop/download  (redirects to the dmg above)"
 echo "   sha256:   $SHA"
 echo "   manifest: ${GCS_PUBLIC_BASE_URL%/}/${METADATA_PATH#/}"
 echo "   Running apps poll this on their own schedule (DesktopUpdater, every few hours + on launch)."

@@ -664,6 +664,24 @@ class _TerminalHeader extends StatelessWidget {
                   child: statusMark,
                 ),
               ),
+            if (session.linkMode != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Tooltip(
+                  message: session.linkMode == 'p2p'
+                      ? 'Direct peer-to-peer connection'
+                      : 'Relayed through Harness',
+                  child: Icon(
+                    session.linkMode == 'p2p'
+                        ? Icons.bolt
+                        : Icons.cloud_outlined,
+                    size: 13,
+                    color: session.linkMode == 'p2p'
+                        ? AppColors.success
+                        : AppColors.mutedStrong,
+                  ),
+                ),
+              ),
             if (onClose != null) PaneCloseButton(onPressed: onClose!),
           ],
         ),

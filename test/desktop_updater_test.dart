@@ -37,6 +37,27 @@ Future<(List<int>, String)> _buildFakeBundleZip(Directory dir, String version) a
   return (bytes, await _sha256Hex(bytes));
 }
 
+/// Builds a real Linux-shaped bundle at [dir]/Harness/{harness,version.txt} — the flat layout
+/// `scripts/upload-desktop-linux.sh` packages — tars it with the same `tar` invocation that script
+/// uses, and returns (tarGzBytes, sha256Hex). `tar` (unlike `ditto`/`plutil`) exists on every dev
+/// machine, so this exercises the real Linux unpack/version-check path even from a macOS test host.
+Future<(List<int>, String)> _buildFakeLinuxBundleTarGz(
+  Directory dir,
+  String version,
+) async {
+  final bundle = Directory('${dir.path}/Harness')..createSync(recursive: true);
+  File('${bundle.path}/harness').writeAsStringSync('#!/bin/sh\necho fake harness\n');
+  File('${bundle.path}/version.txt').writeAsStringSync(version);
+  final tarPath = '${dir.path}/Harness-linux-x64.tar.gz';
+  final result = await Process.run('/usr/bin/tar', [
+    '-czf', 'Harness-linux-x64.tar.gz',
+    'Harness',
+  ], workingDirectory: dir.path);
+  expect(result.exitCode, 0, reason: 'tar failed: ${result.stderr}');
+  final bytes = File(tarPath).readAsBytesSync();
+  return (bytes, await _sha256Hex(bytes));
+}
+
 void main() {
   late Directory scratch;
   HttpServer? server;
@@ -317,5 +338,128 @@ void main() {
       '/Applications/Harness.app',
     );
     expect(currentBundlePath('/usr/local/bin/some-tool'), isNull);
+  });
+
+  test('currentBundlePath on Linux is just the executable\'s parent directory', () {
+    expect(
+      currentBundlePath(
+        '/home/user/.local/opt/Harness/harness',
+        true, // isLinux
+      ),
+      '/home/user/.local/opt/Harness',
+    );
+  });
+
+  group('Linux packaging (desktop-linux-x64)', () {
+    late List<int> tarBytes;
+    late String tarSha;
+
+    setUp(() async {
+      final (bytes, sha) = await _buildFakeLinuxBundleTarGz(scratch, newVersion);
+      tarBytes = bytes;
+      tarSha = sha;
+    });
+
+    Future<String> serveLinuxMetadataAndTar({required String manifestVersion}) async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final base = 'http://127.0.0.1:${server!.port}';
+      server!.listen((request) async {
+        if (request.uri.path == '/metadata.json') {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'desktop-linux-x64': {
+              'version': manifestVersion,
+              'url': '$base/Harness-linux-x64.tar.gz',
+              'sha256': tarSha,
+              'size': tarBytes.length,
+            },
+          }));
+        } else if (request.uri.path == '/Harness-linux-x64.tar.gz') {
+          request.response.add(tarBytes);
+        } else {
+          request.response.statusCode = HttpStatus.notFound;
+        }
+        await request.response.close();
+      });
+      return '$base/metadata.json';
+    }
+
+    test('checkOnce reads the desktop-linux-x64 manifest entry', () async {
+      final url = await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        metadataUrl: url,
+        releaseMode: true,
+        isLinux: true,
+      );
+      final info = await updater.checkOnce(currentVersion: '1.0.0');
+      expect(info, isNotNull);
+      expect(info!.version, newVersion);
+      expect(info.sha256, tarSha);
+    });
+
+    test(
+      'downloadAndStage untars and confirms the staged bundle carries the advertised version',
+      () async {
+        await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+        final updater = DesktopUpdater(dio: Dio(), isLinux: true);
+        final info = UpdateInfo(
+          version: newVersion,
+          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
+          sha256: tarSha,
+          size: tarBytes.length,
+        );
+        final staged = await updater.downloadAndStage(info);
+        expect(staged, isNotNull);
+        expect(staged!.version, newVersion);
+        expect(staged.bundlePath, endsWith('/Harness'));
+        expect(File('${staged.bundlePath}/harness').existsSync(), isTrue);
+        await Directory(staged.stagingDirPath).delete(recursive: true);
+      },
+    );
+
+    test(
+      'downloadAndStage rejects a Linux bundle whose version.txt does not match',
+      () async {
+        await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+        final updater = DesktopUpdater(dio: Dio(), isLinux: true);
+        final mismatched = UpdateInfo(
+          version: '1.2.3',
+          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
+          sha256: tarSha,
+          size: tarBytes.length,
+        );
+        final staged = await updater.downloadAndStage(mismatched);
+        expect(staged, isNull);
+      },
+    );
+
+    test(
+      'applyStaged on Linux execs the binary directly instead of `open -n`',
+      () async {
+        final calls = <String>[];
+        final updater = DesktopUpdater(
+          isLinux: true,
+          launchDetached: (command) async => calls.add(command),
+        );
+        final staged = StagedUpdate(
+          version: newVersion,
+          bundlePath: '${scratch.path}/staged/Harness',
+          stagingDirPath: '${scratch.path}/staged',
+        );
+        final ok = await updater.applyStaged(
+          staged,
+          selfPid: 12345,
+          runningBundlePath: '/home/user/.local/opt/Harness',
+        );
+        expect(ok, isTrue);
+        expect(calls, hasLength(1));
+        expect(calls.single, contains('kill -0 12345'));
+        expect(calls.single, contains('/home/user/.local/opt/Harness/harness'));
+        expect(calls.single, contains('nohup'));
+        expect(calls.single, isNot(contains('open -n')));
+        expect(calls.single, contains('pgrep -f'));
+      },
+    );
   });
 }

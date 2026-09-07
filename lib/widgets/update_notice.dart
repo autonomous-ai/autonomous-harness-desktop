@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
+import '../core/app_version.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/skeleton.dart';
 import '../state/app_state.dart';
@@ -669,13 +669,15 @@ class _InstalledVersion extends StatefulWidget {
 }
 
 class _InstalledVersionState extends State<_InstalledVersion> {
-  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
+  // Built once, not in `build`: `runningAppVersion` reads a file on Linux, and
+  // a future rebuilt per frame would put the placeholder back each time.
+  late final Future<String> _info = runningAppVersion();
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<PackageInfo>(
+  Widget build(BuildContext context) => FutureBuilder<String>(
     future: _info,
     builder: (context, snapshot) {
-      final version = snapshot.data?.version;
+      final version = snapshot.data;
       if (version == null) {
         // Still reading: a blank measured against the ambient mono style the
         // row sets, so it and the version it becomes are the same line.

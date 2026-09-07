@@ -72,8 +72,18 @@ void main() {
     expect(find.text('Harness Desktop'), findsOneWidget);
     expect(find.text('1.0.0'), findsOneWidget);
     expect(find.text('Up to date'), findsOneWidget);
-    // The secondary action, not a filled one — the pane is read, not operated.
-    expect(find.byType(OutlinedButton), findsOneWidget);
+    // Secondary actions, never a filled one — the pane is read, not operated.
+    // Two of them since the merge with main: the update check, and the dial
+    // flash, which on Linux and Windows has no native menu item to live in.
+    expect(
+      find.byKey(const Key('settings-check-updates-button')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('settings-flash-firmware-button')),
+      findsOneWidget,
+    );
+    expect(find.byType(OutlinedButton), findsNWidgets(2));
     expect(find.byType(FilledButton), findsNothing);
   });
 

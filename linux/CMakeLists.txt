@@ -94,6 +94,12 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
+# App icon, read back at runtime by my_application.cc (gtk_window_set_icon_from_file) and by the
+# web installer's .desktop entry (apps/web/src/app/desktop/install.sh in autonomous-code) — both
+# expect it at the bundle root, next to the executable.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/harness.png" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

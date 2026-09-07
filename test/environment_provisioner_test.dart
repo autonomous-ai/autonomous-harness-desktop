@@ -58,6 +58,21 @@ void main() {
     },
   );
 
+  test(
+    'uses a checksum-pinned official Node fallback for each Linux architecture',
+    () {
+      final x64 = ManagedNodeArtifact.officialFallback('linux-x64');
+      final arm64 = ManagedNodeArtifact.officialFallback('linux-arm64');
+
+      expect(x64.version, 'v22.23.2');
+      expect(x64.url.host, 'nodejs.org');
+      expect(x64.url.path, contains('linux-x64.tar.gz'));
+      expect(x64.sha256, hasLength(64));
+      expect(arm64.url.path, contains('linux-arm64.tar.gz'));
+      expect(arm64.sha256, isNot(x64.sha256));
+    },
+  );
+
   test('uses an existing managed Node and skips all downloads', () async {
     final runtime = Directory('${scratch.path}/runtime')
       ..createSync(recursive: true);
@@ -121,6 +136,86 @@ void main() {
     expect(statusCalls, 2);
     expect(installEnvironments, hasLength(1));
     expect(installEnvironments.single?['HARNESS_NODE_BINARY'], node.path);
+  });
+
+  test('fails only when the platform is neither macOS nor Linux', () async {
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      architecture: () async => 'x86_64',
+      run: (executable, arguments, {environment}) async => result(0),
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isFalse);
+    expect(readiness.steps[EnvironmentStep.node], EnvironmentStepStatus.failed);
+    expect(readiness.message, contains('macOS and Linux only'));
+  });
+
+  test('provisions on Linux using an existing managed Node', () async {
+    final runtime = Directory('${scratch.path}/runtime')
+      ..createSync(recursive: true);
+    final node = File('${runtime.path}/node-v22/bin/node')
+      ..createSync(recursive: true);
+    File('${runtime.path}/current-node').writeAsStringSync('${node.path}\n');
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      architecture: () async => 'x86_64',
+      run: (executable, arguments, {environment}) async {
+        if (executable == node.path) return result(0, stdout: 'v22.4.1\n');
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":false}\n');
+        }
+        return result(0, stdout: 'tmux 3.4');
+      },
+    );
+
+    final ready = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(ready.isReady, isTrue);
+  });
+
+  test('opens a terminal with an apt-based script on Linux', () async {
+    final runtime = Directory('${scratch.path}/runtime')
+      ..createSync(recursive: true);
+    final node = File('${runtime.path}/node-v22/bin/node')
+      ..createSync(recursive: true);
+    File('${runtime.path}/current-node').writeAsStringSync('${node.path}\n');
+    String? terminalScript;
+    final shellCommands = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      architecture: () async => 'x86_64',
+      openTerminal: (path) async => terminalScript = path,
+      run: (executable, arguments, {environment}) async {
+        final command = arguments.join(' ');
+        shellCommands.add(command);
+        if (executable == node.path) return result(0, stdout: 'v22.4.1\n');
+        if (command.contains('tmux')) return result(1);
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":false}\n');
+        }
+        return result(0);
+      },
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isFalse);
+    expect(readiness.needsTerminal, isTrue);
+    expect(terminalScript, isNotNull);
+    // Linux never shells out to Homebrew.
+    expect(shellCommands.any((c) => c.contains('brew')), isFalse);
+    expect(
+      await File(terminalScript!).readAsString(),
+      contains('apt-get install -y tmux'),
+    );
   });
 
   test('installs the Grid CLI once, and never over an existing one', () async {

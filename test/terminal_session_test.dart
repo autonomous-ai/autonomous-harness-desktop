@@ -589,6 +589,46 @@ void main() {
     },
   );
 
+  test('terminal_link_mode updates linkMode, ignoring a stale stream id', () async {
+    await ready();
+    expect(session.linkMode, isNull);
+
+    await session.handleFrame('terminal_link_mode', {
+      'streamId': streamId,
+      'mode': 'p2p',
+    });
+    expect(session.linkMode, 'p2p');
+
+    await session.handleFrame('terminal_link_mode', {
+      'streamId': streamId,
+      'mode': 'relay',
+    });
+    expect(session.linkMode, 'relay');
+
+    // A frame for a DIFFERENT (stale) stream id must not touch this session's state.
+    await session.handleFrame('terminal_link_mode', {
+      'streamId': 'some-other-stream',
+      'mode': 'p2p',
+    });
+    expect(session.linkMode, 'relay');
+  });
+
+  test('linkMode resets whenever streamId resets (reopen/close/error)', () async {
+    await ready();
+    await session.handleFrame('terminal_link_mode', {
+      'streamId': streamId,
+      'mode': 'p2p',
+    });
+    expect(session.linkMode, 'p2p');
+
+    await session.handleFrame('terminal_closed', {
+      'streamId': streamId,
+      'reason': 'closed by peer',
+    });
+    expect(session.streamId, isNull);
+    expect(session.linkMode, isNull);
+  });
+
   test('resync retries three times, reopens once, then fails closed', () async {
     session.dispose();
     session = TerminalSession(

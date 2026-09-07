@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/app_version.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/section_scaffold.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../state/app_state.dart';
+import '../../widgets/flash_firmware_dialog.dart';
 import '../../widgets/update_notice.dart';
 
 /// Settings ▸ About: which build this is, and the way to ask for a newer one.
@@ -23,6 +24,13 @@ import '../../widgets/update_notice.dart';
 /// drives, so the menu and this button can't answer differently. The card's
 /// pill is the quiet half of that: the dialog is the answer to a question you
 /// asked, the pill is the state you can see without asking.
+///
+/// "Flash dial firmware…" opens the same [showFlashFirmwareDialog] the native
+/// macOS "Flash Firmware…" menu item does. It is in the card on every platform
+/// rather than only where it is strictly needed, because on Linux and Windows
+/// there is no native app menu and this is the ONLY way to reach it — and a
+/// control that appears on some machines and not others is the harder thing to
+/// support.
 class AboutSection extends StatefulWidget {
   const AboutSection({super.key, required this.notifier});
 
@@ -129,6 +137,8 @@ class _AboutCard extends StatelessWidget {
           Container(height: 1, color: grid.AppPalette.divider),
           const SizedBox(height: 14),
           _CheckRow(checking: checking, onCheck: onCheck),
+          const SizedBox(height: 12),
+          const _FlashRow(),
         ],
       ),
     );
@@ -195,7 +205,10 @@ class _VersionLine extends StatefulWidget {
 class _VersionLineState extends State<_VersionLine> {
   // Once per mount: the line rebuilds with every pill change, and a future
   // built in `build` would put the placeholder back for a frame each time.
-  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
+  // `runningAppVersion`, not `PackageInfo` directly: `flutter build linux` has
+  // nowhere to stamp a release version, so a packaged Linux build reads it from
+  // the `version.txt` the release script writes instead.
+  late final Future<String> _info = runningAppVersion();
 
   _PillState get state => widget.state;
 
@@ -210,10 +223,10 @@ class _VersionLineState extends State<_VersionLine> {
     );
     return Row(
       children: [
-        FutureBuilder<PackageInfo>(
+        FutureBuilder<String>(
           future: _info,
           builder: (context, snapshot) {
-            final version = snapshot.data?.version;
+            final version = snapshot.data;
             // A blank the width of a version while it is being read, not an
             // em dash: a dash is a value ("no version"), and this line is
             // about to have one. The dash is kept for the case it means —
@@ -355,6 +368,38 @@ class _CheckRow extends StatelessWidget {
           key: const Key('settings-check-updates-button'),
           onPressed: checking ? null : () => onCheck(),
           child: Text(checking ? 'Checking…' : 'Check for updates'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The dial, in the same sentence-then-button shape the update row uses, so the
+/// card reads as one object with two things you can ask of it.
+class _FlashRow extends StatelessWidget {
+  const _FlashRow();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Text(
+            'The hardware dial takes its firmware over USB.',
+            style: TextStyle(
+              color: grid.AppPalette.textSecondary,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+        ),
+        const SizedBox(width: 18),
+        OutlinedButton(
+          key: const Key('settings-flash-firmware-button'),
+          onPressed: () => showFlashFirmwareDialog(context),
+          child: const Text('Flash dial firmware…'),
         ),
       ],
     );

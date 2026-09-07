@@ -1,8 +1,8 @@
 # Harness Desktop
 
 Harness Desktop is the native Flutter client for browsing Harness machines and
-interacting with their terminal-backed agents. It runs natively on macOS and
-includes Linux and Windows runners.
+interacting with their terminal-backed agents. It runs natively on **macOS
+and Linux (Ubuntu)** and includes an unexercised Windows runner.
 
 ## Development
 
@@ -12,7 +12,7 @@ root:
 ```bash
 flutter pub get
 flutter test
-flutter run -d macos
+flutter run -d macos   # or: flutter run -d linux
 ```
 
 Useful validation commands:
@@ -21,6 +21,7 @@ Useful validation commands:
 dart analyze
 flutter build macos --debug
 flutter build macos --release
+flutter build linux --release   # must run on an Ubuntu host — no cross-compiling
 ```
 
 The terminal core is vendored at `third_party/xterm`. Do not replace it with an
@@ -56,7 +57,8 @@ The application self-updates from the Harness desktop metadata manifest in the
 public GCS release bucket. Release commands stay in this repository:
 
 ```bash
-make upload-desktop
+make upload-desktop           # macOS
+make upload-desktop-linux     # Linux (x64) — must run on an Ubuntu build host
 make upload-node-runtime ARGS="22.16.0"
 ```
 
