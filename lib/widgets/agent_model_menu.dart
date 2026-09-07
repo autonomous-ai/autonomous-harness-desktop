@@ -27,6 +27,7 @@ import '../grid/agent_grid.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_models_controller.dart';
 import '../grid/grid_selection_store.dart';
+import '../grid/node_display.dart' show kAutoModelId, modelKey;
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/skeleton.dart';
@@ -88,8 +89,16 @@ List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
   ];
   switch (state) {
     case GridModelsReady(:final models):
+      // `auto` is dropped, not listed: the relay advertises its virtual router in `/models` (see
+      // [kAutoModelId]), so passing that list through unfiltered put a SECOND "Auto" under the one
+      // above — and the two are not the same choice. This one carries `value: null`, which leaves
+      // ANTHROPIC_MODEL unset and is the state [agentModelLabel] prints as "Auto"; the relay's row
+      // would send `ANTHROPIC_MODEL=auto` and leave the header reading the raw id back. Matching on
+      // [modelKey] rather than the string: ids arrive from three sources that disagree on case.
       options.addAll(
-        models.map((model) => AgentModelOption(label: model, value: model)),
+        models
+            .where((model) => modelKey(model) != kAutoModelId)
+            .map((model) => AgentModelOption(label: model, value: model)),
       );
     case GridModelsLoading():
       options.add(

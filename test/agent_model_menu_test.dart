@@ -32,6 +32,66 @@ void main() {
     );
   });
 
+  group('the option list', () {
+    // The menu offers its own "Auto" (value: null — leave ANTHROPIC_MODEL unset), and the relay
+    // advertises a virtual `auto` router of its own in /models. Passing that list through raw put
+    // both on screen: two rows reading the same word that send different things, and picking the
+    // relay's left the header printing the raw id back instead of "Auto".
+    test("the relay's virtual auto router is not offered beside the menu's own Auto", () {
+      final options = agentModelMenuOptions(
+        const GridModelsReady(['auto', 'Brute Force', 'Feedback Loop']),
+      );
+
+      expect(
+        options.where((o) => o.label.toLowerCase() == 'auto').length,
+        1,
+        reason: 'exactly one Auto row, whatever the relay advertises',
+      );
+      final auto = options.firstWhere((o) => o.label == 'Auto');
+      expect(
+        auto.value,
+        isNull,
+        reason: 'the surviving Auto must be the one agentModelLabel prints for a null model',
+      );
+    });
+
+    test('a relay that capitalises its router id is still recognised', () {
+      // Ids reach the app from the catalog, a node's own advertisement and the relay's
+      // lowercased public_id — three sources that disagree on case, which is why the filter
+      // goes through modelKey rather than comparing the string.
+      for (final id in ['auto', 'Auto', 'AUTO', ' auto ']) {
+        expect(
+          agentModelMenuOptions(GridModelsReady([id]))
+              .where((o) => o.label.toLowerCase().trim() == 'auto')
+              .length,
+          1,
+          reason: 'relay advertised $id',
+        );
+      }
+    });
+
+    test('real models are still listed, and keep their id as their value', () {
+      final options = agentModelMenuOptions(
+        const GridModelsReady(['auto', 'GLM-4.7-Flash']),
+      );
+
+      expect(options.map((o) => o.label), [
+        'Own login',
+        'Auto',
+        'GLM-4.7-Flash',
+      ]);
+      expect(options.last.value, 'GLM-4.7-Flash');
+      expect(options.first.value, kOwnLoginModelOption);
+    });
+
+    test('a grid serving only auto offers no model rows at all', () {
+      expect(
+        agentModelMenuOptions(const GridModelsReady(['auto'])).map((o) => o.label),
+        ['Own login', 'Auto'],
+      );
+    });
+  });
+
   group('an already-open menu', () {
     // Fix-round regression: a PopupMenuButton's itemBuilder is a one-shot snapshot handed to
     // showMenu() before the tap that triggers a load even finishes — so a menu opened on an
