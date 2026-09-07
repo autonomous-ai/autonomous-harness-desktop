@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+
+import '../core/app_version.dart';
 
 /// Published by `scripts/upload-desktop.sh` (`make upload-desktop`) — see
 /// `RELEASE.md` for the full publish-side design this mirrors.
@@ -15,8 +16,9 @@ const _defaultMetadataUrl =
 /// "Rolling out safely" section. Empty (the default) means "use the real manifest".
 const _metadataUrlOverride = String.fromEnvironment('DESKTOP_UPDATE_METADATA_URL');
 
-/// Must match OTA_KEY in scripts/upload-desktop.sh.
-const _otaKey = 'desktop-macos';
+/// Must match OTA_KEY in scripts/upload-desktop.sh / scripts/upload-desktop-linux.sh.
+const _otaKeyMacOS = 'desktop-macos';
+const _otaKeyLinux = 'desktop-linux-x64';
 
 String get _metadataUrl =>
     _metadataUrlOverride.isNotEmpty ? _metadataUrlOverride : _defaultMetadataUrl;
@@ -94,10 +96,19 @@ List<int>? _parseSemverCore(String version) {
 
 String _singleQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";
 
-/// Walks up from the running executable to the enclosing `.app` bundle —
-/// `.../Harness.app/Contents/MacOS/Harness` -> `.../Harness.app`.
-String? currentBundlePath([String? executablePath]) {
-  var dir = File(executablePath ?? Platform.resolvedExecutable).parent;
+/// Resolves the running build's install root.
+///
+/// On macOS this walks up from the running executable to the enclosing
+/// `.app` bundle — `.../Harness.app/Contents/MacOS/Harness` -> `.../Harness.app`.
+/// On Linux the packaged build (see `scripts/upload-desktop-linux.sh`) is a
+/// flat directory — the `harness` executable, `lib/`, and `data/` all sit
+/// directly inside it — so the bundle root is simply the executable's parent.
+String? currentBundlePath([String? executablePath, bool? isLinux]) {
+  final resolved = executablePath ?? Platform.resolvedExecutable;
+  if (isLinux ?? Platform.isLinux) {
+    return File(resolved).parent.path;
+  }
+  var dir = File(resolved).parent;
   for (var i = 0; i < 6; i++) {
     if (dir.path.endsWith('.app')) return dir.path;
     final parent = dir.parent;
@@ -109,7 +120,7 @@ String? currentBundlePath([String? executablePath]) {
 
 Future<void> _defaultLaunchDetached(String command) async {
   await Process.start(
-    '/bin/zsh',
+    Platform.isLinux ? '/bin/bash' : '/bin/zsh',
     ['-l', '-c', command],
     mode: ProcessStartMode.detached,
   );
@@ -124,6 +135,7 @@ class DesktopUpdater {
   final Future<void> Function(String command) _launchDetached;
   final String _metadataUrlForInstance;
   final bool _releaseMode;
+  final bool _isLinux;
 
   DesktopUpdater({
     Dio? dio,
@@ -135,6 +147,10 @@ class DesktopUpdater {
     // Defaults to the real Flutter build mode — see checkOnce()'s guard. `flutter test` always runs
     // outside release mode, so tests that want to exercise checkOnce()'s real logic pass `true` here.
     bool? releaseMode,
+    // Defaults to the real host OS. Tests force this to exercise the Linux packaging/relaunch branch
+    // (tar/version.txt instead of ditto/plutil) from any host, since the actual archive tooling used
+    // on that branch (tar) is present on every dev machine, unlike ditto/plutil on Linux.
+    bool? isLinux,
   }) : _dio =
            dio ??
            Dio(
@@ -145,7 +161,10 @@ class DesktopUpdater {
            ),
        _launchDetached = launchDetached ?? _defaultLaunchDetached,
        _metadataUrlForInstance = metadataUrl ?? _metadataUrl,
-       _releaseMode = releaseMode ?? kReleaseMode;
+       _releaseMode = releaseMode ?? kReleaseMode,
+       _isLinux = isLinux ?? Platform.isLinux;
+
+  String get _otaKey => _isLinux ? _otaKeyLinux : _otaKeyMacOS;
 
   /// Fetches the manifest and returns the newer entry, or null if this app is already current (or
   /// the manifest/network is unavailable — treated the same as "nothing to do", never surfaced as an
@@ -157,7 +176,7 @@ class DesktopUpdater {
   Future<UpdateInfo?> checkOnce({String? currentVersion}) async {
     if (!_releaseMode) return null;
     try {
-      final running = currentVersion ?? (await PackageInfo.fromPlatform()).version;
+      final running = currentVersion ?? await runningAppVersion();
       final response = await _dio.get<Map<String, dynamic>>(_metadataUrlForInstance);
       final entry = response.data?[_otaKey];
       if (entry is! Map) return null;
@@ -192,8 +211,8 @@ class DesktopUpdater {
     Duration interval = const Duration(hours: 6),
     required void Function(UpdateInfo info) onUpdateAvailable,
     // Forwarded to checkOnce() on every tick — tests pass this to avoid checkOnce()'s default
-    // PackageInfo.fromPlatform() call, which needs a platform method channel real production code
-    // gets for free but a plain `test()` doesn't.
+    // runningAppVersion() call, which (via PackageInfo.fromPlatform()) needs a platform method
+    // channel real production code gets for free but a plain `test()` doesn't.
     String? currentVersion,
   }) {
     void tick() {
@@ -235,36 +254,62 @@ class DesktopUpdater {
       }
 
       stagingDir = await Directory.systemTemp.createTemp('harness-update-');
-      final zipPath = '${stagingDir.path}/Harness-macos.zip';
-      await File(zipPath).writeAsBytes(bytes, flush: true);
+      final archivePath = _isLinux
+          ? '${stagingDir.path}/Harness-linux-x64.tar.gz'
+          : '${stagingDir.path}/Harness-macos.zip';
+      await File(archivePath).writeAsBytes(bytes, flush: true);
 
-      final unzip = await Process.run('/usr/bin/ditto', [
-        '-x',
-        '-k',
-        zipPath,
-        stagingDir.path,
-      ]);
-      if (unzip.exitCode != 0) {
-        debugPrint('DesktopUpdater: ditto unzip failed: ${unzip.stderr}');
+      final unpack = _isLinux
+          ? await Process.run('/usr/bin/tar', [
+              '-xzf',
+              archivePath,
+              '-C',
+              stagingDir.path,
+            ])
+          : await Process.run('/usr/bin/ditto', [
+              '-x',
+              '-k',
+              archivePath,
+              stagingDir.path,
+            ]);
+      if (unpack.exitCode != 0) {
+        debugPrint(
+          'DesktopUpdater: ${_isLinux ? 'tar' : 'ditto'} unpack failed: ${unpack.stderr}',
+        );
         await stagingDir.delete(recursive: true);
         return null;
       }
 
-      final bundlePath = '${stagingDir.path}/Harness.app';
+      final bundlePath = _isLinux
+          ? '${stagingDir.path}/Harness'
+          : '${stagingDir.path}/Harness.app';
       if (!Directory(bundlePath).existsSync()) {
-        debugPrint('DesktopUpdater: no Harness.app inside the downloaded zip');
+        debugPrint('DesktopUpdater: no Harness bundle inside the downloaded archive');
         await stagingDir.delete(recursive: true);
         return null;
       }
 
-      final plutil = await Process.run('/usr/bin/plutil', [
-        '-extract',
-        'CFBundleShortVersionString',
-        'raw',
-        '$bundlePath/Contents/Info.plist',
-      ]);
-      final stagedVersion = (plutil.stdout as String?)?.trim();
-      if (plutil.exitCode != 0 || stagedVersion != info.version) {
+      // macOS reads the version Xcode stamped into Info.plist at build time; `flutter build linux`
+      // has no equivalent, so the Linux release script (scripts/upload-desktop-linux.sh) writes it
+      // into a plain version.txt at the bundle root instead — see lib/core/app_version.dart.
+      String? stagedVersion;
+      if (_isLinux) {
+        final versionFile = File('$bundlePath/version.txt');
+        stagedVersion = await versionFile.exists()
+            ? (await versionFile.readAsString()).trim()
+            : null;
+      } else {
+        final plutil = await Process.run('/usr/bin/plutil', [
+          '-extract',
+          'CFBundleShortVersionString',
+          'raw',
+          '$bundlePath/Contents/Info.plist',
+        ]);
+        stagedVersion = plutil.exitCode == 0
+            ? (plutil.stdout as String?)?.trim()
+            : null;
+      }
+      if (stagedVersion != info.version) {
         debugPrint(
           'DesktopUpdater: staged bundle reports version "$stagedVersion", expected "${info.version}"',
         );
@@ -298,28 +343,36 @@ class DesktopUpdater {
     required int selfPid,
     String? runningBundlePath,
   }) async {
-    final bundlePath = runningBundlePath ?? currentBundlePath();
+    final bundlePath = runningBundlePath ?? currentBundlePath(null, _isLinux);
     if (bundlePath == null) {
       debugPrint(
-        'DesktopUpdater: could not resolve the running .app bundle path — not applying',
+        'DesktopUpdater: could not resolve the running bundle path — not applying',
       );
       return false;
     }
     final prevPath = '$bundlePath.prev';
-    final executableInBundle = '$bundlePath/Contents/MacOS/Harness';
+    final executableInBundle = _isLinux
+        ? '$bundlePath/harness'
+        : '$bundlePath/Contents/MacOS/Harness';
+    // macOS relaunches through `open -n` (LaunchServices, so Dock/menu-bar identity stays correct).
+    // Linux has no such registry for a plain packaged binary — exec it directly, detached from this
+    // shell so it outlives the helper script.
+    final relaunch = _isLinux
+        ? 'nohup ${_singleQuote(executableInBundle)} >/dev/null 2>&1 & disown'
+        : 'open -n ${_singleQuote(bundlePath)}';
     final command = '''
 while kill -0 $selfPid 2>/dev/null; do sleep 0.2; done
 rm -rf ${_singleQuote(prevPath)}
 mv ${_singleQuote(bundlePath)} ${_singleQuote(prevPath)}
 mv ${_singleQuote(staged.bundlePath)} ${_singleQuote(bundlePath)}
-open -n ${_singleQuote(bundlePath)}
+$relaunch
 sleep 3
 if pgrep -f ${_singleQuote(executableInBundle)} >/dev/null; then
   rm -rf ${_singleQuote(prevPath)}
 else
   rm -rf ${_singleQuote(bundlePath)}
   mv ${_singleQuote(prevPath)} ${_singleQuote(bundlePath)}
-  open -n ${_singleQuote(bundlePath)}
+  $relaunch
 fi
 rm -rf ${_singleQuote(staged.stagingDirPath)}
 ''';

@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/app_version.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/section_scaffold.dart';
 import '../../state/app_state.dart';
+import '../../widgets/flash_firmware_dialog.dart';
 import '../../widgets/update_notice.dart';
 
 /// Settings ▸ About: which build this is, and the way to ask for a newer one.
 ///
 /// The check runs through [AppNotifier.checkForUpdates] and reports through
 /// [showUpdateCheckDialog] — the same pair the "Check for Updates…" menu item
-/// drives, so the menu and this button can't answer differently.
+/// drives, so the menu and this button can't answer differently. The "Flash
+/// dial firmware…" button drives the same [showFlashFirmwareDialog] the
+/// native macOS "Flash Firmware…" menu item does — on platforms with no
+/// native app menu (Linux, Windows) this is the only way to reach it.
 class AboutSection extends StatefulWidget {
   const AboutSection({super.key, required this.notifier});
 
@@ -58,6 +62,12 @@ class _AboutSectionState extends State<AboutSection> {
                 onPressed: _checking ? null : _check,
                 child: Text(_checking ? 'Checking…' : 'Check for updates'),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                key: const Key('settings-flash-firmware-button'),
+                onPressed: () => showFlashFirmwareDialog(context),
+                child: const Text('Flash dial firmware…'),
+              ),
             ],
           ),
         ),
@@ -75,8 +85,8 @@ class _VersionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return FutureBuilder<PackageInfo>(
-      future: PackageInfo.fromPlatform(),
+    return FutureBuilder<String>(
+      future: runningAppVersion(),
       builder: (context, snapshot) => Row(
         children: [
           SizedBox(
@@ -90,7 +100,7 @@ class _VersionRow extends StatelessWidget {
             ),
           ),
           Text(
-            snapshot.data?.version ?? '—',
+            snapshot.data ?? '—',
             style: TextStyle(
               color: grid.AppPalette.textPrimary,
               fontSize: 12.5,

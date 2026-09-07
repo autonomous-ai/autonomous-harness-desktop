@@ -113,6 +113,10 @@ class ManagedNodeArtifact {
           '61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6',
       'darwin-x64':
           '58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026',
+      'linux-x64':
+          'b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a',
+      'linux-arm64':
+          '013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30',
     };
     final checksum = checksums[platformKey];
     if (checksum == null) {
@@ -147,13 +151,38 @@ Future<ProcessResult> _defaultRun(
 Future<String> _defaultArchitecture() async {
   final result = await Process.run('/usr/bin/uname', ['-m']);
   if (result.exitCode != 0) {
-    throw StateError('Could not determine Mac architecture');
+    throw StateError('Could not determine machine architecture');
   }
   return (result.stdout as String).trim();
 }
 
-Future<void> _defaultOpenTerminal(String scriptPath) =>
-    Process.start('/usr/bin/open', ['-a', 'Terminal', scriptPath]).then((_) {});
+/// macOS opens a real Terminal.app window. Linux has no single canonical
+/// terminal, so this tries the Debian/Ubuntu `update-alternatives` target
+/// first, then the two most common emulators, and gives up only if none of
+/// them exist on the box.
+Future<void> _defaultOpenTerminal(String scriptPath) async {
+  if (Platform.isMacOS) {
+    await Process.start('/usr/bin/open', ['-a', 'Terminal', scriptPath]);
+    return;
+  }
+  final candidates = <List<String>>[
+    ['x-terminal-emulator', '-e', scriptPath],
+    ['gnome-terminal', '--', scriptPath],
+    ['xterm', '-e', scriptPath],
+  ];
+  for (final candidate in candidates) {
+    try {
+      await Process.start(candidate.first, candidate.skip(1).toList());
+      return;
+    } on ProcessException {
+      continue;
+    }
+  }
+  throw StateError(
+    'Could not find a terminal emulator to launch (tried x-terminal-emulator, '
+    'gnome-terminal, xterm)',
+  );
+}
 
 /// Prepares the only system dependencies required by the desktop transport.
 ///
@@ -167,6 +196,7 @@ class EnvironmentProvisioner {
   final TerminalLauncher _openTerminal;
   final ArchitectureReader _architecture;
   final bool _isMacOS;
+  final bool _isLinux;
 
   EnvironmentProvisioner({
     Directory? harnessHome,
@@ -175,6 +205,7 @@ class EnvironmentProvisioner {
     TerminalLauncher? openTerminal,
     ArchitectureReader? architecture,
     bool? isMacOS,
+    bool? isLinux,
   }) : harnessHome = harnessHome ?? Directory(_defaultHarnessHome()),
        _dio =
            dio ??
@@ -187,7 +218,8 @@ class EnvironmentProvisioner {
        _run = run ?? _defaultRun,
        _openTerminal = openTerminal ?? _defaultOpenTerminal,
        _architecture = architecture ?? _defaultArchitecture,
-       _isMacOS = isMacOS ?? Platform.isMacOS;
+       _isMacOS = isMacOS ?? Platform.isMacOS,
+       _isLinux = isLinux ?? Platform.isLinux;
 
   static String _defaultHarnessHome() {
     final home = Platform.environment['HOME'];
@@ -227,12 +259,12 @@ class EnvironmentProvisioner {
       onProgress(state);
     }
 
-    if (!_isMacOS) {
+    if (!_isMacOS && !_isLinux) {
       emit(
         step: EnvironmentStep.node,
         status: EnvironmentStepStatus.failed,
         message:
-            'Automatic environment setup is currently available on macOS only.',
+            'Automatic environment setup is currently available on macOS and Linux only.',
       );
       return state;
     }
@@ -272,8 +304,10 @@ class EnvironmentProvisioner {
         emit(
           step: EnvironmentStep.tmux,
           status: EnvironmentStepStatus.needsTerminal,
-          message: 'Complete the macOS setup in Terminal, then click Retry.',
-          output: 'Terminal opened to install Homebrew and tmux.',
+          message: 'Complete the setup in the terminal window, then click Retry.',
+          output: _isMacOS
+              ? 'Terminal opened to install Homebrew and tmux.'
+              : 'Terminal opened to install tmux.',
         );
         return state;
       }
@@ -303,11 +337,12 @@ class EnvironmentProvisioner {
     if (existing != null) return existing;
 
     final architecture = await _architecture();
-    final platformKey = switch (architecture) {
-      'arm64' => 'darwin-arm64',
-      'x86_64' => 'darwin-x64',
-      _ => throw StateError('Unsupported Mac architecture: $architecture'),
+    final archKey = switch (architecture) {
+      'arm64' || 'aarch64' => 'arm64',
+      'x86_64' || 'amd64' => 'x64',
+      _ => throw StateError('Unsupported architecture: $architecture'),
     };
+    final platformKey = '${_isMacOS ? 'darwin' : 'linux'}-$archKey';
     final artifact = await _nodeArtifactFor(platformKey);
     final response = await _dio.get<List<int>>(
       artifact.url.toString(),
@@ -466,14 +501,20 @@ class EnvironmentProvisioner {
 
   Future<bool> _ensureTmux() async {
     if (await _hasTmux()) return true;
-    final brew = await _shell('command -v brew');
-    if (brew.exitCode == 0 && (brew.stdout as String).trim().isNotEmpty) {
-      final install = await _shell('brew install tmux');
-      if (install.exitCode != 0) {
-        throw StateError('Could not install tmux: ${_resultText(install)}');
+    if (_isMacOS) {
+      final brew = await _shell('command -v brew');
+      if (brew.exitCode == 0 && (brew.stdout as String).trim().isNotEmpty) {
+        final install = await _shell('brew install tmux');
+        if (install.exitCode != 0) {
+          throw StateError('Could not install tmux: ${_resultText(install)}');
+        }
+        return _hasTmux();
       }
-      return _hasTmux();
     }
+    // Linux (and a Mac without Homebrew): a package manager install needs a
+    // password prompt with a real tty, which a non-interactive Process.run
+    // can't supply — hand it to an opened terminal instead, same as the
+    // Homebrew-install fallback above.
     final script = await _writeTerminalBootstrapScript();
     await _openTerminal(script.path);
     return false;
@@ -486,8 +527,9 @@ class EnvironmentProvisioner {
 
   Future<File> _writeTerminalBootstrapScript() async {
     final directory = await Directory.systemTemp.createTemp('harness-tmux-');
-    final script = File('${directory.path}/install-tmux.command');
-    await script.writeAsString('''#!/bin/zsh
+    if (_isMacOS) {
+      final script = File('${directory.path}/install-tmux.command');
+      await script.writeAsString('''#!/bin/zsh
 set -e
 if ! xcode-select -p >/dev/null 2>&1; then
   echo 'Installing Apple Command Line Tools. Finish the macOS dialog, then return to Harness and click Retry.'
@@ -502,6 +544,24 @@ eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shel
 brew install tmux
 echo 'tmux is ready. Return to Harness.'
 ''', flush: true);
+      await _run('/bin/chmod', ['700', script.path]);
+      return script;
+    }
+    final script = File('${directory.path}/install-tmux.sh');
+    await script.writeAsString('''#!/bin/bash
+set -e
+if command -v apt-get >/dev/null 2>&1; then
+  echo 'Installing tmux (you may be asked for your password)…'
+  sudo apt-get update
+  sudo apt-get install -y tmux
+else
+  echo 'Automatic tmux install only supports apt-based distributions (Ubuntu/Debian).'
+  echo "Install tmux with your distribution's package manager, then return to Harness and click Retry."
+  read -r -p 'Press Enter to close this window…'
+  exit 0
+fi
+echo 'tmux is ready. Return to Harness.'
+''', flush: true);
     await _run('/bin/chmod', ['700', script.path]);
     return script;
   }
@@ -509,7 +569,7 @@ echo 'tmux is ready. Return to Harness.'
   Future<ProcessResult> _shell(
     String command, {
     Map<String, String>? environment,
-  }) => _run('/bin/zsh', [
+  }) => _run(_isMacOS ? '/bin/zsh' : '/bin/bash', [
     '-l',
     '-c',
     'export PATH="\$HOME/.local/bin:\$PATH"; $command',

@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
+import '../core/app_version.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 import '../update/desktop_updater.dart';
@@ -663,8 +663,8 @@ class _Fact extends StatelessWidget {
 
 class _InstalledVersion extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => FutureBuilder<PackageInfo>(
-    future: PackageInfo.fromPlatform(),
-    builder: (context, snapshot) => Text(snapshot.data?.version ?? '—'),
+  Widget build(BuildContext context) => FutureBuilder<String>(
+    future: runningAppVersion(),
+    builder: (context, snapshot) => Text(snapshot.data ?? '—'),
   );
 }

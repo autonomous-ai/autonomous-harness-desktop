@@ -4,8 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Harness Desktop — a Flutter macOS app (Linux/Windows runners exist but are unexercised) that lists Harness
-machines and attaches xterm terminals to the agents running on them. Package name is `harness`
+Harness Desktop — a Flutter app that lists Harness machines and attaches xterm terminals to the
+agents running on them. **macOS and Linux (Ubuntu) are both real, released targets** — first-run
+provisioning (`lib/bootstrap/environment_provisioner.dart`), self-update
+(`lib/update/desktop_updater.dart`), and packaging (`scripts/upload-desktop.sh` /
+`scripts/upload-desktop-linux.sh`, see RELEASE.md) all branch per-OS internally rather than being
+separate code paths. The Windows runner exists but is unexercised. Package name is `harness`
 (`import 'package:harness/...'`). This repo was split out of a monorepo; a few comments still point at
 files that live in the `autonomous-harness` (CLI) or `autonomous-code` (backend) checkouts.
 
@@ -28,12 +32,14 @@ flutter analyze                                   # lints: package:flutter_lints
 flutter test                                      # whole unit/widget suite (test/)
 flutter test test/terminal_session_test.dart      # one file
 flutter test test/ws_conn_test.dart --plain-name "reconnects"   # one test by name substring
-flutter run -d macos
+flutter run -d macos                              # or: flutter run -d linux
 flutter build macos --debug
 flutter build macos --release
+flutter build linux --release                     # Ubuntu build host only — no cross-compiling
 ```
 
-Integration tests (`integration_test/`) need a device: `flutter test integration_test/native_terminal_e2e_test.dart -d macos`.
+Integration tests (`integration_test/`) need a device: `flutter test integration_test/native_terminal_e2e_test.dart -d macos`
+(swap `-d linux` on an Ubuntu host).
 `local_terminal_e2e_test.dart` and `prod_terminal_e2e_test.dart` still import `package:harness/e2ee/*`
 and `widgets/remote_setup_screen.dart`, which no longer exist, and `native_terminal_e2e_test.dart`
 builds `TerminalPanel` without its required `focused` argument — all three fail `flutter analyze` and
@@ -49,11 +55,16 @@ make terminal-local-e2e
 make terminal-prod-e2e       # opt-in, refuses without PROD_TERMINAL_E2E=1 + release evidence vars
 ```
 
-Release (`make upload-desktop`, `make upload-node-runtime ARGS=22.16.0`) is documented in RELEASE.md.
-The published version comes from the remote GCS `metadata.json`; `pubspec.yaml`'s `version:` is a
-placeholder and is never bumped. Test the updater against a scratch manifest with
+Release (`make upload-desktop` for macOS, `make upload-desktop-linux` for Linux — the latter must run
+on an Ubuntu host — plus `make upload-node-runtime ARGS=22.16.0`) is documented in RELEASE.md. Both
+platforms publish to the same GCS `metadata.json` under different keys (`desktop-macos` /
+`desktop-linux-x64`) and share one version number by default; `pubspec.yaml`'s `version:` is a
+placeholder and is never bumped — Linux instead gets a `version.txt` written into the built bundle at
+package time (see `lib/core/app_version.dart`, since `flutter build linux` has no Info.plist-style
+stamping). Test the updater against a scratch manifest with
 `--dart-define=DESKTOP_UPDATE_METADATA_URL=...`; `HARNESS_RUNTIME_METADATA_URL` does the same for the
-managed Node runtime.
+managed Node runtime (published per-OS/arch: `darwin-arm64`, `darwin-x64`, `linux-x64`,
+`linux-arm64`).
 
 ## Architecture
 

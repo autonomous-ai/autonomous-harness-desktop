@@ -138,3 +138,73 @@ The relaunch-health check (step 6 above) only guards against a build that fails 
 a build that starts but is otherwise broken, publish a **higher** version containing the older code —
 the updater refuses to move backwards, so editing the manifest to an older version will not roll a
 running app back.
+
+## Linux
+
+`make upload-desktop-linux` (`scripts/upload-desktop-linux.sh`) is the Linux (x64) counterpart of
+`make upload-desktop`, publishing to the **same** `metadata.json` under a different key so both
+platforms share one version number by default:
+
+```bash
+make upload-desktop-linux                     # auto-bump, same version semantics as upload-desktop
+make upload-desktop-linux ARGS="--force"      # mandatory update, same rule as macOS
+make upload-desktop-linux ARGS="1.3.0"        # explicit version
+make upload-desktop-linux ARGS="--no-bump"
+make upload-desktop-linux ARGS="--no-build"
+```
+
+Must run on an actual Ubuntu/Linux build host — `flutter build linux` cannot cross-compile a Linux
+bundle from macOS or Windows.
+
+**No signing/notarization step** — there is no Linux equivalent of Apple's Developer ID/notarization,
+and none is needed: the trust boundary is the same sha256-verified manifest entry `DesktopUpdater`
+already checks on every platform.
+
+**No Info.plist-style version stamp.** `flutter build linux` has nowhere to stamp a version the way
+Xcode does into `Info.plist`, so the release script writes a plain `version.txt` into the built
+bundle (`build/linux/x64/release/bundle/version.txt`) and asserts it before packaging. Both
+`lib/core/app_version.dart` (what Settings ▸ About shows) and `lib/update/desktop_updater.dart`'s
+`downloadAndStage()` (verifying a downloaded update) read this file back on Linux, falling through to
+`PackageInfo.fromPlatform()` (which would otherwise just return `pubspec.yaml`'s never-bumped
+placeholder) everywhere else.
+
+### GCS layout
+
+```
+gs://s3-autonomous-upgrade-3/harness/desktop/metadata.json          (shared with macOS, different key)
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-x64.tar.gz
+```
+
+```json
+{
+  "desktop-linux-x64": {
+    "version": "1.2.4",
+    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-linux-x64.tar.gz",
+    "sha256": "<64 hex>",
+    "size": 41230011
+  }
+}
+```
+
+The archive's top-level directory is always named `Harness/` (the release script stages the built
+`bundle/` under that name before tarring it) — `lib/update/desktop_updater.dart`'s
+`downloadAndStage()` expects the unpacked archive at `<stagingDir>/Harness`, matching the installed
+layout `apps/web/src/app/desktop/install.sh` (in `autonomous-code`) creates at
+`~/.local/opt/Harness`.
+
+### How a running Linux app self-updates
+
+Same shape as macOS (see above), with the platform-specific pieces:
+
+1. `DesktopUpdater` reads the `desktop-linux-x64` manifest entry instead of `desktop-macos`.
+2. The downloaded archive is a `.tar.gz`, unpacked with `tar` instead of `ditto`.
+3. The staged bundle's version comes from its `version.txt`, not an `Info.plist` extraction.
+4. On restart, the detached helper `mv`s the install directory (`~/.local/opt/Harness` by default)
+   the same way the macOS script swaps `Harness.app`, then execs the bundle's own `harness` binary
+   directly (there's no `open -n`/LaunchServices equivalent for a plain packaged Linux binary) and
+   checks it's still alive with `pgrep -f`, same as macOS.
+
+### Rolling out safely / rollback
+
+Same conventions as macOS — publish to a scratch `METADATA_PATH` first, and roll back only by
+publishing a newer version containing the older code (see above).
