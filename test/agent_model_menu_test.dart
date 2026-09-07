@@ -423,4 +423,269 @@ void main() {
       );
     });
   });
+
+  group('an agent that is mid-turn', () {
+    // Before this, the control let the user pick during a turn and surfaced the CLI's refusal
+    // afterwards as a SnackBar ("It is running a turn. Move it when the turn finishes.") — a
+    // round trip to be told the click was never going to work. The app already knows which
+    // agents are mid-turn, so the pill disables itself for exactly those and says why on hover.
+    // The AGENT_BUSY path is untouched and still the backstop: only the CLI reads the pane, and a
+    // turn can start between a build and a tap.
+    final beforeSelection = gridSelectionStore.value;
+
+    setUp(() {
+      gridSelectionStore.value = const GridSelection(
+        networkId: kNetworkId,
+        networkName: 'Live Grid',
+      );
+      gridModelsController.debugSetState(
+        kNetworkId,
+        const GridModelsReady(['GLM-4.7-Flash']),
+      );
+    });
+
+    tearDown(() {
+      gridSelectionStore.value = beforeSelection;
+      gridModelsController.debugSetState(kNetworkId, const GridModelsIdle());
+    });
+
+    /// Builds the control against a notifier the test can drive turns on.
+    Future<AppNotifier> pumpBusyMenu(WidgetTester tester) async {
+      final notifier = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
+      addTearDown(notifier.dispose);
+      notifier.machineStates['m1'] =
+          MachineState(
+              const Machine(
+                machineId: 'm1',
+                apiKey: '',
+                authMode: MachineAuthMode.remote,
+                name: 'm1',
+                status: 'online',
+              ),
+            )
+            ..agents = [
+              const Agent(
+                id: 'a1',
+                name: 'a1',
+                engine: 'claude',
+                status: 'active',
+                terminalAvailable: true,
+                grid: AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
+              ),
+            ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: AgentModelMenu(
+                notifier: notifier,
+                machineId: 'm1',
+                agentId: 'a1',
+                engine: 'claude',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      return notifier;
+    }
+
+    /// A turn ending, as the daemon announces it.
+    Future<void> endTurn(WidgetTester tester, AppNotifier notifier) async {
+      await notifier.handleMachineEventForTest('m1', {
+        'type': 'turn_ended',
+        'agentId': 'a1',
+      });
+      await tester.pump();
+    }
+
+    /// A turn starting, as the daemon announces it.
+    ///
+    /// `turn_started` arms a watchdog that clears a stalled turn (`turnActivityTimeout`), and a
+    /// pending timer fails the test binding on teardown. Every test here ends the turn for real
+    /// rather than letting the clock be mocked out from under the thing being tested.
+    Future<void> startTurn(WidgetTester tester, AppNotifier notifier) async {
+      await notifier.handleMachineEventForTest('m1', {
+        'type': 'turn_started',
+        'agentId': 'a1',
+      });
+      await tester.pump();
+    }
+
+    testWidgets('cannot be picked for, and says so', (tester) async {
+      final notifier = await pumpBusyMenu(tester);
+
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
+        isNotNull,
+        reason: 'an idle agent must still be pickable',
+      );
+
+      await startTurn(tester, notifier);
+
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
+        isNull,
+        reason: 'a mid-turn agent must not open a menu the CLI would refuse',
+      );
+      expect(
+        tester.widget<Tooltip>(find.byType(Tooltip)).message,
+        contains('running a turn'),
+        reason: 'the reason has to be readable without clicking first',
+      );
+
+      // Disarms the turn watchdog, which outlives the widget tree otherwise.
+      await endTurn(tester, notifier);
+    });
+
+    testWidgets('leads the label with a spinner, keeping its rim', (
+      tester,
+    ) async {
+      final notifier = await pumpBusyMenu(tester);
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      await startTurn(tester, notifier);
+
+      expect(
+        find.byIcon(Icons.expand_more_rounded),
+        findsNothing,
+        reason: 'a chevron on a control that cannot open is a lie',
+      );
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsOneWidget,
+        reason: 'the same mark the rail draws for a running agent',
+      );
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).rimmed,
+        isTrue,
+        reason:
+            'dropping the rim mid-turn would blink the one box on the strip',
+      );
+
+      await endTurn(tester, notifier);
+    });
+
+    testWidgets('puts the spinner ahead of the model name', (tester) async {
+      // Left of the label, not right: the spinner is about the AGENT, the chevron about the menu,
+      // and one slot carrying both was what made the busy pill hard to read.
+      final notifier = await pumpBusyMenu(tester);
+      await startTurn(tester, notifier);
+
+      expect(
+        tester.getCenter(find.byType(CircularProgressIndicator)).dx,
+        lessThan(tester.getCenter(find.text('Pinned-Model')).dx),
+      );
+
+      await endTurn(tester, notifier);
+    });
+
+    testWidgets('refuses the pointer rather than going inert', (tester) async {
+      // A rimmed, captioned pill that answers with a plain arrow reads as a dead control. The
+      // other disabled states drop the rim, so `basic` is already honest for them.
+      final notifier = await pumpBusyMenu(tester);
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).disabledCursor,
+        isNull,
+      );
+
+      await startTurn(tester, notifier);
+
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).disabledCursor,
+        SystemMouseCursors.forbidden,
+      );
+
+      await endTurn(tester, notifier);
+    });
+
+    testWidgets('unlocks itself when the turn ends', (tester) async {
+      // The regression this guards: nothing in the pane header listens to the notifier, so a pill
+      // built from turn state latches at whatever it was built with. Without a ListenableBuilder on
+      // the notifier this control stays disabled for the rest of the session.
+      final notifier = await pumpBusyMenu(tester);
+      await startTurn(tester, notifier);
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
+        isNull,
+      );
+
+      await endTurn(tester, notifier);
+
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
+        isNotNull,
+        reason: 'the control must reopen on its own when the turn finishes',
+      );
+      expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+    });
+
+    testWidgets('a standing refusal outranks the turn', (tester) async {
+      // An engine that can never use a grid says so whether or not it is mid-turn: an hourglass
+      // there would promise a wait that never resolves.
+      final notifier = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
+      addTearDown(notifier.dispose);
+      notifier.machineStates['m1'] =
+          MachineState(
+              const Machine(
+                machineId: 'm1',
+                apiKey: '',
+                authMode: MachineAuthMode.remote,
+                name: 'm1',
+                status: 'online',
+              ),
+            )
+            ..agents = [
+              const Agent(
+                id: 'a1',
+                name: 'a1',
+                engine: 'gemini',
+                status: 'active',
+              ),
+            ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: AgentModelMenu(
+                notifier: notifier,
+                machineId: 'm1',
+                agentId: 'a1',
+                engine: 'gemini',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await startTurn(tester, notifier);
+
+      expect(
+        tester.widget<Tooltip>(find.byType(Tooltip)).message,
+        'gemini cannot use a grid',
+        reason: 'the condition the user can act on is the one worth naming',
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).disabledCursor,
+        isNull,
+        reason:
+            'forbidden promises a wait; this refusal does not end on its own',
+      );
+
+      await endTurn(tester, notifier);
+    });
+  });
 }

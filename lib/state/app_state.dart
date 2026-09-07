@@ -1827,6 +1827,18 @@ class AppNotifier extends ChangeNotifier {
     });
   }
 
+  /// Whether this agent is mid-turn, by the app's own reckoning.
+  ///
+  /// Fed by `turn_started`/`turn_heartbeat`/`turn_ended` and by the same watchdog that clears a
+  /// stalled turn, so it answers what the tiles already draw rather than a second opinion.
+  ///
+  /// Read by the model menu, which disables itself for exactly the agents the CLI would refuse with
+  /// AGENT_BUSY. It is deliberately NOT authoritative: only the CLI inspects the pane, and a turn
+  /// can begin between a build and a tap. This spares the user the round trip in the common case;
+  /// the refusal remains the thing that guarantees no turn is lost.
+  bool agentIsProcessing(String machineId, String agentId) =>
+      machineStates[machineId]?.processingAgentIds.contains(agentId) ?? false;
+
   // ── blocked agents ────────────────────────────────────────────────────────
 
   /// The question this agent stopped on, if it is waiting for one.
@@ -2663,10 +2675,10 @@ class AppNotifier extends ChangeNotifier {
     for (final entry in entries) {
       panes.add(
         TerminalPane(
-          id: _nextPaneId++,
-          machineId: entry.machineId,
-          agentId: entry.agentId,
-        )
+            id: _nextPaneId++,
+            machineId: entry.machineId,
+            agentId: entry.agentId,
+          )
           ..composerVisible = entry.composerVisible
           ..pinnedSlot = entry.pinnedSlot,
       );

@@ -10,6 +10,12 @@
 /// under a running process. The restart is cheap (`--resume`, same pane, same scrollback) and the
 /// CLI refuses the one expensive case itself, answering AGENT_BUSY mid-turn rather than losing work —
 /// which is why picking applies immediately instead of opening a confirmation nobody needs.
+///
+/// That refusal is the CLI's floor, not this control's behaviour. The app already knows which agents
+/// are mid-turn — `MachineState.processingAgentIds`, fed by `turn_started`/`turn_ended` — so the
+/// control disables itself for exactly the agents the CLI would refuse, and says why on hover. The
+/// AGENT_BUSY path stays as the backstop it always was: the turn can start in the gap between a
+/// build and a tap, and only the CLI reads the pane itself.
 library;
 
 import 'dart:async';
@@ -161,120 +167,183 @@ class AgentModelMenuState extends State<AgentModelMenu> {
       valueListenable: gridSelectionStore,
       builder: (context, selection, _) {
         final capable = kGridCapableEngines.contains(widget.engine);
-        final enabled = capable && selection.hasGrid && !_pending;
-        final tooltip = !capable
-            ? '${widget.engine} cannot use a grid'
-            : !selection.hasGrid
-            ? 'Pick a grid to change this agent\'s model'
-            : 'Changing the model restarts the agent';
-        // See the class doc: this is what keeps an ALREADY-OPEN menu's rows current as
-        // gridModelsController moves through its states, rather than freezing them at open time.
+        // Listens to the NOTIFIER, not just the models controller: `busy` below is turn state, and
+        // nothing else in this subtree rebuilds when a turn starts or ends (the pane header holds no
+        // listener of its own). Without this the pill would latch at whatever it was built with and
+        // stay disabled after the turn it was disabled for had finished.
         return ListenableBuilder(
-          listenable: gridModelsController,
+          listenable: widget.notifier,
           builder: (context, _) {
-            final currentGrid = agentGridOf(
-              widget.notifier,
-              widget.machineId,
-              widget.agentId,
-            );
-            final label = agentModelLabel(currentGrid);
-            final currentValue = currentGrid == null
-                ? kOwnLoginModelOption
-                : currentGrid.model;
-            return Tooltip(
-              message: tooltip,
-              child: MenuAnchor(
-                controller: _controller,
-                // Bounded because the note at the top of this list is a
-                // sentence. Left to the theme's default the panel is unbounded,
-                // and the sentence is clipped rather than wrapped — see
-                // [AppMenuNote.panelWidth].
-                style: grid.AppMenu.style(maxWidth: _panelMaxWidth),
-                onOpen: () {
-                  setState(() => _open = true);
-                  final networkId = selection.networkId;
-                  if (networkId != null) {
-                    gridModelsController.ensureLoadedFor(networkId);
-                  }
-                },
-                onClose: () {
-                  // Guarded: the menu closes on route teardown too, after this State is gone.
-                  if (mounted) setState(() => _open = false);
-                },
-                menuChildren: _rows(currentValue),
-                builder: (context, controller, _) => ToolbarPill(
-                  active: _open,
-                  // Rimmed whenever this engine could use the menu at all — including mid-restart,
-                  // when `enabled` is briefly false because a second tap must not land. The pill
-                  // sits alone among plain labels in the pane header, so at rest it needs the rim
-                  // to read as pressable; dropping it for the moment the model is changing would
-                  // blink the one box on the strip. A rim on an engine that can NEVER open the
-                  // menu would draw a box around something inert, so that case keeps none.
-                  rimmed: capable && selection.hasGrid,
-                  onTap: enabled
-                      ? () => controller.isOpen
-                            ? controller.close()
-                            : controller.open()
-                      : null,
-                  child: _pending
-                      // A skeleton, not a spinner: the shape is already known — the same one line
-                      // of mono type, about to say a different model — so the pill keeps its
-                      // metrics and nothing jumps when the answer lands. (The spinner here was
-                      // also drawn 12x24: ToolbarPill's box is a fixed 26px tall, which hands its
-                      // single child a tight height, and a bare SizedBox took it instead of
-                      // shrinking — a Row escapes that with mainAxisSize.min, a SizedBox cannot.)
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SkeletonText(
-                              style: grid.AppFont.codeStyle(),
-                              // Held at the label's own width so the strip does not resize under
-                              // the pointer mid-restart, and the rim stays where it was.
-                              width: _labelWidth(context, label),
-                            ),
-                            // The chevron's slot, kept empty rather than collapsed: it is dropped
-                            // while `enabled` is false, and letting the pill lose that width for
-                            // the length of a restart is the same jump the skeleton prevents.
-                            const SizedBox(
-                              width: 4 + grid.AppControl.iconSizeChip,
-                            ),
-                          ],
-                        )
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Flexible, not bare: the pill hugs its label, but a long grid model id
-                            // in a narrow pane has to ellipsize inside it rather than overflow it.
-                            Flexible(
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: grid.AppFont.codeStyle(
-                                  color: ToolbarPill.tint(
-                                    tinted: false,
-                                    enabled: enabled,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // The affordance the control was missing: this restarts the agent, and
-                            // a bare label gave no sign it could be pressed at all. Dropped when
-                            // disabled — there is nothing to open, so a chevron would lie.
-                            if (enabled) ...[
-                              const SizedBox(width: 4),
-                              Icon(
-                                Icons.expand_more_rounded,
-                                size: grid.AppControl.iconSizeChip,
-                                color: grid.AppPalette.textFaint,
-                              ),
-                            ],
-                          ],
-                        ),
-                ),
-              ),
+            // Qualified by the two standing conditions, not raw turn state: `busy` is what earns
+            // the hourglass and the sentence that promises the control comes back, and neither is
+            // true of an agent that is also mid-turn on an engine with no grid to move to. Those
+            // do not clear when the turn ends, so they are named first and this stays false.
+            final busy =
+                capable &&
+                selection.hasGrid &&
+                widget.notifier.agentIsProcessing(
+                  widget.machineId,
+                  widget.agentId,
+                );
+            final enabled = capable && selection.hasGrid && !_pending && !busy;
+            // Ordered by what the user can do about it: the two standing conditions first, then
+            // the one that clears on its own. Busy sits last because it outranks nothing — an
+            // engine that cannot use a grid says so whether or not it is mid-turn.
+            final tooltip = !capable
+                ? '${widget.engine} cannot use a grid'
+                : !selection.hasGrid
+                ? 'Pick a grid to change this agent\'s model'
+                : busy
+                ? 'Agent is running a turn — changing the model would restart it '
+                      'and lose the turn. This unlocks when the turn finishes.'
+                : 'Changing the model restarts the agent';
+            return _buildPill(
+              context,
+              selection: selection,
+              capable: capable,
+              enabled: enabled,
+              busy: busy,
+              tooltip: tooltip,
             );
           },
+        );
+      },
+    );
+  }
+
+  /// The pill itself, split out only so [build] stays readable through three nested builders.
+  Widget _buildPill(
+    BuildContext context, {
+    required GridSelection selection,
+    required bool capable,
+    required bool enabled,
+    required bool busy,
+    required String tooltip,
+  }) {
+    // See the class doc: this is what keeps an ALREADY-OPEN menu's rows current as
+    // gridModelsController moves through its states, rather than freezing them at open time.
+    return ListenableBuilder(
+      listenable: gridModelsController,
+      builder: (context, _) {
+        final currentGrid = agentGridOf(
+          widget.notifier,
+          widget.machineId,
+          widget.agentId,
+        );
+        final label = agentModelLabel(currentGrid);
+        final currentValue = currentGrid == null
+            ? kOwnLoginModelOption
+            : currentGrid.model;
+        return Tooltip(
+          message: tooltip,
+          child: MenuAnchor(
+            controller: _controller,
+            // Bounded because the note at the top of this list is a
+            // sentence. Left to the theme's default the panel is unbounded,
+            // and the sentence is clipped rather than wrapped — see
+            // [AppMenuNote.panelWidth].
+            style: grid.AppMenu.style(maxWidth: _panelMaxWidth),
+            onOpen: () {
+              setState(() => _open = true);
+              final networkId = selection.networkId;
+              if (networkId != null) {
+                gridModelsController.ensureLoadedFor(networkId);
+              }
+            },
+            onClose: () {
+              // Guarded: the menu closes on route teardown too, after this State is gone.
+              if (mounted) setState(() => _open = false);
+            },
+            menuChildren: _rows(currentValue),
+            builder: (context, controller, _) => ToolbarPill(
+              active: _open,
+              // Rimmed whenever this engine could use the menu at all — including mid-restart,
+              // when `enabled` is briefly false because a second tap must not land. The pill
+              // sits alone among plain labels in the pane header, so at rest it needs the rim
+              // to read as pressable; dropping it for the moment the model is changing would
+              // blink the one box on the strip. A rim on an engine that can NEVER open the
+              // menu would draw a box around something inert, so that case keeps none.
+              rimmed: capable && selection.hasGrid,
+              // Only for busy. The other two disabled states drop the rim as well, so there is
+              // nothing left that claims to be pressable and `basic` is already honest; a mid-turn
+              // pill keeps its rim and its ink, and the pointer is what says the refusal is real.
+              disabledCursor: busy ? SystemMouseCursors.forbidden : null,
+              onTap: enabled
+                  ? () => controller.isOpen
+                        ? controller.close()
+                        : controller.open()
+                  : null,
+              child: _pending
+                  // A skeleton, not a spinner: the shape is already known — the same one line
+                  // of mono type, about to say a different model — so the pill keeps its
+                  // metrics and nothing jumps when the answer lands. (The spinner here was
+                  // also drawn 12x24: ToolbarPill's box is a fixed 26px tall, which hands its
+                  // single child a tight height, and a bare SizedBox took it instead of
+                  // shrinking — a Row escapes that with mainAxisSize.min, a SizedBox cannot.)
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SkeletonText(
+                          style: grid.AppFont.codeStyle(),
+                          // Held at the label's own width so the strip does not resize under
+                          // the pointer mid-restart, and the rim stays where it was.
+                          width: _labelWidth(context, label),
+                        ),
+                        // The chevron's slot, kept empty rather than collapsed: it is dropped
+                        // while `enabled` is false, and letting the pill lose that width for
+                        // the length of a restart is the same jump the skeleton prevents.
+                        const SizedBox(width: 4 + grid.AppControl.iconSizeChip),
+                      ],
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Leads the label rather than trailing it: this says the AGENT is working,
+                        // which is a fact about the pane the pill sits in, while the chevron on the
+                        // other end is about the menu. Putting both on the right made one slot mean
+                        // two different things. Same indicator the rail draws in its badge slot for
+                        // the same agent (`machine_rail.dart`) — one turn, one glyph, two places.
+                        if (busy) ...[
+                          SizedBox(
+                            width: grid.AppControl.iconSizeChip - 2,
+                            height: grid.AppControl.iconSizeChip - 2,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: grid.AppPalette.online,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                        // Flexible, not bare: the pill hugs its label, but a long grid model id
+                        // in a narrow pane has to ellipsize inside it rather than overflow it.
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: grid.AppFont.codeStyle(
+                              color: ToolbarPill.tint(
+                                tinted: false,
+                                enabled: enabled,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // The affordance the control was missing: this restarts the agent, and
+                        // a bare label gave no sign it could be pressed at all. Dropped when
+                        // disabled — there is nothing to open, so a chevron would lie.
+                        if (enabled) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.expand_more_rounded,
+                            size: grid.AppControl.iconSizeChip,
+                            color: grid.AppPalette.textFaint,
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+          ),
         );
       },
     );
