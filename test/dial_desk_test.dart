@@ -170,7 +170,7 @@ void main() {
     'payload': {
       'machineId': 'm1',
       'agentId': agentId,
-      if (edge != null) 'edge': edge,
+      'edge': ?edge,
     },
   });
 
