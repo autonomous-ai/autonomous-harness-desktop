@@ -51,8 +51,12 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () =>
-                  showNewAgentDialog(context, notifier, 'machine-1'),
+              onPressed: () => showNewAgentDialog(
+                context,
+                notifier,
+                'machine-1',
+                source: 'machine_row',
+              ),
               child: const Text('open'),
             ),
           ),
