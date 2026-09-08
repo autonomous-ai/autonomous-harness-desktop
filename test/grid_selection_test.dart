@@ -48,6 +48,31 @@ void main() {
     });
 
     test(
+      'a build with Grid hidden reads no grid, whatever is on disk',
+      () async {
+        // `state.json` is one file shared by every build on this Mac, and the debug build is where a
+        // grid gets picked. Without this gate a shipped build would inherit that choice and quietly
+        // launch agents on a grid it shows no picker for, no Settings pane for, and no way out of.
+        final picked = storeOnDisk();
+        await picked.selectNetwork(networkId: 'grid-1', networkName: 'Office');
+
+        final shipped = GridSelectionStore(
+          storage: HarnessFileStore(directory: dir),
+          gridSurface: false,
+        );
+        await shipped.load();
+
+        expect(shipped.value.hasGrid, isFalse);
+        expect(
+          await HarnessFileStore(directory: dir)
+              .read('grid_selected_network_id'),
+          'grid-1',
+          reason: "the other build's setting is left alone, not cleared",
+        );
+      },
+    );
+
+    test(
       'clearing goes back to no grid, and that survives a relaunch',
       () async {
         final first = storeOnDisk();

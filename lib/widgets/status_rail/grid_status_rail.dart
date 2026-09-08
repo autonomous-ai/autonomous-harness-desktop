@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
+import '../../grid/grid_surface.dart';
 import '../../grid/node_metrics.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../grid/grid_overview.dart';
@@ -53,7 +54,11 @@ class _GridStatusRailState extends State<GridStatusRail> {
 
   @override
   void dispose() {
-    if (widget.controller == null) _controller.dispose();
+    // `_controller` is `late`: in a build that hides Grid the readout below is
+    // never drawn, so it was never created — and reaching for it here to
+    // dispose it is what would create it, listener on the selection store and
+    // all.
+    if (widget.controller == null && kGridSurfaceEnabled) _controller.dispose();
     super.dispose();
   }
 
@@ -76,15 +81,23 @@ class _GridStatusRailState extends State<GridStatusRail> {
           padding: const EdgeInsets.only(left: 12, right: 10),
           child: Row(
             children: [
-              Expanded(
-                child: ListenableBuilder(
-                  listenable: _controller,
-                  builder: (context, _) => _Readout(
-                    controller: _controller,
-                    onShareIntelligence: widget.onShareIntelligence,
+              // Every figure on the left of this strip is a grid's, and the
+              // version mark on the right is not — so a build that hides Grid
+              // keeps the strip for the mark alone. The readout's other state
+              // is the words "No grid chosen", which is a fair thing to say to
+              // someone who can pick one and a riddle for someone who cannot.
+              if (kGridSurfaceEnabled)
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: _controller,
+                    builder: (context, _) => _Readout(
+                      controller: _controller,
+                      onShareIntelligence: widget.onShareIntelligence,
+                    ),
                   ),
-                ),
-              ),
+                )
+              else
+                const Spacer(),
               const _VersionMark(),
             ],
           ),

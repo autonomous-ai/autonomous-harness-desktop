@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../grid/grid_surface.dart';
 import '../logging/debug_surface.dart';
 
 /// One screen in Settings — a row in its rail, and the pane that row opens.
@@ -43,26 +44,62 @@ class SettingsGroup {
 ///
 /// A getter rather than a `const`, for the rows that are not always there:
 /// [SettingsSection.debug] and [SettingsSection.tracking] are developer
-/// furniture and ship only where [kDebugSurfaceEnabled] says so. Everything
-/// that draws or searches the rail reads this, so a hidden section cannot be
-/// reached by a stale copy of the list — while the enum values themselves
-/// always exist, so the screens behind them need no gate of their own.
-List<SettingsGroup> get settingsGroups => [
-  for (final group in _kSettingsGroups)
-    if (group.sections.any(_isVisible))
-      SettingsGroup(group.title, [
-        for (final section in group.sections)
-          if (_isVisible(section)) section,
-      ]),
-];
+/// furniture and ship only where [kDebugSurfaceEnabled] says so, and the two
+/// Grid rows ship only where [kGridSurfaceEnabled] does. Everything that draws
+/// or searches the rail reads this, so a hidden section cannot be reached by a
+/// stale copy of the list — while the enum values themselves always exist, so
+/// the screens behind them need no gate of their own.
+List<SettingsGroup> get settingsGroups => settingsGroupsFor(
+  debugSurface: kDebugSurfaceEnabled,
+  gridSurface: kGridSurfaceEnabled,
+);
+
+/// [settingsGroups] with the two gates passed in rather than read off the
+/// build.
+///
+/// Both flags are compile-time consts, so the shape a SHIPPED build has — no
+/// Grid group, Settings opening on Appearance — is otherwise unreachable from a
+/// test, which by definition runs with everything switched on. This seam is the
+/// only way to assert the thing the gate exists to do.
+@visibleForTesting
+List<SettingsGroup> settingsGroupsFor({
+  required bool debugSurface,
+  required bool gridSurface,
+}) {
+  bool visible(SettingsSection section) =>
+      _isVisible(section, debugSurface: debugSurface, gridSurface: gridSurface);
+  return [
+    for (final group in _kSettingsGroups)
+      if (group.sections.any(visible))
+        SettingsGroup(group.title, [
+          for (final section in group.sections)
+            if (visible(section)) section,
+        ]),
+  ];
+}
 
 /// The two developer sections, named once. Both read the same in-memory
 /// buffers, both are worth nothing in a build that cannot open them, and a
 /// second list of "which ones are hidden" is how the two would drift apart.
 const _kDeveloperSections = {SettingsSection.debug, SettingsSection.tracking};
 
-bool _isVisible(SettingsSection section) =>
-    !_kDeveloperSections.contains(section) || kDebugSurfaceEnabled;
+/// The two Grid sections, hidden together for a different reason: not furniture
+/// nobody but us wants, but a feature not finished being one. Kept apart from
+/// [_kDeveloperSections] so a build can show either set without the other.
+const _kGridSections = {
+  SettingsSection.grid,
+  SettingsSection.shareIntelligence,
+};
+
+bool _isVisible(
+  SettingsSection section, {
+  required bool debugSurface,
+  required bool gridSurface,
+}) {
+  if (_kDeveloperSections.contains(section)) return debugSurface;
+  if (_kGridSections.contains(section)) return gridSurface;
+  return true;
+}
 
 const _kSettingsGroups = [
   // The two directions of the same relationship, and the only run here about
@@ -90,4 +127,9 @@ const _kSettingsGroups = [
 
 /// The section Settings opens on — the first row of the first group, so the
 /// screen never opens on a pane its rail doesn't show as selected.
-const kDefaultSettingsSection = SettingsSection.grid;
+///
+/// Derived, not named: the first group is Grid, which a shipped build hides, and
+/// a constant pointing at it would open Settings on a pane with no row lit in
+/// the rail beside it.
+SettingsSection get kDefaultSettingsSection =>
+    settingsGroups.first.sections.first;

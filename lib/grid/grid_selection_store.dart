@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
+import 'grid_surface.dart';
 
 /// What "no grid at all" is called on screen.
 ///
@@ -71,9 +72,14 @@ class GridSelection {
 /// ⚠️ Choosing a grid does NOT retarget agents that are already running. It is
 /// only read when an agent is created.
 class GridSelectionStore extends ValueNotifier<GridSelection> {
-  GridSelectionStore({LocalKeyValueStore? storage})
-    : _storage = storage ?? HarnessFileStore.shared,
-      super(GridSelection.none);
+  GridSelectionStore({
+    LocalKeyValueStore? storage,
+    // A compile-time const in the app, which makes the shipped build's own
+    // behaviour — a persisted grid left unread — unreachable from a test run,
+    // where it is always true. Passed in so that case can be asserted.
+    @visibleForTesting this._gridSurface = kGridSurfaceEnabled,
+  }) : _storage = storage ?? HarnessFileStore.shared,
+       super(GridSelection.none);
 
   static const _networkIdKey = 'grid_selected_network_id';
   static const _networkNameKey = 'grid_selected_network_name';
@@ -85,6 +91,9 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
 
   final LocalKeyValueStore _storage;
 
+  /// See the constructor: [kGridSurfaceEnabled], and only a test passes another.
+  final bool _gridSurface;
+
   /// Read the saved choice, if there is one.
   ///
   /// Failure is silent and lands on [GridSelection.none], which is the same as
@@ -95,7 +104,18 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
   /// it named no particular agent, so there is nothing to carry forward. It is
   /// deleted the next time [_write] runs, not here — reading is not the place
   /// to also mutate the store.
+  ///
+  /// A build with [kGridSurfaceEnabled] off reads nothing at all. `state.json`
+  /// is shared with the debug build that CAN pick a grid, so a developer's
+  /// choice would otherwise reach a release build through the file and point
+  /// its agents at a grid it shows no way to see, change or leave. The stored
+  /// key is left alone rather than cleared: it is that other build's setting,
+  /// and this one is only declining to act on it.
   Future<void> load() async {
+    if (!_gridSurface) {
+      value = GridSelection.none;
+      return;
+    }
     try {
       final id = await _storage.read(_networkIdKey);
       if (id == null || id.isEmpty) {

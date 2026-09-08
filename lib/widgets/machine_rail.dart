@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'window_chrome.dart';
 
 import '../core/models.dart';
+import '../grid/grid_surface.dart';
 import '../shared/layouts/widgets/sidebar_item.dart';
 import '../shared/layouts/widgets/sidebar_timeline.dart';
 import '../shared/theme/app_theme.dart' as grid;
@@ -358,10 +359,14 @@ class MachineRailState extends State<MachineRail> {
             ),
             // Above the account pill, and only on the WIDE rail: a grid's name does not fit in
             // 72px any more than a machine's does — see MachineRailMini for that judgement.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
-              child: GridTargetPill(notifier: widget.notifier),
-            ),
+            // Gone entirely in a shipped build, along with Settings ▸ Grid — see
+            // [kGridSurfaceEnabled], which also keeps the selection it writes from being read
+            // there, so nothing is left pointing at a grid this build does not admit to.
+            if (kGridSurfaceEnabled)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                child: GridTargetPill(notifier: widget.notifier),
+              ),
             AccountFooter(notifier: widget.notifier),
           ],
         );

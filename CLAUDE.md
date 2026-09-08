@@ -202,12 +202,25 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   on screen) and Settings ▸ Grid, which keeps the table because that is where a grid is *compared*
   rather than merely picked. Both list `gridNetworksController`, the shared singleton, so neither
   holds a half-stale copy. The label for "no grid" is `kNoGridTargetLabel` beside the store — four
-  places print it. The model is chosen per agent, not globally, and
-  **only once the agent exists**: the agent view's header menu (`widgets/agent_model_menu.dart`)
-  picks it for a running agent, and the New agent dialog offers no model at all — every new agent
-  launches on Auto (no `model` on the wire, the grid chooses), because a model picked before there
-  is an agent to apply it to is a second door onto a setting the header menu already owns. At create
-  time the New agent
+  places print it. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
+  `grid/grid_surface.dart` — `kDebugMode` or `--dart-define=HARNESS_GRID_SURFACE=true`): it is a
+  feature still being built, so its own flag rather than `kDebugSurfaceEnabled`, which is developer
+  furniture and must be switchable apart from it. Four places read it — the two Settings rows
+  (`_kGridSections`), the rail's pill, the status rail's readout (the strip stays, for the version
+  mark), and **`GridSelectionStore.load`, which is the one that matters**: `state.json` is shared
+  with the debug build where a grid IS picked, so without it a release build would inherit that
+  choice off disk and launch agents on a grid it shows no picker, no pane and no way out of. The
+  stored key is left alone, not cleared — it is the other build's setting. `settingsGroupsFor` takes
+  both gates as arguments so the shipped shape can be asserted from a test run, which by definition
+  has everything switched on, and `kDefaultSettingsSection` is derived from the visible list rather
+  than named (it used to name Grid, the first row a shipped build drops).
+  The model is chosen per agent, not globally, and **only once the agent exists**: the agent view's
+  header menu (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
+  dialog offers no model at all — every new agent launches on Auto (no `model` on the wire, the grid
+  chooses), because a model picked before there is an agent to apply it to is a second door onto a
+  setting the header menu already owns. That header menu draws **nothing at all** when no grid is
+  picked: every choice it offers needs a grid to move the agent onto, so a dimmed pill there would
+  be one more word in the header to decode with nothing behind it. At create time the New agent
   dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
   as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
   always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
