@@ -86,21 +86,23 @@ void main() {
     expect(identical(session.terminal, before), isTrue);
   });
 
-  test('a renderer that keeps failing still gives up rather than looping',
-      () async {
-    await ready();
-    await session.handleBinary(
-      output(0, 'hello'.codeUnits, keyframe: true, cols: 100, rows: 30),
-    );
+  test(
+    'a renderer that keeps failing still gives up rather than looping',
+    () async {
+      await ready();
+      await session.handleBinary(
+        output(0, 'hello'.codeUnits, keyframe: true, cols: 100, rows: 30),
+      );
 
-    for (var attempt = 0; attempt < 8; attempt++) {
-      await session.onRendererFailure();
-    }
+      for (var attempt = 0; attempt < 8; attempt++) {
+        await session.onRendererFailure();
+      }
 
-    // Bounded by the existing ladder: three resyncs, then a reopen.
-    final resyncs = sent.where((f) => f.type == 'terminal_resync').length;
-    expect(resyncs, lessThanOrEqualTo(3));
-  });
+      // Bounded by the existing ladder: three resyncs, then a reopen.
+      final resyncs = sent.where((f) => f.type == 'terminal_resync').length;
+      expect(resyncs, lessThanOrEqualTo(3));
+    },
+  );
 
   test(
     'uses measured viewport geometry for the initial terminal_open',
@@ -123,6 +125,31 @@ void main() {
       expect(session.rows, 54);
     },
   );
+
+  test('opens immediately at fallback size and flushes measured resize after first keyframe', () async {
+    await session.open();
+    expect(sent.single.type, 'terminal_open');
+    expect(sent.single.payload, containsPair('cols', 80));
+    final requestId = sent.single.payload['requestId'];
+
+    session.reportViewport(120, 40);
+    expect(sent.where((frame) => frame.type == 'terminal_resize'), isEmpty);
+    await session.handleFrame('terminal_ready', {
+      'requestId': requestId,
+      'protocolVersion': 3,
+      'streamId': streamId,
+      'agentId': 'agent-1',
+    });
+    await session.handleBinary(
+      output(0, const [], keyframe: true, cols: 80, rows: 24),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      sent.where((frame) => frame.type == 'terminal_resize').single.payload,
+      containsPair('cols', 120),
+    );
+  });
 
   test(
     'keyframe + split UTF-8 output render in FIFO order and ACK quickly',
@@ -400,12 +427,12 @@ void main() {
     );
   });
 
-  test(
-    'scrollViaTmuxCopyMode is true only for grok, mirroring _prepareKeyframeBytes',
-    () {
-      expect(session.scrollViaTmuxCopyMode, isFalse); // engineId: 'codex' from setUp
-    },
-  );
+  test('scrollViaTmuxCopyMode is true only for grok, mirroring _prepareKeyframeBytes', () {
+    expect(
+      session.scrollViaTmuxCopyMode,
+      isFalse,
+    ); // engineId: 'codex' from setUp
+  });
 
   group('sendScrollCommand (grok only)', () {
     Future<void> readyGrokSession() async {
@@ -432,12 +459,15 @@ void main() {
       );
     }
 
-    test('is a no-op for a non-grok session — codex still uses raw mouseInput', () async {
-      await ready();
-      session.sendScrollCommand(true, 5);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(sent.where((f) => f.type == 'terminal_scroll'), isEmpty);
-    });
+    test(
+      'is a no-op for a non-grok session — codex still uses raw mouseInput',
+      () async {
+        await ready();
+        session.sendScrollCommand(true, 5);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(sent.where((f) => f.type == 'terminal_scroll'), isEmpty);
+      },
+    );
 
     test('coalesces a burst of same-direction deltas into one frame', () async {
       await readyGrokSession();
@@ -446,7 +476,10 @@ void main() {
       for (var i = 0; i < 5; i++) {
         session.sendScrollCommand(true, 1);
       }
-      expect(sent.where((f) => f.type == 'terminal_scroll'), isEmpty); // still coalescing
+      expect(
+        sent.where((f) => f.type == 'terminal_scroll'),
+        isEmpty,
+      ); // still coalescing
 
       await Future<void>.delayed(const Duration(milliseconds: 30));
       final scrolls = sent.where((f) => f.type == 'terminal_scroll').toList();
@@ -456,25 +489,31 @@ void main() {
       expect(scrolls.single.payload['streamId'], streamId);
     });
 
-    test('a direction reversal mid-burst flushes the first batch separately', () async {
-      await readyGrokSession();
-      sent.clear();
+    test(
+      'a direction reversal mid-burst flushes the first batch separately',
+      () async {
+        await readyGrokSession();
+        sent.clear();
 
-      session.sendScrollCommand(true, 3);
-      session.sendScrollCommand(true, 2);
-      session.sendScrollCommand(false, 1); // reverses direction — flushes the 5 "up" first
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+        session.sendScrollCommand(true, 3);
+        session.sendScrollCommand(true, 2);
+        session.sendScrollCommand(
+          false,
+          1,
+        ); // reverses direction — flushes the 5 "up" first
+        await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      final scrolls = sent
-          .where((f) => f.type == 'terminal_scroll')
-          .map((f) => f.payload)
-          .toList();
-      expect(scrolls, hasLength(2));
-      expect(scrolls[0]['direction'], 'up');
-      expect(scrolls[0]['lines'], 5);
-      expect(scrolls[1]['direction'], 'down');
-      expect(scrolls[1]['lines'], 1);
-    });
+        final scrolls = sent
+            .where((f) => f.type == 'terminal_scroll')
+            .map((f) => f.payload)
+            .toList();
+        expect(scrolls, hasLength(2));
+        expect(scrolls[0]['direction'], 'up');
+        expect(scrolls[0]['lines'], 5);
+        expect(scrolls[1]['direction'], 'down');
+        expect(scrolls[1]['lines'], 1);
+      },
+    );
   });
 
   test('Ctrl+C (0x03) is stripped from native terminal input', () async {
@@ -595,45 +634,51 @@ void main() {
     },
   );
 
-  test('terminal_link_mode updates linkMode, ignoring a stale stream id', () async {
-    await ready();
-    expect(session.linkMode, isNull);
+  test(
+    'terminal_link_mode updates linkMode, ignoring a stale stream id',
+    () async {
+      await ready();
+      expect(session.linkMode, isNull);
 
-    await session.handleFrame('terminal_link_mode', {
-      'streamId': streamId,
-      'mode': 'p2p',
-    });
-    expect(session.linkMode, 'p2p');
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': 'p2p',
+      });
+      expect(session.linkMode, 'p2p');
 
-    await session.handleFrame('terminal_link_mode', {
-      'streamId': streamId,
-      'mode': 'relay',
-    });
-    expect(session.linkMode, 'relay');
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': 'relay',
+      });
+      expect(session.linkMode, 'relay');
 
-    // A frame for a DIFFERENT (stale) stream id must not touch this session's state.
-    await session.handleFrame('terminal_link_mode', {
-      'streamId': 'some-other-stream',
-      'mode': 'p2p',
-    });
-    expect(session.linkMode, 'relay');
-  });
+      // A frame for a DIFFERENT (stale) stream id must not touch this session's state.
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': 'some-other-stream',
+        'mode': 'p2p',
+      });
+      expect(session.linkMode, 'relay');
+    },
+  );
 
-  test('linkMode resets whenever streamId resets (reopen/close/error)', () async {
-    await ready();
-    await session.handleFrame('terminal_link_mode', {
-      'streamId': streamId,
-      'mode': 'p2p',
-    });
-    expect(session.linkMode, 'p2p');
+  test(
+    'linkMode resets whenever streamId resets (reopen/close/error)',
+    () async {
+      await ready();
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': 'p2p',
+      });
+      expect(session.linkMode, 'p2p');
 
-    await session.handleFrame('terminal_closed', {
-      'streamId': streamId,
-      'reason': 'closed by peer',
-    });
-    expect(session.streamId, isNull);
-    expect(session.linkMode, isNull);
-  });
+      await session.handleFrame('terminal_closed', {
+        'streamId': streamId,
+        'reason': 'closed by peer',
+      });
+      expect(session.streamId, isNull);
+      expect(session.linkMode, isNull);
+    },
+  );
 
   test('resync retries three times, reopens once, then fails closed', () async {
     session.dispose();
@@ -702,10 +747,7 @@ void main() {
     test('carries a multi-line body through verbatim', () async {
       await live();
 
-      expect(
-        await session.sendComposerText('first line\nsecond line'),
-        isTrue,
-      );
+      expect(await session.sendComposerText('first line\nsecond line'), isTrue);
 
       // No bracketed-paste wrapping of our own — the machine decides how to inject it.
       expect(messages().single['content'], 'first line\nsecond line');
@@ -720,13 +762,16 @@ void main() {
       expect(messages().single['content'], 'ship it');
     });
 
-    test('strips Ctrl+C, which would be a SIGINT once pasted into the pane', () async {
-      await live();
+    test(
+      'strips Ctrl+C, which would be a SIGINT once pasted into the pane',
+      () async {
+        await live();
 
-      expect(await session.sendComposerText('a\x03b'), isTrue);
+        expect(await session.sendComposerText('a\x03b'), isTrue);
 
-      expect(messages().single['content'], 'ab');
-    });
+        expect(messages().single['content'], 'ab');
+      },
+    );
 
     test('sends nothing while the stream is not accepting input', () async {
       expect(session.acceptsInput, isFalse);

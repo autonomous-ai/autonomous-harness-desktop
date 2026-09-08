@@ -12,6 +12,7 @@ class GridUser {
     required this.email,
     required this.name,
     this.emailDomain,
+    this.canRestrictToDomain = false,
   });
 
   final String sub;
@@ -19,11 +20,30 @@ class GridUser {
   final String name;
   final String? emailDomain;
 
+  /// Whether this account may gate a grid to its own email domain.
+  ///
+  /// The control plane decides, not the app: the list of public providers that
+  /// cannot — gmail.com and friends, where "only my domain" would mean *all of
+  /// Gmail* — is a server env var. A copy kept here would drift, and it drifts
+  /// silently in the worst direction: the app keeps offering a rule the API
+  /// has started refusing.
+  final bool canRestrictToDomain;
+
+  /// The domain this account may gate by, or null when it may not. Both halves
+  /// of the answer have to hold — the flag alone names no domain to put in a
+  /// label, and a domain alone is not permission to use it.
+  String? get gatedDomain {
+    if (!canRestrictToDomain) return null;
+    final domain = emailDomain?.trim();
+    return domain == null || domain.isEmpty ? null : domain;
+  }
+
   static GridUser fromJson(Map<String, dynamic> json) => GridUser(
     sub: json['sub'] as String? ?? '',
     email: json['email'] as String? ?? '',
     name: json['name'] as String? ?? '',
     emailDomain: json['email_domain'] as String?,
+    canRestrictToDomain: json['can_restrict_to_domain'] == true,
   );
 }
 

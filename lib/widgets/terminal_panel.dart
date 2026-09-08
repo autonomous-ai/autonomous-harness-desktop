@@ -48,6 +48,7 @@ class TerminalPanel extends StatefulWidget {
 
   /// Whether this tile's composer textbox is showing. Only consulted for a remote machine.
   final bool composerVisible;
+  final bool readOnly;
 
   /// Flips [composerVisible]. Null where there is no composer to toggle.
   final VoidCallback? onToggleComposer;
@@ -62,6 +63,7 @@ class TerminalPanel extends StatefulWidget {
     required this.session,
     required this.focused,
     this.composerVisible = true,
+    this.readOnly = false,
     this.onToggleComposer,
     this.onClose,
     this.pinned = false,
@@ -169,6 +171,7 @@ class _TerminalPanelState extends State<TerminalPanel>
     final machineState = widget.notifier.stateOf(widget.session.machineId);
     return machineState != null &&
         !machineState.isLocalMachine &&
+        !widget.readOnly &&
         widget.composerVisible;
   }
 
@@ -419,7 +422,7 @@ class _TerminalPanelState extends State<TerminalPanel>
   /// to paste, the keystroke is handed DOWN as Ctrl+V rather than dropped. That
   /// is also exactly what the user had been doing by hand to work around this.
   Future<void> _paste() async {
-    if (!widget.session.acceptsInput) return;
+    if (widget.readOnly || !widget.session.acceptsInput) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     if (text != null && text.isNotEmpty) {
       widget.session.terminal.paste(text);
@@ -485,7 +488,7 @@ class _TerminalPanelState extends State<TerminalPanel>
                     scrollController: _scrollController,
                     focusNode: _focusNode,
                     autofocus: widget.focused && !showComposer,
-                    readOnly: !session.acceptsInput,
+                    readOnly: widget.readOnly || !session.acceptsInput,
                     theme: terminalThemeFor(grid.AppTheme.brightness.value),
                     padding: const EdgeInsets.all(10),
                     textStyle: terminalFontStore.value,

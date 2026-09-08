@@ -41,5 +41,22 @@ void main() {
     });
 
     expect(agent.terminalAvailable, isTrue);
+    expect(agent.launchState, 'ready');
+  });
+
+  test('parses a sanitized asynchronous launch failure', () {
+    final agent = Agent.fromJson({
+      'id': 'agent-1',
+      'name': 'Failed agent',
+      'launch': {
+        'state': 'failed',
+        'error': 'ENGINE_DID_NOT_START',
+        'detail': 'Engine exited\nsee terminal',
+      },
+    });
+
+    expect(agent.launchState, 'failed');
+    expect(agent.launchError, 'ENGINE_DID_NOT_START');
+    expect(agent.launchDetail, 'Engine exited see terminal');
   });
 }

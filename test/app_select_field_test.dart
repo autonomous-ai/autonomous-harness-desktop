@@ -375,4 +375,75 @@ void main() {
     // field holds names that a 188pt list would have to truncate.
     expect(rowWidth, greaterThanOrEqualTo(240));
   });
+
+  group('a detail line', () {
+    const detailed = <SelectOption<String>>[
+      SelectOption(
+        value: 'invite',
+        label: 'Invite only',
+        detail: 'Only people you invite can use this grid.',
+      ),
+      SelectOption(
+        value: 'public',
+        label: 'Public',
+        detail: 'Anyone can use this grid.',
+      ),
+    ];
+
+    testWidgets('shows the sentence in the open menu, not in the field', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          AppSelectField<String>(
+            value: 'invite',
+            options: detailed,
+            onChanged: (_) {},
+          ),
+          top: true,
+        ),
+      );
+      // Closed, the control is only as wide as itself — a sentence would arrive
+      // clipped mid-clause and read as a rendering bug.
+      expect(find.textContaining('Only people you invite'), findsNothing);
+
+      await _open(tester);
+      expect(find.textContaining('Only people you invite'), findsOneWidget);
+      expect(find.textContaining('Anyone can use'), findsOneWidget);
+    });
+
+    // A panel measured with the plain extent is shorter than its own rows, and
+    // grows a scrollbar to show the overflow — furniture that says "there is
+    // more here" when there is not.
+    testWidgets('is counted when the panel is sized, so no scrollbar', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          AppSelectField<String>(
+            value: 'invite',
+            options: detailed,
+            onChanged: (_) {},
+          ),
+          top: true,
+        ),
+      );
+      await _open(tester);
+
+      final rows = tester
+          .widgetList<AppMenuItem>(find.byType(AppMenuItem))
+          .length;
+      expect(rows, 2);
+      final first = tester.getRect(find.byType(AppMenuItem).at(0));
+      expect(
+        first.height,
+        greaterThan(AppMenuRowMetrics.roomy.extent),
+        reason: 'a row carrying a sentence is taller than one without',
+      );
+      expect(
+        tester.getRect(find.byType(AppMenuItem).at(1)).bottom - first.top,
+        lessThanOrEqualTo(2 * AppMenuRowMetrics.roomy.detailExtent + 1),
+      );
+    });
+  });
 }
