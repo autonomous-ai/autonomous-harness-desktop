@@ -67,6 +67,7 @@ void main() {
     expect(shipped, [
       SettingsSection.appearance,
       SettingsSection.terminal,
+      SettingsSection.devices,
       SettingsSection.shortcuts,
       SettingsSection.about,
     ]);

@@ -8,6 +8,7 @@ import '../widgets/window_chrome.dart';
 import 'sections/about_section.dart';
 import 'sections/appearance_section.dart';
 import 'sections/debug_section.dart';
+import 'sections/devices_section.dart';
 import 'sections/grid_section.dart';
 import 'sections/share_intelligence_section.dart';
 import 'sections/shortcuts_section.dart';
@@ -181,6 +182,7 @@ class _SettingsBody extends StatelessWidget {
       SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),
+      SettingsSection.devices => const DevicesSection(),
       SettingsSection.shortcuts => const ShortcutsSection(),
       SettingsSection.debug => const DebugSection(),
       SettingsSection.tracking => const TrackingSection(),

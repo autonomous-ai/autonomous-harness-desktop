@@ -14,6 +14,7 @@ enum SettingsSection {
   shareIntelligence(LucideIcons.share2300, 'Share this computer'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
+  devices(LucideIcons.zap300, 'Devices'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
   debug(LucideIcons.bug300, 'Debug'),
   tracking(LucideIcons.activity300, 'Tracking'),
@@ -112,6 +113,7 @@ const _kSettingsGroups = [
   SettingsGroup('Preferences', [
     SettingsSection.appearance,
     SettingsSection.terminal,
+    SettingsSection.devices,
   ]),
   // Debug and Tracking sit between the two things they are most often reached
   // from: the keys that open them, and the version a report has to name. The
