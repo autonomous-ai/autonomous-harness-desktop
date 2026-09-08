@@ -41,10 +41,10 @@ class GridNetworkTable extends StatefulWidget {
   /// email the reader has to compare against their own.
   final String signedInEmail;
 
-  /// The grid new agents launch against — null for "each engine's own login".
+  /// The grid new agents launch against — null for "no grid".
   final String? selectedId;
 
-  /// Pick a grid, or null to go back to the engines' own logins.
+  /// Pick a grid, or null to go back to the engines' own accounts.
   final ValueChanged<GridNetwork?> onUse;
 
   /// Whether [networks] is a filtered view, so an empty table can say which
@@ -82,7 +82,7 @@ class _GridNetworkTableState extends State<GridNetworkTable> {
                 _HeaderRow(columns: columns),
                 // The "no grid" option is part of the same radio group and is
                 // deliberately outside the scroll view: it is never filtered
-                // away, so the way back to the engines' own logins cannot be
+                // away, so the way back to the engines' own accounts cannot be
                 // hidden by a query that happens to match nothing.
                 _NoGridRow(
                   selected: widget.selectedId == null,
@@ -250,7 +250,7 @@ class _NoGridRow extends StatelessWidget {
     return _RowSurface(
       selected: selected,
       onTap: onTap,
-      semanticsLabel: kOwnLoginTargetLabel,
+      semanticsLabel: kNoGridTargetLabel,
       child: Row(
         children: [
           SizedBox(
@@ -265,7 +265,7 @@ class _NoGridRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    kOwnLoginTargetLabel,
+                    kNoGridTargetLabel,
                     style: TextStyle(
                       color: grid.AppPalette.textPrimary,
                       fontSize: 13,
@@ -274,7 +274,7 @@ class _NoGridRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    "Claude Code signs in with its own account — how the app "
+                    'Each engine signs in with its own account — how the app '
                     'worked before grids',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1070,8 +1070,8 @@ String? _shortUrl(String? url) {
 class GridNetworkTableSkeleton extends StatelessWidget {
   const GridNetworkTableSkeleton({super.key, required this.noGridSelected});
 
-  /// Whether "each engine's own login" is in force, so the first row is drawn
-  /// exactly as it will be once the grids arrive.
+  /// Whether "no grid" is in force, so the first row is drawn exactly as it
+  /// will be once the grids arrive.
   final bool noGridSelected;
 
   static const int rows = 4;

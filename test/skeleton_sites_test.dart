@@ -93,7 +93,7 @@ void main() {
         // before the control plane answers, so they are drawn in ink.
         expect(find.byKey(const Key('grid-table-skeleton')), findsOneWidget);
         expect(find.text('GRID'), findsOneWidget);
-        expect(find.text("Each engine's own login"), findsWidgets);
+        expect(find.text(kNoGridTargetLabel), findsWidgets);
         // The strip reads the choice off disk, not the network.
         expect(find.text('NEW AGENTS USE'), findsOneWidget);
         // A count nobody knows yet is a bar, not the number 0.

@@ -70,9 +70,9 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool _submitting = false;
 
   /// The model this NEW agent launches on. Null = Auto (the grid decides —
-  /// no model on the wire), [kOwnLoginModelOption] = the engine's own login
-  /// even though a grid is picked. Only meaningful once a grid is picked;
-  /// dialog default is Auto either way.
+  /// no model on the wire), [kNoGridModelOption] = off the grid, on the
+  /// engine's own account, even though a grid is picked. Only meaningful once
+  /// a grid is picked; dialog default is Auto either way.
   String? _model;
 
   @override
@@ -143,6 +143,21 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 
   /// The engine will have to be installed before it can run.
   bool get _willInstall => _willInstallEngine(_engine);
+
+  /// The machine was ASKED which engines it has, and could not answer.
+  ///
+  /// Distinct from the probe still being out, which is the ordinary first
+  /// second of this dialog and says nothing worth printing. This one is
+  /// settled, and it is what stands between the panel and every claim below:
+  /// a remote box on an older CLI does not know `engines_probe` — and does not
+  /// refuse it either, it simply never replies, so this arrives 30s later —
+  /// and until it is rendered the panel says "Ready to launch" over an engine
+  /// nobody checked for, which the create then fails on at the far end.
+  bool get _engineCheckFailed {
+    final machine = widget.notifier.stateOf(widget.machineId);
+    if (machine == null) return false;
+    return !machine.engines.loaded && machine.engines.error != null;
+  }
 
   /// The engine is missing and Harness has no line it can cite to fix that —
   /// Pi, and anything else without an entry in the CLI's install table. Stated
@@ -228,11 +243,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     // A relay key is minted per launch, so it is fetched here rather than held
     // in the store. Null when no grid is picked, which leaves the frame exactly
     // as it was before this feature existed — and null too when this agent is
-    // pinned to its own login despite a grid being picked, which mints no key
+    // pinned to its own account despite a grid being picked, which mints no key
     // at all rather than one that would go unused.
     final GridAgentOverride? gridOverride;
     try {
-      gridOverride = _model == kOwnLoginModelOption
+      gridOverride = _model == kNoGridModelOption
           ? null
           : await resolveGridAgentOverride(
               client: widget.gridApiClient,
@@ -242,8 +257,9 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        // Named rather than swallowed: falling back to the engine's own login
-        // would silently run the agent somewhere the user did not choose.
+        // Named rather than swallowed: falling back to the engine's own
+        // account would silently run the agent somewhere the user did not
+        // choose.
         _error =
             'Could not get a key for '
             '${gridSelectionStore.value.label}: $error';
@@ -281,15 +297,15 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       valueListenable: gridSelectionStore,
       builder: (context, chosen, _) {
         // The CLI refuses an engine it cannot point at a grid rather than
-        // quietly running it on its own login, so the dialog already knows this
+        // quietly running it on its own account, so the dialog already knows this
         // launch will fail. Gating the button here is what stops a round trip
         // that only ever ends in an error the user was already warned about.
         //
-        // Own login is the escape hatch for exactly this case — picking it sends `gridOverride:
+        // "No grid" is the escape hatch for exactly this case — picking it sends `gridOverride:
         // null`, the same frame the CLI accepts for ANY engine — so it must not itself be refused.
         final refused =
             chosen.hasGrid &&
-            _model != kOwnLoginModelOption &&
+            _model != kNoGridModelOption &&
             !kGridCapableEngines.contains(_engine);
         final canCreate = _folder != null && !refused && !_submitting;
 
@@ -322,6 +338,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                             ? _availability(_engine)?.installCommand
                             : null,
                         missingWithoutRecipe: _missingAndUnfixable,
+                        checkFailed: _engineCheckFailed,
                       );
                       // Below this the two columns would each be too narrow to
                       // hold a path, so the summary goes back on top of the
@@ -437,7 +454,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           }),
         ),
         // Only meaningful once a grid is picked — an unselected build behaves exactly as it did
-        // before this field existed, per the summary's own "own login" branch below.
+        // before this field existed, per the summary's own "no grid" branch below.
         if (selection.hasGrid) ...[
           const SizedBox(height: _gapField),
           const FieldLabel('Model'),
@@ -839,7 +856,7 @@ class _BypassCheck extends StatelessWidget {
 /// thing the old dialog never said. It matters most for the two settings that
 /// reach outside this window: a bypass flag turns off an engine's own guardrails
 /// on a machine that may not be this one, and a grid sends every token somewhere
-/// other than the engine's own login.
+/// other than the engine's own account.
 ///
 /// Read-only on purpose, and shaped so: it takes the recessed inset fill, never
 /// a field's, so nothing here invites a click.
@@ -855,6 +872,7 @@ class _NewAgentSummary extends StatelessWidget {
     required this.refused,
     this.installCommand,
     this.missingWithoutRecipe = false,
+    this.checkFailed = false,
   });
 
   final String engine;
@@ -868,7 +886,7 @@ class _NewAgentSummary extends StatelessWidget {
   final GridSelection selection;
 
   /// The dialog's own model choice for THIS agent — null (Auto) or
-  /// [kOwnLoginModelOption], never read off [selection]. `GridSelection.model`
+  /// [kNoGridModelOption], never read off [selection]. `GridSelection.model`
   /// is a leftover from the single global setting this field replaces.
   final String? model;
   final bool refused;
@@ -883,6 +901,12 @@ class _NewAgentSummary extends StatelessWidget {
   /// [installCommand] being null, which is also the state while the machine has
   /// not answered — this one is a settled "we know, and we cannot fix it".
   final bool missingWithoutRecipe;
+
+  /// The machine could not say which engines it has. The opposite settled
+  /// answer to [missingWithoutRecipe]: not "we know and cannot fix it" but
+  /// "we do not know", which is the one thing this panel may not round off to
+  /// "Ready to launch".
+  final bool checkFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -907,6 +931,13 @@ class _NewAgentSummary extends StatelessWidget {
     } else if (install != null && ready) {
       dot = grid.AppPalette.accentOnSurface;
       heading = 'Will install, then launch';
+    } else if (checkFailed && ready) {
+      // Faint, not the accent: the accent dot is a claim, and there is nothing
+      // here to claim. Not the warning colour either — nothing is wrong with
+      // the launch, we simply could not look, and painting an absence of
+      // information as a problem would cry wolf on every older remote box.
+      dot = grid.AppPalette.textFaint;
+      heading = 'Could not check this machine';
     } else if (ready) {
       dot = grid.AppPalette.accentOnSurface;
       heading = 'Ready to launch';
@@ -994,9 +1025,8 @@ class _NewAgentSummary extends StatelessWidget {
                   ),
               ],
             ),
-            style: _mono(
-              color: grid.AppPalette.textPrimary,
-            ).copyWith(height: 1.5),
+            style: _mono(color: grid.AppPalette.textPrimary)
+                .copyWith(height: 1.5),
           ),
           const SizedBox(height: _gapBlock),
           _fact(
@@ -1019,8 +1049,8 @@ class _NewAgentSummary extends StatelessWidget {
           _fact(
             context,
             'Inference',
-            refused || !selection.hasGrid || model == kOwnLoginModelOption
-                ? "${engineIdentity(engine).label}'s own login"
+            refused || !selection.hasGrid || model == kNoGridModelOption
+                ? "${engineIdentity(engine).label}'s own account"
                 : '${selection.label} · ${model ?? 'Auto'}',
           ),
           if (refused) ...[
@@ -1035,8 +1065,8 @@ class _NewAgentSummary extends StatelessWidget {
               child: Text(
                 '${engineIdentity(engine).label} cannot be pointed at a grid — '
                 'it offers no way to change where it sends inference. Choose '
-                "another engine, or set the sidebar's grid picker to each "
-                "engine's own login.",
+                "another engine, or set the sidebar's grid picker to "
+                '\u201cNo grid\u201d.',
                 style: theme.textTheme.bodySmall?.copyWith(color: warn),
               ),
             ),
@@ -1055,6 +1085,34 @@ class _NewAgentSummary extends StatelessWidget {
                 'Harness has no install line for it. Install it there first, '
                 'or choose another engine.',
                 style: theme.textTheme.bodySmall?.copyWith(color: warn),
+              ),
+            ),
+          ],
+          if (!refused && checkFailed) ...[
+            const SizedBox(height: _gapBlock),
+            Container(
+              padding: const EdgeInsets.only(top: _gapBlock),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: grid.AppPalette.textFaint.withValues(alpha: 0.28),
+                  ),
+                ),
+              ),
+              // Faint like the rule above it, not the warning colour the two
+              // blocks before this wear. Those name something that WILL go
+              // wrong; this names something nobody could find out. Reading the
+              // same as a real refusal would teach the reader to skip both.
+              child: Text(
+                '$machineName did not say which engines it has, so Harness '
+                'could not check for '
+                '${engineIdentity(engine).label} before offering to launch it. '
+                'The create will still run — if the engine is missing there, '
+                'that will only show up when it fails. Updating the Harness '
+                'CLI on $machineName lets this be checked first.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: grid.AppPalette.textSecondary,
+                ),
               ),
             ),
           ],
@@ -1086,9 +1144,8 @@ class _NewAgentSummary extends StatelessWidget {
                   // what they would have typed, which defeats showing it.
                   SelectableText(
                     install,
-                    style: _mono(
-                      color: grid.AppPalette.textPrimary,
-                    ).copyWith(height: 1.4),
+                    style: _mono(color: grid.AppPalette.textPrimary)
+                        .copyWith(height: 1.4),
                   ),
                 ],
               ),
@@ -1170,7 +1227,8 @@ class _InstallMark extends StatelessWidget {
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     return Tooltip(
-      message: '${engineIdentity(engine).label} is not on this machine — '
+      message:
+          '${engineIdentity(engine).label} is not on this machine — '
           'Harness installs it before launching',
       child: Icon(
         LucideIcons.download300,

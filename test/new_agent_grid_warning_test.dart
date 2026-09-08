@@ -25,13 +25,20 @@ import 'support/fake_grid_api.dart';
 /// machine never reaches `fs_list_dir` for real.
 class RecordingCreateAgentNotifier extends AppNotifier {
   RecordingCreateAgentNotifier()
-    : super(config: AppConfig.dev, authSession: AuthSession(), configStore: null);
+    : super(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
 
   bool createAgentCalled = false;
   GridAgentOverride? lastGrid;
 
   @override
-  Future<Map<String, dynamic>> listRemoteFolder(String machineId, String? path) async {
+  Future<Map<String, dynamic>> listRemoteFolder(
+    String machineId,
+    String? path,
+  ) async {
     return {'path': '/tmp/agent-folder', 'entries': <dynamic>[]};
   }
 
@@ -105,9 +112,7 @@ void main() {
     if (engine == 'claude') return;
     await tester.tap(find.byKey(const Key('new-agent-engine-field')));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.text(engine == 'codex' ? 'Codex' : 'Cursor').last,
-    );
+    await tester.tap(find.text(engine == 'codex' ? 'Codex' : 'Cursor').last);
     await tester.pumpAndSettle();
   }
 
@@ -118,8 +123,8 @@ void main() {
     gridSelectionStore.value = GridSelection.none;
     await openDialog(tester, engine: 'cursor');
     // The summary still has to answer "on whose account", and with no grid the
-    // honest answer is the engine's own login.
-    expect(find.textContaining("Cursor's own login"), findsOneWidget);
+    // honest answer is the engine's own account.
+    expect(find.textContaining("Cursor's own account"), findsOneWidget);
     expect(warning, findsNothing);
   });
 
@@ -151,11 +156,13 @@ void main() {
     // Case-insensitive: the sentence has moved between the middle of a paragraph
     // and the start of one, and that is not what this test is about.
     expect(
-      find.textContaining(RegExp('choose another engine', caseSensitive: false)),
+      find.textContaining(
+        RegExp('choose another engine', caseSensitive: false),
+      ),
       findsOneWidget,
     );
     // Names the sidebar's grid picker specifically, not a vague "the sidebar" — see
-    // grid_target_pill.dart, whose own "Own login" row is what this sentence points at.
+    // grid_target_pill.dart, whose own "No grid" row is what this sentence points at.
     expect(find.textContaining("sidebar's grid picker"), findsOneWidget);
   });
 
@@ -212,7 +219,10 @@ void main() {
     gridSelectionStore.value = GridSelection.none;
     await openDialog(tester, engine: 'claude');
     // Unticked, the summary must not claim a flag that will not be passed.
-    expect(find.textContaining('--dangerously-skip-permissions'), findsOneWidget);
+    expect(
+      find.textContaining('--dangerously-skip-permissions'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Bypass permission prompts'));
     await tester.pumpAndSettle();
@@ -386,7 +396,9 @@ void main() {
     expect(find.byType(AppCheckbox), findsOneWidget);
   });
 
-  testWidgets('creates the agent with the model the user picked', (tester) async {
+  testWidgets('creates the agent with the model the user picked', (
+    tester,
+  ) async {
     // Auto is the default, and Auto means "no model on the wire" — the grid's own choice, which is
     // not the same as pinning a model named Auto.
     gridSelectionStore.value = const GridSelection(
@@ -438,15 +450,16 @@ void main() {
     expect(
       grid.toJson().containsKey('model'),
       isFalse,
-      reason: 'Auto means the key is left off the wire entirely, not sent as null',
+      reason:
+          'Auto means the key is left off the wire entirely, not sent as null',
     );
   });
 
   testWidgets(
-    'own login re-enables Create for an engine that cannot reach a grid, and sends no grid',
+    '"No grid" re-enables Create for an engine that cannot reach a grid, and sends no grid',
     (tester) async {
       // The gap this closes: `refused` only checked hasGrid + kGridCapableEngines, so Cursor
-      // stayed refused even after the user picked Own login in the Model field — the exact choice
+      // stayed refused even after the user picked "No grid" in the Model field — the exact choice
       // that makes the launch frame `gridOverride: null`, the one every engine already accepts.
       // The button and the warning must both clear, and the frame that goes out must carry no grid.
       gridSelectionStore.value = const GridSelection(
@@ -494,7 +507,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('new-agent-model-field')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Own login').last);
+      await tester.tap(find.text('No grid').last);
       await tester.pumpAndSettle();
 
       expect(warning, findsNothing);
@@ -507,7 +520,7 @@ void main() {
       expect(
         notifier.lastGrid,
         isNull,
-        reason: 'own login sends no grid override, for any engine',
+        reason: '"No grid" sends no grid override, for any engine',
       );
     },
   );
@@ -527,7 +540,6 @@ void main() {
     });
   });
 }
-
 
 /// Stands in for the OS folder panel, which a widget test cannot open.
 class _StubFileSelector extends FileSelectorPlatform {

@@ -28,7 +28,7 @@ import '../state/app_state.dart';
 /// One row the grid picker can show: a real choice, or — while the grids load, after the load
 /// failed, or on an account with none — a disabled line that exists to be read, not picked.
 ///
-/// A null [networkId] on an ENABLED option is "own login"; on a disabled one it means nothing,
+/// A null [networkId] on an ENABLED option is "no grid"; on a disabled one it means nothing,
 /// because a placeholder is never the thing picked.
 @immutable
 class GridTargetOption {
@@ -45,11 +45,11 @@ class GridTargetOption {
 
 /// The picker's rows, from whatever the shared controller has so far.
 ///
-/// Own login comes FIRST and unconditionally — it is the only choice that needs no network call, so
-/// it must not be a row that appears once a fetch lands. Pure, so the states a menu is hard to open
+/// "No grid" comes FIRST and unconditionally — it is the only choice that needs no network call,
+/// so it must not be a row that appears once a fetch lands. Pure, so the states a menu is hard to open
 /// in (mid-load, failed, an account on no grids) are covered by a test rather than by hand.
 List<GridTargetOption> gridTargetMenuOptions(GridNetworksState state) => [
-  const GridTargetOption(label: kOwnLoginTargetLabel),
+  const GridTargetOption(label: kNoGridTargetLabel),
   ...switch (state) {
     GridNetworksIdle() || GridNetworksLoading() => const [
       GridTargetOption(label: 'Loading grids…', enabled: false),
@@ -235,7 +235,7 @@ class _PillState extends State<_Pill> {
     return Tooltip(
       message: on
           ? 'New agents run on ${widget.chosen.label}'
-          : 'New agents use each engine’s own login',
+          : 'New agents run on each engine’s own account, not on a grid',
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
@@ -258,8 +258,8 @@ class _PillState extends State<_Pill> {
                   LucideIcons.zap300,
                   size: 16,
                   // Lit only when a grid is actually in force: the glyph is the one part of this
-                  // row readable at a glance, so it must not say "on" while the value says own
-                  // login.
+                  // row readable at a glance, so it must not say "on" while the value says no
+                  // grid.
                   color: on
                       ? grid.AppPalette.accentOnSurface
                       : grid.AppPalette.textFaint,
