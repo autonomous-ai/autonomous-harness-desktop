@@ -31,6 +31,9 @@ class GridNetworkTable extends StatefulWidget {
     required this.signedInEmail,
     required this.selectedId,
     required this.onUse,
+    this.onDelete,
+    this.onRename,
+    this.isDeleting,
     this.filtered = false,
   });
 
@@ -46,6 +49,19 @@ class GridNetworkTable extends StatefulWidget {
 
   /// Pick a grid, or null to go back to the engines' own logins.
   final ValueChanged<GridNetwork?> onUse;
+
+  /// Delete a grid this account owns. Null leaves the action off every row —
+  /// which is what a caller that has no way to perform it should pass, rather
+  /// than a callback that does nothing.
+  final ValueChanged<GridNetwork>? onDelete;
+
+  /// Rename a grid this account owns. Null leaves the action off, like
+  /// [onDelete].
+  final ValueChanged<GridNetwork>? onRename;
+
+  /// Whether this grid's delete is in flight, so one row spins rather than all
+  /// of them. Absent means none is.
+  final bool Function(String networkId)? isDeleting;
 
   /// Whether [networks] is a filtered view, so an empty table can say which
   /// kind of nothing it is showing.
@@ -114,6 +130,13 @@ class _GridNetworkTableState extends State<GridNetworkTable> {
           expanded: _open.contains(network.networkId),
           last: index == widget.networks.length - 1,
           onUse: () => widget.onUse(network),
+          onDelete: widget.onDelete == null
+              ? null
+              : () => widget.onDelete!(network),
+          onRename: widget.onRename == null
+              ? null
+              : () => widget.onRename!(network),
+          deleting: widget.isDeleting?.call(network.networkId) ?? false,
           onToggleDetails: () => setState(() {
             if (!_open.remove(network.networkId)) {
               _open.add(network.networkId);
@@ -305,6 +328,9 @@ class _NetworkRow extends StatelessWidget {
     required this.last,
     required this.onUse,
     required this.onToggleDetails,
+    this.onDelete,
+    this.onRename,
+    this.deleting = false,
   });
 
   final GridNetwork network;
@@ -315,6 +341,9 @@ class _NetworkRow extends StatelessWidget {
   final bool last;
   final VoidCallback onUse;
   final VoidCallback onToggleDetails;
+  final VoidCallback? onDelete;
+  final VoidCallback? onRename;
+  final bool deleting;
 
   @override
   Widget build(BuildContext context) {
@@ -379,6 +408,9 @@ class _NetworkRow extends StatelessWidget {
             owned: owned,
             selected: selected,
             last: last,
+            onDelete: onDelete,
+            onRename: onRename,
+            deleting: deleting,
           ),
       ],
     );
@@ -805,12 +837,24 @@ class _DetailDrawer extends StatelessWidget {
     required this.owned,
     required this.selected,
     required this.last,
+    this.onDelete,
+    this.onRename,
+    this.deleting = false,
   });
 
   final GridNetwork network;
   final bool owned;
   final bool selected;
   final bool last;
+
+  /// Null on a grid this account does not own, and on a caller with no way to
+  /// delete: the server refuses a non-owner anyway, and an action that always
+  /// fails is worse than one that is not offered.
+  final VoidCallback? onDelete;
+
+  /// Null on the same terms as [onDelete] — renaming is the owner's too.
+  final VoidCallback? onRename;
+  final bool deleting;
 
   @override
   Widget build(BuildContext context) {
@@ -825,10 +869,14 @@ class _DetailDrawer extends StatelessWidget {
             ? null
             : Border(bottom: BorderSide(color: grid.AppPalette.divider)),
       ),
-      child: Wrap(
-        spacing: 32,
-        runSpacing: 14,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          Wrap(
+            spacing: 32,
+            runSpacing: 14,
+            children: [
           if (description.isNotEmpty)
             _Pair(label: 'Description', child: _PlainValue(description)),
           _Pair(
@@ -872,10 +920,140 @@ class _DetailDrawer extends StatelessWidget {
                         ),
                     ],
                   ),
+              ),
+            ],
+          ),
+          // Owner-only, and checked here rather than left to the server: a
+          // grid somebody else owns answers 403, and an action that can only
+          // fail is worse than one that was never offered.
+          if (owned && (onRename != null || onDelete != null)) ...[
+            const SizedBox(height: 16),
+            // One row: the two things an owner can do to the grid itself, in
+            // the order of what they cost. Rename reads as ordinary ink and
+            // Delete as danger, which is the only separation they need.
+            Row(
+              children: [
+                if (onRename != null)
+                  TextButton.icon(
+                    key: Key('grid-rename-${network.networkId}'),
+                    onPressed: onRename,
+                    style: TextButton.styleFrom(
+                      foregroundColor: grid.AppPalette.textSecondary,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: TextStyle(
+                        fontFamily: grid.AppFont.sans,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    icon: const Icon(LucideIcons.pencil300, size: 14),
+                    label: const Text('Rename'),
+                  ),
+                if (onRename != null && onDelete != null)
+                  const SizedBox(width: 4),
+                if (onDelete != null)
+                  _DeleteGridButton(
+                    name: network.displayName,
+                    deleting: deleting,
+                    onDelete: onDelete!,
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The one irreversible action on this pane: it deletes the grid for everyone
+/// on it, not just for this computer.
+///
+/// Small and last, so it never competes with the facts above it — but NAMED for
+/// what it does and drawn in the app's danger ink. An action nobody can undo
+/// should not also be the faintest thing in the drawer: greying it to the point
+/// of looking disabled is how you get somebody to press it to find out.
+class _DeleteGridButton extends StatelessWidget {
+  const _DeleteGridButton({
+    required this.name,
+    required this.deleting,
+    required this.onDelete,
+  });
+
+  final String name;
+  final bool deleting;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return TextButton.icon(
+      key: Key('grid-delete-$name'),
+      onPressed: deleting ? null : () => _confirm(context),
+      style: TextButton.styleFrom(
+        foregroundColor: grid.AppPalette.dangerFill,
+        // The wash appears only under the pointer — at rest the button is just
+        // its label, which is what keeps it quiet.
+        overlayColor: grid.AppPalette.dangerFill,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: TextStyle(fontFamily: grid.AppFont.sans, fontSize: 12.5),
+      ),
+      icon: deleting
+          ? const SizedBox(
+              width: 13,
+              height: 13,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(LucideIcons.trash2300, size: 14),
+      label: Text(deleting ? 'Deleting…' : 'Delete grid'),
+    );
+  }
+
+  /// Names what is lost rather than asking "are you sure?" — the question adds
+  /// nothing the reader did not already know, and trains people to dismiss it.
+  Future<void> _confirm(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete this grid?'),
+        content: SizedBox(
+          width: 360,
+          child: Text(
+            'This permanently deletes "$name" and removes everyone on it. '
+            "This can't be undone.",
+            style: TextStyle(
+              fontFamily: grid.AppFont.sans,
+              fontSize: 13.5,
+              height: 1.4,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: grid.AppPalette.textSecondary,
+            ),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('grid-delete-confirm'),
+            style: FilledButton.styleFrom(
+              backgroundColor: grid.AppPalette.dangerFill,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
+    if (confirmed == true) onDelete();
   }
 }
 

@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import '../api/api_client.dart' show ApiException;
 import '../logging/http_log.dart';
 import '../share/catalog_models.dart';
+import 'grid_access_type.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
 import 'grid_session.dart';
@@ -214,6 +215,67 @@ class GridApiClient {
     ];
   }
 
+  /// Creates a managed (hosted) grid — `POST /v1/grid/managed-networks`.
+  ///
+  /// The account this call is made with becomes the grid's owner, so there is
+  /// no owner argument: the bearer IS the answer.
+  ///
+  /// The name is validated by `gridNameError` before it gets here. The server
+  /// applies the same rule, but answers a violation with a 4xx body that is a
+  /// validation object rather than a sentence — checking first is what lets the
+  /// dialog say which rule was broken.
+  Future<GridNetwork> createNetwork({
+    required String name,
+    required GridAccessType type,
+  }) async {
+    final body = await _post(_managedPath, {
+      'name': name,
+      'network_type': type.wire,
+    });
+    return GridNetwork.fromJson(Map<String, dynamic>.from(body));
+  }
+
+  /// Deletes a grid — `DELETE /v1/grid/managed-networks/{id}`. Owner-only on
+  /// the server, and irreversible: everyone on the grid loses it.
+  ///
+  /// Uses [_unwrapEmpty] rather than [_unwrap] for the reason [removeMember]
+  /// does — the endpoint's answer is its status code, and insisting on a body
+  /// it need not send would turn a success into an error.
+  Future<void> deleteNetwork(String networkId) async {
+    _unwrapEmpty(
+      await _dio.delete<dynamic>(
+        '$_managedPath/$networkId',
+        options: _authorized(),
+      ),
+    );
+  }
+
+  /// Renames a grid — `PATCH /v1/grid/networks/{id}`.
+  ///
+  /// ⚠️ On `networks`, NOT `managed-networks`: the control plane keeps the
+  /// managed routes for provisioning (create / delete / members) and serves an
+  /// edit here. The two paths are one character apart and answer 404 for each
+  /// other, so they are written down separately rather than derived.
+  ///
+  /// Only the display name changes — the grid keeps its id, so relay keys,
+  /// joined nodes and every Base URL already handed out keep working.
+  ///
+  /// Uses [_unwrapEmpty], like [deleteNetwork]: the endpoint's answer is its
+  /// status code, and the Grid app's own client reads no body on success
+  /// either — insisting on one would turn a 204 into an error.
+  Future<void> renameNetwork(String networkId, {required String name}) async {
+    _unwrapEmpty(
+      await _dio.patch<dynamic>(
+        '$_networksPath/$networkId',
+        data: {'name': name},
+        options: _authorized(),
+      ),
+    );
+  }
+
+  static const String _managedPath = '/v1/grid/managed-networks';
+  static const String _networksPath = '/v1/grid/networks';
+
   /// Invites [email] to this grid, or changes what they may already do.
   ///
   /// **One POST does both.** There is no `PATCH …/members/{email}`: the store
@@ -249,7 +311,7 @@ class GridApiClient {
   }
 
   static String _membersPath(String networkId) =>
-      '/v1/grid/managed-networks/$networkId/members';
+      '$_managedPath/$networkId/members';
 
   /// What each person on this grid ran inside the relay's window.
   ///
