@@ -212,14 +212,21 @@ class _DevicesSectionState extends State<DevicesSection> {
 
   Future<void> _submitCode() async {
     final pairId = _pair['pairId'];
-    final code = _code.text.trim().toUpperCase();
+    // Match Harness core.normalizeCode before validating the Crockford alphabet.
+    final code = _code.text
+        .toUpperCase()
+        .replaceAll(RegExp(r'[\s\-·_]'), '')
+        .replaceAll('I', '1')
+        .replaceAll('L', '1')
+        .replaceAll('O', '0')
+        .replaceAll('U', 'V');
     if (_busy ||
         _pair['state'] != 'waiting' ||
         pairId is! String ||
         _remaining <= 0) {
       return;
     }
-    if (!RegExp(r'^[A-Z0-9]{6}$').hasMatch(code)) {
+    if (!RegExp(r'^[0-9A-HJKMNP-TV-Z]{6}$').hasMatch(code)) {
       setState(
         () => _error =
             'Enter the six-character code shown on your Autonomous device.',
@@ -301,6 +308,16 @@ class _DevicesSectionState extends State<DevicesSection> {
     grid.AppTheme.watch(context);
     final disabled = _busy || _loading || (kUnderTest && widget.cli == null);
     final remaining = _remaining;
+    final pairError = switch (_pair['error']) {
+      'CODE_MISMATCH' =>
+        'That code did not match. Check the device and try again.',
+      'RATE_LIMITED' =>
+        'Too many pairing attempts. Start a new pairing window and try again.',
+      'EXPIRED' => 'The pairing window expired. Start again to retry.',
+      'CANCELLED' => null,
+      final String value when value.isNotEmpty => 'Pairing failed: $value',
+      _ => _pair['state'] == 'failed' ? 'Start again to retry.' : null,
+    };
     Widget action(String label, VoidCallback? onPressed) => SizedBox(
       width: SettingRow.controlWidth,
       child: OutlinedButton(onPressed: onPressed, child: Text(label)),
@@ -469,11 +486,10 @@ class _DevicesSectionState extends State<DevicesSection> {
                 ),
                 const SizedBox(height: 10),
               ],
-              if (_pair['state'] == 'failed') ...[
+              if (pairError != null) ...[
                 SettingRow(
                   title: 'Pairing failed',
-                  detail: (_pair['error'] ?? 'Start again to retry.')
-                      .toString(),
+                  detail: pairError,
                   control: const SizedBox.shrink(),
                 ),
                 const SizedBox(height: 10),

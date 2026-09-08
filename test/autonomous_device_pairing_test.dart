@@ -298,6 +298,79 @@ void main() {
     expect(cli.arguments.join(' '), isNot(contains('ABC234')));
     expect(cli.secret, 'ABC234');
   });
+  testWidgets('mismatched code stays visible when CLI returns to listening', (
+    tester,
+  ) async {
+    final cli = FakeAutonomousDeviceCli()
+      ..pairState = {
+        'state': 'listening',
+        'error': 'CODE_MISMATCH',
+        'expiresAt': DateTime.now()
+            .add(const Duration(seconds: 60))
+            .millisecondsSinceEpoch,
+      };
+    await open(tester, cli);
+    expect(
+      find.text('That code did not match. Check the device and try again.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
+    cli.pairState = {
+      'state': 'waiting',
+      'pairId': 'next-intent',
+      'expiresAt': cli.expiry,
+    };
+    await tester.ensureVisible(find.byType(AppIconButton));
+    await tester.tap(find.byType(AppIconButton));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('That code did not match. Check the device and try again.'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('exhausted attempts explain how to retry', (tester) async {
+    final cli = FakeAutonomousDeviceCli()
+      ..pairState = {'state': 'failed', 'error': 'RATE_LIMITED'};
+    await open(tester, cli);
+    expect(
+      find.text(
+        'Too many pairing attempts. Start a new pairing window and try again.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'code normalization matches CLI and invalid punctuation stays local',
+    (tester) async {
+      final cli = FakeAutonomousDeviceCli()
+        ..pairState = {
+          'state': 'waiting',
+          'pairId': 'intent-1',
+          'expiresAt': DateTime.now()
+              .add(const Duration(seconds: 60))
+              .millisecondsSinceEpoch,
+        };
+      await open(tester, cli);
+      final field = find.byKey(const Key('autonomous-device-code'));
+      await tester.ensureVisible(field);
+      await tester.enterText(field, 'AB!234');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(cli.submissions, isEmpty);
+      expect(
+        find.text(
+          'Enter the six-character code shown on your Autonomous device.',
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(field, 'oilu23');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(cli.submissions.single['code'], '011V23');
+    },
+  );
 }
 
 class RecordingAutonomousDeviceCli extends AutonomousDeviceCli {

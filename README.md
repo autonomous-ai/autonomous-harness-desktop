@@ -96,3 +96,7 @@ make upload-node-runtime ARGS="22.23.2"
 
 See [RELEASE.md](RELEASE.md) for signing, notarization, versioning, managed
 Node runtime publishing, safe test releases, and rollback behavior.
+
+Pairing errors remain visible when the CLI returns to listening after a code mismatch.
+Desktop normalizes code look-alikes (`I/L → 1`, `O → 0`, `U → V`) like the CLI before
+checking the six-character Crockford alphabet. Exhausted attempts require a new window.
