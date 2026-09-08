@@ -1,17 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../usage/usage_window.dart';
-
-/// The glyph that stands for an agent account wherever its usage is printed.
-///
-/// One place, because the rail and the panel both draw it and a account that
-/// changed shape between the strip and the popover would read as two accounts.
-IconData usageIconFor(UsageProvider provider) => switch (provider) {
-  UsageProvider.claude => LucideIcons.asterisk,
-  UsageProvider.codex => LucideIcons.circleDot,
-};
+import '../engine_identity.dart';
 
 /// What one account has spent, window by window.
 ///
@@ -65,11 +56,10 @@ class _Header extends StatelessWidget {
     final fetchedAt = reading.fetchedAt;
     return Row(
       children: [
-        Icon(
-          usageIconFor(reading.provider),
-          size: 13,
-          color: grid.AppPalette.textSecondary,
-        ),
+        // The mark the machine rail already draws beside every agent of this
+        // engine — the account's own logo, in its own colour. Drawing a second
+        // glyph here would make one account look like two things.
+        EngineMark(engine: reading.provider.engineId, size: 13),
         const SizedBox(width: 7),
         Text(
           reading.provider.label,

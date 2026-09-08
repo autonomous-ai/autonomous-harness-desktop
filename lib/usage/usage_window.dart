@@ -21,6 +21,12 @@ enum UsageProvider {
 
   /// How the provider is named on screen.
   final String label;
+
+  /// The engine id this account's agents run under, which is also how
+  /// `EngineMark` finds the logo the machine rail already draws beside every
+  /// agent. The enum's own name is that id — spelled the same on purpose, so
+  /// there is no second mapping to keep in step.
+  String get engineId => name;
 }
 
 /// Why a provider's figures are, or are not, on screen.

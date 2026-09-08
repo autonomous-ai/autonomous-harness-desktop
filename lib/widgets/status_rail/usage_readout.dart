@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/skeleton.dart';
 import '../../usage/usage_window.dart';
+import '../engine_identity.dart';
 import 'rail_figure.dart';
-import 'usage_panel.dart';
 
 /// What the agent accounts on this machine have spent, along the status rail.
 ///
@@ -95,11 +95,7 @@ class _ProviderFigures extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          usageIconFor(reading.provider),
-          size: 12,
-          color: grid.AppPalette.textFaint,
-        ),
+        EngineMark(engine: reading.provider.engineId, size: 12),
         const SizedBox(width: 5),
         for (final (index, window) in reading.windows.indexed) ...[
           if (index > 0)

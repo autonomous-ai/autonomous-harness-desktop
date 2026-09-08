@@ -218,6 +218,33 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('an account nobody signed into here leaves the strip empty', (
+    tester,
+  ) async {
+    final api = _Api();
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.signedOut,
+        message: 'Sign in to Claude to see usage',
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(
+      tester,
+      api: api,
+      usage: usage,
+      withGrid: false,
+    );
+
+    // A figure-shaped blank that will never fill is worse than nothing, so an
+    // account with no session contributes no figures at all — the reason there
+    // are none belongs in the panel, where there is room to say it.
+    expect(find.textContaining('% used'), findsNothing);
+    expect(api.overviewCalls, 0);
+    controller.dispose();
+  });
+
   test('a failed refresh keeps the figures and marks them stale', () async {
     final api = _Api();
     final selection = GridSelectionStore(storage: _MemoryStore());
