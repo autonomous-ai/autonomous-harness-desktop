@@ -4,8 +4,33 @@ import 'dart:convert';
 import '../core/harness_cli_runner.dart';
 import '../core/test_run.dart';
 
-class LampCliException implements Exception {
-  const LampCliException(this.code, this.message);
+/// Polling may omit a code already returned by pair. Keep it only for the exact
+/// same active window, and discard it as soon as that window ends or changes.
+Map<String, dynamic> mergeAutonomousDevicePairStatus(
+  Map<String, dynamic> previous,
+  Map<String, dynamic> incoming,
+) {
+  final merged = <String, dynamic>{...incoming};
+  for (final key in ['address', 'machineName']) {
+    if (merged[key] == null && previous[key] != null) {
+      merged[key] = previous[key];
+    }
+  }
+  final active = const {'waiting', 'running'}.contains(incoming['state']);
+  final sameWindow =
+      incoming['expiresAt'] != null &&
+      incoming['expiresAt'] == previous['expiresAt'] &&
+      const {'waiting', 'running'}.contains(previous['state']);
+  if (!active) {
+    merged.remove('code');
+  } else if (sameWindow && merged['code'] == null && previous['code'] != null) {
+    merged['code'] = previous['code'];
+  }
+  return merged;
+}
+
+class AutonomousDeviceCliException implements Exception {
+  const AutonomousDeviceCliException(this.code, this.message);
   final String code;
   final String message;
   bool get unsupported =>
@@ -14,9 +39,10 @@ class LampCliException implements Exception {
   String toString() => message;
 }
 
-/// The CLI owns credentials and lamp trust. Pair codes remain in memory only.
-class LampCli {
-  LampCli({HarnessCliRunner? runner}) : _runner = runner ?? HarnessCliRunner();
+/// The CLI owns credentials and Autonomous device trust. Pair codes remain in memory only.
+class AutonomousDeviceCli {
+  AutonomousDeviceCli({HarnessCliRunner? runner})
+    : _runner = runner ?? HarnessCliRunner();
   final HarnessCliRunner _runner;
 
   Future<Map<String, dynamic>> status() => command('status');
@@ -33,14 +59,14 @@ class LampCli {
     List<String> arguments = const [],
   }) async {
     if (kUnderTest) {
-      throw const LampCliException(
+      throw const AutonomousDeviceCliException(
         'TEST_DISABLED',
-        'Inject a fake LampCli in tests.',
+        'Inject a fake AutonomousDeviceCli in tests.',
       );
     }
     // start logs lifecycle only; run would persist the secret code in stdout.
     final process = await _runner.start([
-      'lamp',
+      'autonomous-device',
       operation,
       ...arguments,
       '--json',
@@ -53,9 +79,9 @@ class LampCli {
     } on TimeoutException {
       process.kill();
       // A timed-out mutation may have succeeded. Read state before retrying it.
-      throw const LampCliException(
+      throw const AutonomousDeviceCliException(
         'TIMEOUT',
-        'The command timed out. Refresh the lamp status before trying again.',
+        'The command timed out. Refresh the Autonomous device status before trying again.',
       );
     }
     final output = await stdout;
@@ -71,9 +97,9 @@ class LampCli {
     }
     final error = result?['error'];
     if (error is Map) {
-      throw LampCliException(
+      throw AutonomousDeviceCliException(
         error['code']?.toString() ?? 'FAILED',
-        error['message']?.toString() ?? 'The lamp command failed.',
+        error['message']?.toString() ?? 'The Autonomous device command failed.',
       );
     }
     if (exitCode != 0 || result == null) {
@@ -81,9 +107,9 @@ class LampCli {
         r'unknown command|unknown subcommand|unrecognized command',
         caseSensitive: false,
       ).hasMatch('$output\n$errorOutput');
-      throw LampCliException(
+      throw AutonomousDeviceCliException(
         unsupported ? 'UNKNOWN_COMMAND' : 'FAILED',
-        unsupported ? 'This Harness CLI does not support lamp devices.' : 'The lamp command failed. Check that Harness is signed in and running.',
+        unsupported ? 'This Harness CLI does not support Autonomous devices.' : 'The Autonomous device command failed. Check that Harness is signed in and running.',
       );
     }
     return result;

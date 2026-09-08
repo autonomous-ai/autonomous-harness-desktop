@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:harness/lamp/lamp_cli.dart';
+import 'package:harness/autonomous_device/autonomous_device_cli.dart';
 import 'package:harness/shared/widgets/app_icon_button.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
 import 'package:harness/settings/sections/devices_section.dart';
 
-class FakeLampCli extends LampCli {
+class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
   bool paired = false;
   int statusCalls = 0;
   Duration window = const Duration(seconds: 60);
@@ -21,17 +21,17 @@ class FakeLampCli extends LampCli {
     statusCalls++;
     if (statusWait != null) await statusWait!.future;
     if (unsupported) {
-      throw const LampCliException('NOT_FOUND', 'Unsupported CLI');
+      throw const AutonomousDeviceCliException('NOT_FOUND', 'Unsupported CLI');
     }
     return {'proto': 1, 'address': '192.168.1.10:18474'};
   }
 
   @override
   Future<Map<String, dynamic>> list() async => {
-    'lamps': [
+    'devices': [
       if (paired)
         {
-          'id': 'lamp-public-key',
+          'id': 'device-public-key',
           'label': 'Kitchen',
           'online': false,
           'fingerprint': 'ABCD 1234',
@@ -60,7 +60,57 @@ class FakeLampCli extends LampCli {
 }
 
 void main() {
-  Future<void> open(WidgetTester tester, FakeLampCli cli) async {
+  group('pair-status code lifetime', () {
+    final previous = <String, dynamic>{
+      'state': 'waiting',
+      'expiresAt': 1234,
+      'code': 'ABC234',
+    };
+    test('omitted code survives only the same active expiry', () {
+      expect(
+        mergeAutonomousDevicePairStatus(previous, {
+          'state': 'running',
+          'expiresAt': 1234,
+        })['code'],
+        'ABC234',
+      );
+      expect(
+        mergeAutonomousDevicePairStatus(previous, {
+          'state': 'waiting',
+          'expiresAt': 5678,
+        })['code'],
+        isNull,
+      );
+      expect(
+        mergeAutonomousDevicePairStatus(previous, {'state': 'waiting'})['code'],
+        isNull,
+      );
+    });
+    for (final state in ['paired', 'failed', 'idle']) {
+      test('$state erases even an echoed code', () {
+        expect(
+          mergeAutonomousDevicePairStatus(previous, {
+            'state': state,
+            'expiresAt': 1234,
+            'code': 'ABC234',
+          }).containsKey('code'),
+          isFalse,
+        );
+      });
+    }
+    test('a new active window uses only its newly supplied code', () {
+      expect(
+        mergeAutonomousDevicePairStatus(previous, {
+          'state': 'waiting',
+          'expiresAt': 5678,
+          'code': 'XYZ789',
+        })['code'],
+        'XYZ789',
+      );
+    });
+  });
+
+  Future<void> open(WidgetTester tester, FakeAutonomousDeviceCli cli) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: DevicesSection(cli: cli)),
@@ -72,9 +122,9 @@ void main() {
   testWidgets('pairing displays CLI code and reachable address', (
     tester,
   ) async {
-    final cli = FakeLampCli();
+    final cli = FakeAutonomousDeviceCli();
     await open(tester, cli);
-    await tester.tap(find.text('Pair a lamp'));
+    await tester.tap(find.text('Pair an Autonomous device'));
     await tester.pumpAndSettle();
     expect(cli.replacements, [false]);
     expect(find.text('ABC234'), findsOneWidget);
@@ -83,18 +133,18 @@ void main() {
   });
 
   testWidgets('replacement requires explicit confirmation', (tester) async {
-    final cli = FakeLampCli()..paired = true;
+    final cli = FakeAutonomousDeviceCli()..paired = true;
     await open(tester, cli);
     expect(find.text('Paired · Offline'), findsOneWidget);
-    await tester.tap(find.text('Replace lamp'));
+    await tester.tap(find.text('Replace Autonomous device'));
     await tester.pumpAndSettle();
     expect(cli.replacements, isEmpty);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(cli.replacements, isEmpty);
-    await tester.tap(find.text('Replace lamp'));
+    await tester.tap(find.text('Replace Autonomous device'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('lamp-confirm')));
+    await tester.tap(find.byKey(const Key('device-confirm')));
     await tester.pumpAndSettle();
     expect(cli.replacements, [true]);
     expect(find.text('Kitchen'), findsOneWidget);
@@ -104,13 +154,13 @@ void main() {
   testWidgets(
     'unsupported CLI offers update guidance without pairing actions',
     (tester) async {
-      await open(tester, FakeLampCli()..unsupported = true);
+      await open(tester, FakeAutonomousDeviceCli()..unsupported = true);
       expect(
-        find.text('Update Harness CLI to use lamp devices.'),
+        find.text('Update Harness CLI to use Autonomous devices.'),
         findsOneWidget,
       );
       expect(find.text('Unsupported CLI'), findsNothing);
-      expect(find.text('Pair a lamp'), findsNothing);
+      expect(find.text('Pair an Autonomous device'), findsNothing);
       expect(find.text('Refresh'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
@@ -129,14 +179,17 @@ void main() {
     expect(refresh.onPressed, isNull);
   });
 
-  test('real LampCli refuses commands in tests', () async {
-    await expectLater(LampCli().status(), throwsA(isA<LampCliException>()));
+  test('real AutonomousDeviceCli refuses commands in tests', () async {
+    await expectLater(
+      AutonomousDeviceCli().status(),
+      throwsA(isA<AutonomousDeviceCliException>()),
+    );
   });
 
   testWidgets('injected CLI does not start background polling in tests', (
     tester,
   ) async {
-    final cli = FakeLampCli();
+    final cli = FakeAutonomousDeviceCli();
     await open(tester, cli);
     await tester.pump(const Duration(minutes: 2));
     expect(cli.statusCalls, 1);
@@ -146,7 +199,7 @@ void main() {
     tester,
   ) async {
     final pending = Completer<void>();
-    final cli = FakeLampCli()..statusWait = pending;
+    final cli = FakeAutonomousDeviceCli()..statusWait = pending;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: DevicesSection(cli: cli)),
@@ -154,19 +207,19 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(SkeletonBlock), findsOneWidget);
-    expect(find.text('No lamp paired'), findsNothing);
+    expect(find.text('No Autonomous device paired'), findsNothing);
     pending.complete();
     await tester.pumpAndSettle();
     expect(find.byType(SkeletonBlock), findsNothing);
-    expect(find.text('No lamp paired'), findsOneWidget);
+    expect(find.text('No Autonomous device paired'), findsOneWidget);
   });
 
   testWidgets('CLI deadline and nullable status metadata are preserved', (
     tester,
   ) async {
-    final cli = FakeLampCli()..window = const Duration(minutes: 3);
+    final cli = FakeAutonomousDeviceCli()..window = const Duration(minutes: 3);
     await open(tester, cli);
-    await tester.tap(find.text('Pair a lamp'));
+    await tester.tap(find.text('Pair an Autonomous device'));
     await tester.pumpAndSettle();
     final expiry = find.textContaining(
       RegExp(r'Expires in 1[67-8][0-9] seconds'),

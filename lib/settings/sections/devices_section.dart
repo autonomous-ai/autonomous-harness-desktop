@@ -4,7 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../lamp/lamp_cli.dart';
+import '../../autonomous_device/autonomous_device_cli.dart';
 import '../../core/test_run.dart';
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/setting_row.dart';
@@ -14,13 +14,13 @@ import '../../shared/widgets/section_scaffold.dart';
 
 class DevicesSection extends StatefulWidget {
   const DevicesSection({super.key, this.cli});
-  final LampCli? cli;
+  final AutonomousDeviceCli? cli;
   @override
   State<DevicesSection> createState() => _DevicesSectionState();
 }
 
 class _DevicesSectionState extends State<DevicesSection> {
-  late final LampCli _cli = widget.cli ?? LampCli();
+  late final AutonomousDeviceCli _cli = widget.cli ?? AutonomousDeviceCli();
   Timer? _timer;
   bool _loading = true;
   bool _busy = false;
@@ -30,7 +30,7 @@ class _DevicesSectionState extends State<DevicesSection> {
   String? _error;
   Map<String, dynamic> _status = {};
   Map<String, dynamic> _pair = {};
-  List<Map<String, dynamic>> _lamps = [];
+  List<Map<String, dynamic>> _devices = [];
 
   @override
   void initState() {
@@ -63,10 +63,12 @@ class _DevicesSectionState extends State<DevicesSection> {
   }
 
   void _failed(Object error) {
-    _error = error is LampCliException
+    _error = error is AutonomousDeviceCliException
         ? error.message
         : 'Could not reach the Harness CLI.';
-    if (error is LampCliException && error.unsupported) _unsupported = true;
+    if (error is AutonomousDeviceCliException && error.unsupported) {
+      _unsupported = true;
+    }
   }
 
   Future<void> _refresh() async {
@@ -77,24 +79,20 @@ class _DevicesSectionState extends State<DevicesSection> {
       final status = await _cli.status();
       final results = await Future.wait([_cli.list(), _cli.pairStatus()]);
       if (!mounted || generation != _generation) return;
-      final lamps = <Map<String, dynamic>>[
-        for (final row in results[0]['lamps'] as List? ?? [])
+      final devices = <Map<String, dynamic>>[
+        for (final row in results[0]['devices'] as List? ?? [])
           if (row is Map<String, dynamic>) row,
       ];
-      final pair = <String, dynamic>{...results[1]};
-      // Only preserve omitted display metadata, never a stale code or state.
-      for (final key in ['address', 'machineName']) {
-        if (pair[key] == null && _pair[key] != null) pair[key] = _pair[key];
-      }
+      final pair = mergeAutonomousDevicePairStatus(_pair, results[1]);
       if (_loading ||
           _unsupported ||
           _error != null ||
-          jsonEncode([status, lamps, pair]) !=
-              jsonEncode([_status, _lamps, _pair]) ||
+          jsonEncode([status, devices, pair]) !=
+              jsonEncode([_status, _devices, _pair]) ||
           _pairing) {
         setState(() {
           _status = status;
-          _lamps = lamps;
+          _devices = devices;
           _pair = pair;
           _loading = false;
           _unsupported = false;
@@ -140,7 +138,7 @@ class _DevicesSectionState extends State<DevicesSection> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              key: const Key('lamp-confirm'),
+              key: const Key('device-confirm'),
               style: FilledButton.styleFrom(
                 backgroundColor: grid.AppPalette.dangerFill,
                 overlayColor: const Color(0x1FFFFFFF),
@@ -173,15 +171,15 @@ class _DevicesSectionState extends State<DevicesSection> {
   }
 
   Future<void> _start() async {
-    // CLI LampTransport.pairStart only stages a candidate; receive confirms it
-    // after authenticated lamp_finished, then disconnects the previous lamp.
-    final replace = _lamps.isNotEmpty;
+    // CLI AutonomousDeviceTransport.pairStart only stages a candidate; receive confirms it
+    // after authenticated autonomous_device_finished, then disconnects the previous Autonomous device.
+    final replace = _devices.isNotEmpty;
     if (replace &&
         !await _confirm(
-          'Replace paired lamp?',
-          'The current lamp keeps access until the new lamp connects securely. '
+          'Replace paired Autonomous device?',
+          'The current Autonomous device keeps access until the new Autonomous device connects securely. '
               'Cancelling or letting the code expire keeps the current pairing.',
-          'Replace lamp',
+          'Replace Autonomous device',
         )) {
       return;
     }
@@ -196,18 +194,18 @@ class _DevicesSectionState extends State<DevicesSection> {
     });
   }
 
-  Future<void> _revoke(Map<String, dynamic> lamp) async {
+  Future<void> _revoke(Map<String, dynamic> device) async {
     if (!await _confirm(
-      'Revoke lamp?',
-      'Disconnect ${lamp['label'] ?? 'this lamp'} and remove its access to this computer. '
+      'Revoke Autonomous device?',
+      'Disconnect ${device['label'] ?? 'this Autonomous device'} and remove its access to this computer. '
           'It will need to pair again.',
-      'Revoke',
+      'Revoke Autonomous device',
     )) {
       return;
     }
     if (!mounted) return;
     await _act(() async {
-      await _cli.revoke(lamp['id'] as String);
+      await _cli.revoke(device['id'] as String);
       await _refresh();
     });
   }
@@ -252,7 +250,7 @@ class _DevicesSectionState extends State<DevicesSection> {
     );
     return SectionScaffold(
       title: 'Devices',
-      subtitle: 'Pair one Autonomous lamp with this computer.',
+      subtitle: 'Pair one Autonomous device with this computer.',
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -277,7 +275,7 @@ class _DevicesSectionState extends State<DevicesSection> {
               ),
             if (_unsupported)
               SettingRow(
-                title: 'Update Harness CLI to use lamp devices.',
+                title: 'Update Harness CLI to use Autonomous devices.',
                 detail: 'Run this command in Terminal, then refresh this page.',
                 control: const SizedBox(
                   width: SettingRow.controlWidth,
@@ -297,23 +295,23 @@ class _DevicesSectionState extends State<DevicesSection> {
                 ),
               ),
             if (!_unsupported && !_loading) ...[
-              for (final lamp in _lamps) ...[
+              for (final device in _devices) ...[
                 SettingRow(
-                  title: lamp['label']?.toString() ?? 'Lamp',
-                  detail: lamp['pendingFirstSession'] == true
+                  title: device['label']?.toString() ?? 'Autonomous device',
+                  detail: device['pendingFirstSession'] == true
                       ? 'Waiting for first connection'
-                      : lamp['online'] == true
+                      : device['online'] == true
                       ? 'Connected'
                       : 'Paired · Offline',
                   control: action(
-                    'Revoke',
-                    disabled || lamp['id'] is! String
+                    'Revoke Autonomous device',
+                    disabled || device['id'] is! String
                         ? null
-                        : () => _revoke(lamp),
+                        : () => _revoke(device),
                   ),
                 ),
                 const SizedBox(height: 10),
-                fact('Fingerprint', lamp['fingerprint']?.toString() ?? ''),
+                fact('Fingerprint', device['fingerprint']?.toString() ?? ''),
                 const SizedBox(height: 10),
               ],
               if (_pairing) ...[
@@ -336,8 +334,8 @@ class _DevicesSectionState extends State<DevicesSection> {
                 SettingRow(
                   title: _pair['state'] == 'running'
                       ? 'Pairing…'
-                      : 'Enter these on your lamp',
-                  detail: 'The lamp and computer must be reachable on your local network.',
+                      : 'Enter these on your Autonomous device',
+                  detail: 'The Autonomous device and computer must be reachable on your local network.',
                   control: action(
                     'Cancel pairing',
                     disabled
@@ -354,8 +352,8 @@ class _DevicesSectionState extends State<DevicesSection> {
               ],
               if (_pair['state'] == 'paired') ...[
                 fact(
-                  'Lamp paired successfully.',
-                  _pair['lampFingerprint']?.toString() ?? '',
+                  'Autonomous device paired successfully.',
+                  _pair['deviceFingerprint']?.toString() ?? '',
                 ),
                 const SizedBox(height: 10),
               ],
@@ -369,12 +367,16 @@ class _DevicesSectionState extends State<DevicesSection> {
                 const SizedBox(height: 10),
               ],
               SettingRow(
-                title: _lamps.isEmpty ? 'No lamp paired' : 'Pair another lamp',
-                detail: _lamps.isEmpty
-                    ? 'Connect a lamp to this computer’s agents.'
-                    : 'The current lamp keeps access until its replacement connects securely.',
+                title: _devices.isEmpty
+                    ? 'No Autonomous device paired'
+                    : 'Pair another Autonomous device',
+                detail: _devices.isEmpty
+                    ? 'Connect an Autonomous device to this computer’s agents.'
+                    : 'The current Autonomous device keeps access until its replacement connects securely.',
                 control: action(
-                  _lamps.isEmpty ? 'Pair a lamp' : 'Replace lamp',
+                  _devices.isEmpty
+                      ? 'Pair an Autonomous device'
+                      : 'Replace Autonomous device',
                   disabled || _pairing ? null : _start,
                 ),
               ),
@@ -385,7 +387,7 @@ class _DevicesSectionState extends State<DevicesSection> {
               detail: 'Harness CLI keeps the connection running when you close Desktop.',
               control: AppIconButton(
                 icon: Icons.refresh_rounded,
-                tooltip: 'Refresh lamp status',
+                tooltip: 'Refresh Autonomous device status',
                 onPressed: disabled ? null : () => unawaited(_refresh()),
               ),
             ),

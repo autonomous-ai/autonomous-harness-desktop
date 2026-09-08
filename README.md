@@ -51,29 +51,33 @@ PROD_TERMINAL_E2E=1 ... bash scripts/test-terminal-prod-e2e.sh
 The production script deliberately requires release, deployment, machine, and
 commit evidence before it sends terminal traffic to production.
 
-## Lamp pairing
+## Autonomous device pairing
 
-Open **Settings → Devices**, select **Pair a lamp**, then enter the displayed
-computer address and pairing code on the lamp. The CLI owns the pairing deadline;
+Open **Settings → Devices**, select **Pair an Autonomous device**, then enter the displayed
+computer address and pairing code on the Autonomous device. The CLI owns the pairing deadline;
 Desktop refreshes every two seconds during pairing and every sixty seconds
 otherwise. **Refresh** also reads the current state manually.
 
-**Replace lamp** requires confirmation. The current lamp keeps access until the
+**Replace Autonomous device** requires confirmation. The current Autonomous device keeps access until the
 replacement completes an authenticated connection. Cancelling the pending pairing
-keeps the current lamp. **Revoke** removes the selected lamp's access immediately
+keeps the current Autonomous device. **Revoke Autonomous device** removes the selected Autonomous device's access immediately
 and requires confirmation. Closing Desktop does not stop the CLI daemon or revoke
-pairing. The lamp can interact only with agents on the paired computer.
+pairing. The Autonomous device can interact only with agents on the paired computer.
 
 The CLI contract is implemented in `autonomous-harness`:
-`cli/src/lib/lamp/transport.ts` — `pairStart` opens the pairing window without
-revoking the current lamp; `receive` confirms the replacement only after encrypted
-`lamp_finished` proves possession of the session key and signed welcome challenge.
-`cli/src/lib/lamp/store.ts` — `confirm` persists the new active identity.
+`cli/src/lib/autonomous-device/transport.ts` — `pairStart` opens the pairing window without
+revoking the current Autonomous device; `receive` confirms the replacement only after encrypted
+`autonomous_device_finished` proves possession of the session key and signed welcome challenge.
+`cli/src/lib/autonomous-device/store.ts` — `confirm` persists the new active identity.
 
 An older CLI shows the `harness update` instruction. Desktop uses
-`HarnessCliRunner.start` for `harness lamp ... --json` so pairing codes are not
+`HarnessCliRunner.start` for `harness autonomous-device ... --json` so pairing codes are not
 written to the process-output transcript. Codes remain in widget memory. Commands
-that time out are not automatically retried. Widget tests inject a fake `LampCli`;
+that time out are not automatically retried. A polling response that omits the code
+retains it only when `expiresAt` matches the same active pairing window; a terminal
+state or a different window clears it. `lib/autonomous_device/autonomous_device_cli.dart` wraps the CLI,
+and `test/autonomous_device_pairing_test.dart` covers this lifetime and the pairing UI.
+Widget tests inject a fake `AutonomousDeviceCli`;
 `kUnderTest` disables background polling and real CLI process execution.
 
 ## Releases
