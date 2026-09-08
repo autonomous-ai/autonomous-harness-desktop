@@ -13,6 +13,7 @@ import 'sections/share_intelligence_section.dart';
 import 'sections/shortcuts_section.dart';
 import 'sections/terminal_section.dart';
 import 'sections/tracking_section.dart';
+import 'sections/usage_section.dart';
 import 'settings_nav.dart';
 import 'settings_section.dart';
 
@@ -181,6 +182,7 @@ class _SettingsBody extends StatelessWidget {
       SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),
+      SettingsSection.usage => const UsageSection(),
       SettingsSection.shortcuts => const ShortcutsSection(),
       SettingsSection.debug => const DebugSection(),
       SettingsSection.tracking => const TrackingSection(),
