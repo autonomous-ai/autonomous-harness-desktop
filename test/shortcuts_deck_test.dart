@@ -81,4 +81,27 @@ void main() {
     expect(find.text('The terminal keeps'.toUpperCase()), findsOneWidget);
     expect(find.text(kTerminalOwnedKeys.first.label), findsOneWidget);
   });
+
+  // The invariant the deck's minimum card width is FOR. It used to hold only by
+  // 5.5px at three columns, so the row that outgrew it overflowed just once the
+  // deck handed a card its minimum — a layout no fixed-width test rendered, so
+  // it surfaced as the two tests above failing at random.
+  //
+  // Rendering at exactly _minCardWidth is what makes it deterministic: if a new
+  // chord outgrows a card again, THIS fails, by name, every time.
+  testWidgets('no row overflows a card at its narrowest', (tester) async {
+    tester.view.physicalSize = const Size(1400 * 2, 4000 * 2);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    // One lane, sized so the deck's LayoutBuilder settles on a single card at
+    // exactly the minimum it will ever draw.
+    await pumpDeck(tester, ShortcutsDeck.minCardWidth);
+
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'a chord outgrew the narrowest card — it must wrap, not overflow',
+    );
+  });
 }
