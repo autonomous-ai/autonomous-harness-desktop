@@ -10,8 +10,8 @@ import '../logging/debug_surface.dart';
 /// rail, the search filter and the pane all read this list, so a section cannot
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
-  grid(LucideIcons.zap300, 'Grid'),
-  shareIntelligence(LucideIcons.share2300, 'Share Intelligence'),
+  grid(LucideIcons.zap300, 'Your grids'),
+  shareIntelligence(LucideIcons.share2300, 'Share this computer'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),

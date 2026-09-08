@@ -87,9 +87,10 @@ void main() {
     expect(find.text('About'), findsOneWidget);
     expect(find.text('Back to app'), findsOneWidget);
 
-    // Grid is the section it opens on, so its name is the group caption, the
-    // rail row AND the pane's title.
-    expect(find.text('Grid'), findsNWidgets(3));
+    // Grid is the section it opens on: the group caption keeps the product's
+    // name, while the row and the pane it opens are named for what they hold.
+    expect(find.text('Grid'), findsOneWidget);
+    expect(find.text('Your grids'), findsNWidgets(2));
     // And its pane really loaded, through the injected fake.
     expect(find.text('hp-1-1'), findsOneWidget);
   });
@@ -200,8 +201,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Keyboard shortcuts'), findsOneWidget);
-    // Rail rows gone; the open pane's own title is what remains of 'Grid'.
-    expect(find.text('Grid'), findsOneWidget);
+    // Rail rows and their captions gone; the open pane's own title is all
+    // that remains of the Grid section.
+    expect(find.text('Grid'), findsNothing);
+    expect(find.text('Your grids'), findsOneWidget);
     expect(find.text('Appearance'), findsNothing);
     expect(find.text('Terminal'), findsNothing);
     expect(find.text('Preferences'), findsNothing);
@@ -222,7 +225,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Back to app'), findsNothing);
-    expect(find.text('Grid'), findsNothing);
+    expect(find.text('Your grids'), findsNothing);
     expect(find.byType(Placeholder), findsOneWidget);
   });
 }

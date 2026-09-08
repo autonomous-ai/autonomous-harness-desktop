@@ -230,8 +230,8 @@ class EnvironmentProvisioner {
         message: 'Environment ready.',
         output: grid
             ? 'Grid CLI ready'
-            : 'Grid CLI unavailable — Share Intelligence stays off until it is '
-                  'installed.',
+            : 'Grid CLI unavailable — this computer cannot be shared with a '
+                  'grid until it is installed.',
       );
       return state;
     } catch (error) {

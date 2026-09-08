@@ -9,6 +9,9 @@ import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/grid/managed_network_member.dart';
 import 'package:harness/grid/member_usage.dart';
+import 'package:harness/usage/usage_controller.dart';
+import 'package:harness/usage/usage_source.dart';
+import 'package:harness/usage/usage_window.dart';
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
 import 'package:harness/widgets/status_rail/pill_panel_shell.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -92,9 +95,38 @@ class _Api extends GridApiClient {
   }) async => null;
 }
 
+/// One agent account's rate limits, fixed, so the strip's no-grid half can be
+/// read without shelling out to a vendor CLI.
+class _StubUsageSource implements UsageSource {
+  _StubUsageSource(this.reading);
+
+  final ProviderUsage reading;
+
+  @override
+  UsageProvider get provider => reading.provider;
+
+  @override
+  Future<ProviderUsage> read() async => reading;
+}
+
+/// A controller holding [readings], already settled.
+///
+/// `autoStart: false` and one explicit [UsageController.refresh]: the live one
+/// starts a periodic timer, and a timer is a `pumpAndSettle` that never
+/// settles.
+Future<UsageController> _usageWith(List<ProviderUsage> readings) async {
+  final controller = UsageController(
+    sources: [for (final reading in readings) _StubUsageSource(reading)],
+    autoStart: false,
+  );
+  await controller.refresh();
+  return controller;
+}
+
 Future<GridOverviewController> _pump(
   WidgetTester tester, {
   _Api? api,
+  UsageController? usage,
   bool withGrid = true,
 }) async {
   final selection = GridSelectionStore(storage: _MemoryStore());
@@ -116,7 +148,7 @@ Future<GridOverviewController> _pump(
         body: Column(
           children: [
             const Spacer(),
-            GridStatusRail(controller: controller),
+            GridStatusRail(controller: controller, usage: usage),
           ],
         ),
       ),
@@ -158,13 +190,30 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('with no grid chosen it says so and asks the relay nothing', (
+  testWidgets('with no grid chosen the strip reads the agent accounts', (
     tester,
   ) async {
     final api = _Api();
-    final controller = await _pump(tester, api: api, withGrid: false);
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        windows: [UsageWindow(label: 'Session', usedPercent: 12)],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(
+      tester,
+      api: api,
+      usage: usage,
+      withGrid: false,
+    );
 
-    expect(find.text('No grid chosen'), findsOneWidget);
+    // A rate limit belongs to an account rather than to a grid, so this is a
+    // substitution and not a fallback: the strip answers the question it can.
+    expect(find.text('12% used'), findsOneWidget);
+    expect(find.text('Session'), findsOneWidget);
+    // And with no grid there is nothing to ask a relay about.
     expect(api.overviewCalls, 0);
     controller.dispose();
   });

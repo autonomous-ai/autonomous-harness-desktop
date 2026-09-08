@@ -115,7 +115,7 @@ class _StepRow extends StatelessWidget {
       // its own runtime, so there is nothing separate left to show.
       EnvironmentStep.harness => 'Harness CLI & runtime',
       EnvironmentStep.tmux => 'tmux terminal support',
-      EnvironmentStep.grid => 'Grid CLI for Share Intelligence',
+      EnvironmentStep.grid => 'Grid CLI for sharing this computer',
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),

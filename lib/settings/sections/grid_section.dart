@@ -119,7 +119,7 @@ class _GridSectionState extends State<GridSection> {
           fontSize: 12.5,
         );
         return SectionScaffold(
-          title: 'Grid',
+          title: 'Your grids',
           // The count is part of the load, so while it is unknown the heading
           // wears a bar of the same height rather than nothing: a heading that
           // grows a figure a beat after the table is a heading that moved.

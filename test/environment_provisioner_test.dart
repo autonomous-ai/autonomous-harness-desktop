@@ -244,7 +244,7 @@ void main() {
       EnvironmentStepStatus.unavailable,
     );
     expect(readiness.needsTerminal, isFalse);
-    expect(readiness.output.last, contains('Share Intelligence'));
+    expect(readiness.output.last, contains('cannot be shared with a grid'));
   });
 
   /// The one path nothing else covers, and the whole point of the managed

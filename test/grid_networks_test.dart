@@ -196,7 +196,7 @@ void main() {
     testWidgets('lists every grid, marking the one you own', (tester) async {
       await ready(tester);
 
-      expect(find.text('Grid'), findsOneWidget);
+      expect(find.text('Your grids'), findsOneWidget);
       expect(find.textContaining('huy@example.com'), findsWidgets);
       expect(find.text('hp-1-1'), findsOneWidget);
       expect(find.text('Water Grid'), findsOneWidget);
