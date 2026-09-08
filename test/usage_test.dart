@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:harness/widgets/engine_identity.dart';
+import 'package:harness/widgets/status_rail/usage_panel.dart';
 import 'package:harness/usage/claude_usage_source.dart';
 import 'package:harness/usage/codex_usage_source.dart';
 import 'package:harness/usage/usage_credentials.dart';
@@ -251,6 +254,87 @@ void main() {
         credentials: UsageCredentials(home: '/nonexistent-harness-test-home'),
       ).read();
       expect(reading.status, UsageStatus.signedOut);
+    });
+  });
+
+  group('the bar', () {
+    /// Pumps one window's row and hands back the fill that was actually
+    /// painted — its measured width, and the colour it was drawn in.
+    Future<({double width, Color color})> fill(
+      WidgetTester tester,
+      double percent,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                // The width the rail actually opens this panel at.
+                width: 248,
+                child: UsagePanelContent(
+                  reading: ProviderUsage(
+                    provider: UsageProvider.claude,
+                    status: UsageStatus.ok,
+                    windows: [
+                      UsageWindow(label: 'Session', usedPercent: percent),
+                    ],
+                    fetchedAt: DateTime.now(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final finder = find.byKey(const Key('usage-bar-fill'));
+      final box = tester.widget<SizedBox>(finder);
+      final painted = tester.widget<ColoredBox>(
+        find.descendant(of: finder, matching: find.byType(ColoredBox)),
+      );
+      return (width: box.width ?? 0, color: painted.color);
+    }
+
+    testWidgets('a single-digit window still shows a band of colour', (
+      tester,
+    ) async {
+      // The bug this guards: at the percentages these windows sit at for most
+      // of their life, a strictly proportional fill is a couple of pixels and
+      // reads as nothing at all.
+      final small = await fill(tester, 2);
+      expect(small.width, greaterThanOrEqualTo(4));
+    });
+
+    testWidgets('an untouched window draws no fill at all', (tester) async {
+      // Zero is the one case that must NOT be over-represented: a bar claiming
+      // usage nobody spent is worse than a bar that is hard to see.
+      expect((await fill(tester, 0)).width, 0);
+    });
+
+    testWidgets('the fill wears the account colour, and never a grey', (
+      tester,
+    ) async {
+      final claude = await fill(tester, 30);
+      expect(claude.color, engineIdentity('claude').color);
+      // The mark at the top of the panel is drawn from the same source, so the
+      // two cannot drift into two colours for one account.
+      expect(claude.color.r == claude.color.g && claude.color.g == claude.color.b,
+          isFalse);
+    });
+
+    testWidgets('a nearly spent window stops wearing the account colour', (
+      tester,
+    ) async {
+      final spent = await fill(tester, 92);
+      expect(spent.color, isNot(engineIdentity('claude').color));
+    });
+
+    testWidgets('a full window fills the bar exactly, not past it', (
+      tester,
+    ) async {
+      // The bar spans the panel, so a spent window's fill is the panel's own
+      // width — and the clamp that widens small fills must not widen this one
+      // past the track it sits in.
+      expect((await fill(tester, 100)).width, 248);
     });
   });
 
