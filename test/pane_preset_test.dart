@@ -12,7 +12,6 @@ import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/state/pane_preset.dart';
-import 'package:harness/state/pane_splits.dart';
 import 'package:harness/state/terminal_pane.dart';
 import 'package:harness/widgets/pane_grid.dart';
 
@@ -154,26 +153,53 @@ void main() {
     expect(PanePreset.byId(null), isNull);
   });
 
-  test('changing the shape drops dividers that described the old one', () {
-    // A 0.7 divider under "two over one" is a boundary that does not exist
-    // under "main + stack"; carrying it over lands a tile somewhere nobody
-    // chose. Starting even is the only honest answer.
-    final notifier = _withPanes(3);
-    notifier.setSplits(3, const PaneSplits(row: 0.7, col: 0.3));
-    expect(notifier.splitsFor(3).row, closeTo(0.7, 1e-9));
+  testWidgets('two tiles are separated by exactly one line', (tester) async {
+    // The point of the whole change. Before it there were three lines between
+    // every pair — the wall, plus the 1px border each tile drew around itself —
+    // sitting inside a 9px grab strip. One wall, one pixel, shared.
+    final notifier = _withPanes(2);
+    notifier.setPreset(2, PanePreset.columns);
+    await _layout(tester, notifier);
 
-    notifier.setPreset(3, PanePreset.mainLeft);
-    expect(notifier.splitsFor(3).row, closeTo(0.5, 1e-9));
-    expect(notifier.splitsFor(3).col, closeTo(0.5, 1e-9));
+    final left = tester.getRect(find.byKey(notifier.panes[0].cellKey));
+    final right = tester.getRect(find.byKey(notifier.panes[1].cellKey));
+    expect(right.left - left.right, closeTo(1, 0.01));
   });
 
-  test('setting the shape it already has leaves the dividers alone', () {
-    // Re-picking the current shape from the palette is a no-op, not a reset —
-    // it would be a nasty way to lose a tuned layout.
-    final notifier = _withPanes(3);
-    final preset = notifier.presetFor(3)!;
-    notifier.setSplits(3, const PaneSplits(row: 0.7, col: 0.3));
-    notifier.setPreset(3, preset);
-    expect(notifier.splitsFor(3).row, closeTo(0.7, 1e-9));
+  testWidgets('and so are two rows', (tester) async {
+    final notifier = _withPanes(2);
+    notifier.setPreset(2, PanePreset.rows);
+    await _layout(tester, notifier);
+
+    final top = tester.getRect(find.byKey(notifier.panes[0].cellKey));
+    final bottom = tester.getRect(find.byKey(notifier.panes[1].cellKey));
+    expect(bottom.top - top.bottom, closeTo(1, 0.01));
+  });
+
+  testWidgets('a big grid keeps the same single wall', (tester) async {
+    final notifier = _withPanes(6);
+    notifier.setPreset(6, PanePreset.cols3);
+    await _layout(tester, notifier);
+
+    final first = tester.getRect(find.byKey(notifier.panes[0].cellKey));
+    final second = tester.getRect(find.byKey(notifier.panes[1].cellKey));
+    final below = tester.getRect(find.byKey(notifier.panes[3].cellKey));
+    expect(second.left - first.right, closeTo(1, 0.01), reason: 'column wall');
+    expect(below.top - first.bottom, closeTo(1, 0.01), reason: 'row wall');
+  });
+
+  testWidgets('no boundary offers a resize cursor', (tester) async {
+    // Dragging is gone, and the surest sign it is really gone is that nothing
+    // on screen still invites it.
+    final notifier = _withPanes(4);
+    await _layout(tester, notifier);
+
+    final resizable = find.byWidgetPredicate(
+      (w) =>
+          w is MouseRegion &&
+          (w.cursor == SystemMouseCursors.resizeColumn ||
+              w.cursor == SystemMouseCursors.resizeRow),
+    );
+    expect(resizable, findsNothing);
   });
 }

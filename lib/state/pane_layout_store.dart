@@ -3,7 +3,6 @@ import 'dart:convert';
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 import 'pane_preset.dart';
-import 'pane_splits.dart';
 import 'terminal_pane.dart';
 
 /// Remembers which agents were on screen, so reopening the app returns to the
@@ -18,16 +17,17 @@ class PaneLayoutStore {
 
   static const _key = 'terminal_pane_layout';
 
-  /// A SECOND key rather than a field on the layout entries. The two answer
-  /// different questions — which agents were open, and where the dividers sat —
-  /// and the entry schema above already refuses anything it does not recognise,
-  /// so widening it would make an old build drop a new build's whole layout
-  /// rather than just the part it cannot use.
-  static const _splitsKey = 'terminal_pane_splits';
-
-  /// Chosen shapes, by tile count. Its own key for the same reason the splits
-  /// have one: an older build that cannot read it should lose the shape, not
-  /// the whole layout.
+  /// Chosen shapes, by tile count. A SECOND key rather than a field on the
+  /// layout entries: the two answer different questions — which agents were
+  /// open, and what shape the grid was in — and the entry schema above already
+  /// refuses anything it does not recognise, so widening it would make an old
+  /// build drop a new build's whole layout rather than just the part it cannot
+  /// use.
+  ///
+  /// A third key, `terminal_pane_splits`, is written by older builds and no
+  /// longer read: dividers were draggable and their positions were remembered.
+  /// Nothing deletes it — a downgrade would want it back, and a few hundred
+  /// bytes of dead JSON costs less than a file this build has to migrate.
   static const _presetsKey = 'terminal_pane_presets';
 
   /// The ceiling on tiles, enforced on the way IN as well as out: a file written
@@ -78,40 +78,6 @@ class PaneLayoutStore {
 
   /// A failed write costs the layout at the next launch, which is a far smaller
   /// wrong than an exception thrown out of a pane close.
-  /// Divider positions, by pane count. Missing or unreadable → centred.
-  Future<Map<int, PaneSplits>> loadSplits() async {
-    try {
-      final raw = await _storage.read(_splitsKey);
-      if (raw == null || raw.isEmpty) return const {};
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return const {};
-      final out = <int, PaneSplits>{};
-      for (final entry in decoded.entries) {
-        final count = int.tryParse(entry.key.toString());
-        // A count this build cannot lay out is dropped rather than kept: it
-        // would be dead weight now and a lie if the grid's shape changes.
-        if (count == null || count < 2 || count > maxPanes) continue;
-        out[count] = PaneSplits.fromJson(entry.value);
-      }
-      return out;
-    } catch (_) {
-      return const {};
-    }
-  }
-
-  Future<void> saveSplits(Map<int, PaneSplits> splits) async {
-    try {
-      final payload = <String, dynamic>{
-        for (final entry in splits.entries)
-          // Centred is the default, so writing it only grows the file and
-          // gives a future build something to misread.
-          if (!entry.value.isDefault) '${entry.key}': entry.value.toJson(),
-      };
-      await _storage.write(_splitsKey, jsonEncode(payload));
-    } catch (_) {
-      // Kept in memory for this run; see above.
-    }
-  }
 
   /// Chosen shapes, by tile count. An id this build does not know is dropped —
   /// a shape it cannot draw is worse than the default it can.

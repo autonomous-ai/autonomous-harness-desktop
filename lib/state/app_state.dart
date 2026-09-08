@@ -28,7 +28,6 @@ import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
 import 'pane_preset.dart';
-import 'pane_splits.dart';
 import 'pending_question.dart';
 
 enum AppStatus {
@@ -217,49 +216,25 @@ class AppNotifier extends ChangeNotifier {
   /// the rail draws as current.
   int? focusedPaneId;
 
-  /// Divider positions, keyed by how many panes are on the grid. Empty means
-  /// every divider is centred, which is also what a first run looks like.
-  final Map<int, PaneSplits> paneSplits = {};
-
-  PaneSplits splitsFor(int paneCount) =>
-      paneSplits[paneCount] ?? const PaneSplits();
-
   /// The chosen shape for a grid of this size, or the shipped one.
   final Map<int, PanePreset> panePresets = {};
 
   PanePreset? presetFor(int paneCount) =>
       panePresets[paneCount] ?? PanePreset.defaultFor(paneCount);
 
-  /// Choose a shape. Keyed by tile COUNT, like the dividers: three tiles and
-  /// four tiles are different shapes and one choice cannot speak for both.
+  /// Choose a shape. Keyed by tile COUNT: three tiles and four tiles are
+  /// different shapes and one choice cannot speak for both.
+  ///
+  /// The shape is now the ONLY thing to choose about the grid — tiles are laid
+  /// out at the proportions the shape states and nothing is draggable. Which is
+  /// why the shapes had to become a real list first: dragging was what a person
+  /// reached for when the one shape on offer was not the one they wanted.
   void setPreset(int paneCount, PanePreset preset) {
     if (!PanePreset.forCount(paneCount).contains(preset)) return;
     if (presetFor(paneCount) == preset) return;
     panePresets[paneCount] = preset;
-    // The dividers described the OLD shape's boundaries. Keeping them would
-    // move a line the user never touched — the same reason a count change
-    // drops them.
-    paneSplits.remove(paneCount);
     notifyListeners();
-    final store = _paneLayout;
-    if (store != null) {
-      unawaited(store.saveSplits(paneSplits));
-      unawaited(store.savePresets(panePresets));
-    }
-  }
-
-  /// Move one divider and remember it.
-  ///
-  /// Keyed by pane count so the 3-pane and 4-pane grids keep their own
-  /// dividers: they are different shapes, and reusing a fraction across them
-  /// would move a boundary the user never dragged.
-  void setSplits(int paneCount, PaneSplits next) {
-    if (paneCount < 2 || paneCount > maxPanes) return;
-    if (splitsFor(paneCount) == next) return;
-    paneSplits[paneCount] = next;
-    notifyListeners();
-    final store = _paneLayout;
-    if (store != null) unawaited(store.saveSplits(paneSplits));
+    unawaited(_paneLayout?.savePresets(panePresets));
   }
 
   int _nextPaneId = 1;
@@ -2736,12 +2711,11 @@ class AppNotifier extends ChangeNotifier {
     // Read before the guards below: the dividers are remembered even for a
     // grid this run has not restored any agents into, so a window that opens
     // empty and is then filled by hand still comes up the shape it was left.
-    paneSplits.addAll(await store.loadSplits());
     panePresets.addAll(await store.loadPresets());
     if (panes.isNotEmpty) return;
     final entries = await store.load();
     if (entries.isEmpty) {
-      if (paneSplits.isNotEmpty || panePresets.isNotEmpty) notifyListeners();
+      if (panePresets.isNotEmpty) notifyListeners();
       return;
     }
     for (final entry in entries) {

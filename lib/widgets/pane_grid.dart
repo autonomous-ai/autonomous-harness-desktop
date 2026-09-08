@@ -6,12 +6,10 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
 import '../state/pane_preset.dart';
-import '../state/pane_splits.dart';
 import '../state/terminal_pane.dart';
 import '../terminal/terminal_font_store.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
-import 'pane_snap.dart';
 import 'harness_join_guide_screen.dart';
 import 'new_agent_dialog.dart';
 import 'terminal_panel.dart';
@@ -65,7 +63,7 @@ class PaneGrid extends StatelessWidget {
               child: const _AddSlot(),
             ),
         ];
-        return _arrange(cells, interactive: dragging == null);
+        return _arrange(cells);
       },
     );
   }
@@ -74,30 +72,17 @@ class PaneGrid extends StatelessWidget {
   /// are two over one, not two over one-and-a-gap.
   ///
   /// Keyed on the number of CELLS, not of panes: mid-drag an extra drop slot
-  /// joins them, and the grid on screen is the one the dividers have to match.
-  /// Those dividers are inert while an agent is being dragged — one pointer
-  /// cannot mean both things.
-  Widget _arrange(List<Widget> cells, {required bool interactive}) {
-    final splits = notifier.splitsFor(cells.length);
-    void put(PaneSplits next) => notifier.setSplits(cells.length, next);
-
-    // Above four, one shape: a grid whose COLUMN COUNT is chosen by the width.
-    // The hand-tuned shapes below stay exactly as they are — three tiles are
-    // two over one with the bottom one SPANNING, and no uniform grid can say
-    // that. They were tuned by eye and there is nothing to gain by re-deriving
-    // them from a rule.
-    if (cells.length > 4) {
-      // The column count is the choice at this size, and `auto` states none —
-      // which is exactly what the lattice already means by a null.
-      return _Lattice(
-        cells: cells,
-        splits: splits,
-        onSplits: interactive ? put : null,
-        columns: notifier.presetFor(cells.length)?.statedColumns,
-      );
-    }
-
+  /// joins them, and the grid on screen is the one the shape has to describe.
+  Widget _arrange(List<Widget> cells) {
     final preset = notifier.presetFor(cells.length);
+
+    // Above four, one family of shapes: a grid whose COLUMN COUNT is either
+    // stated by the preset or measured from the width. The hand-tuned shapes
+    // below stay as they are — three tiles are two over one with the bottom one
+    // SPANNING, and no uniform grid can say that.
+    if (cells.length > 4) {
+      return _Lattice(cells: cells, columns: preset?.statedColumns);
+    }
 
     switch (cells.length) {
       case 1:
@@ -117,138 +102,66 @@ class PaneGrid extends StatelessWidget {
                     ? Axis.horizontal
                     : Axis.vertical,
             };
-            return _Split(
-              axis: side,
-              fraction: splits.col,
-              onFraction: interactive
-                  ? (v) => put(splits.copyWith(col: v))
-                  : null,
-              first: cells[0],
-              second: cells[1],
-            );
+            return _Axis(axis: side, children: cells);
           },
         );
       case 3:
-        // Three across is the one shape here with no spanning tile, so it is
-        // the lattice with its column count stated rather than measured — the
-        // same widget the five-and-up grid uses, which is what makes its
-        // dividers, its 40-column floor and its scroll fallback behave
-        // identically to every other grid in the app.
+        // Three across has no spanning tile, so it is the lattice with its
+        // column count stated rather than measured — the same widget the
+        // five-and-up grid uses, which is what makes its walls, its 40-column
+        // floor and its scroll fallback behave identically everywhere.
         if (preset == PanePreset.cols3) {
-          return _Lattice(
-            cells: cells,
-            splits: splits,
-            onSplits: interactive ? put : null,
-            columns: 3,
-          );
+          return _Lattice(cells: cells, columns: 3);
         }
         // The rest each have ONE spanning tile — the whole reason three is not
         // a grid. Which tile spans, and on which side, is the choice.
-        _Split pair(Widget a, Widget b, Axis axis) => _Split(
-          axis: axis,
-          fraction: splits.col,
-          onFraction: interactive ? (v) => put(splits.copyWith(col: v)) : null,
-          first: a,
-          second: b,
-        );
         return switch (preset) {
-          PanePreset.oneOverTwo => _Split(
+          PanePreset.oneOverTwo => _Axis(
             axis: Axis.vertical,
-            fraction: splits.row,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(row: v))
-                : null,
-            first: cells[0],
-            second: pair(cells[1], cells[2], Axis.horizontal),
+            children: [
+              cells[0],
+              _Axis(axis: Axis.horizontal, children: [cells[1], cells[2]]),
+            ],
           ),
-          PanePreset.mainLeft => _Split(
+          PanePreset.mainLeft => _Axis(
             axis: Axis.horizontal,
-            fraction: splits.col,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(col: v))
-                : null,
-            first: cells[0],
-            second: _Split(
-              axis: Axis.vertical,
-              fraction: splits.row,
-              onFraction: interactive
-                  ? (v) => put(splits.copyWith(row: v))
-                  : null,
-              first: cells[1],
-              second: cells[2],
-            ),
+            children: [
+              cells[0],
+              _Axis(axis: Axis.vertical, children: [cells[1], cells[2]]),
+            ],
           ),
-          _ => _Split(
+          _ => _Axis(
             axis: Axis.vertical,
-            fraction: splits.row,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(row: v))
-                : null,
-            first: pair(cells[0], cells[1], Axis.horizontal),
-            second: cells[2],
+            children: [
+              _Axis(axis: Axis.horizontal, children: [cells[0], cells[1]]),
+              cells[2],
+            ],
           ),
         };
       default:
-        // Four columns and main+stack are both just the lattice with the column
-        // count stated instead of measured — the same widget, so the dividers,
-        // the floor and the scroll fallback all behave identically.
         if (preset == PanePreset.cols4) {
-          return _Lattice(
-            cells: cells,
-            splits: splits,
-            onSplits: interactive ? put : null,
-            columns: 4,
-          );
+          return _Lattice(cells: cells, columns: 4);
         }
         if (preset == PanePreset.mainAndStack) {
-          return _Split(
+          return _Axis(
             axis: Axis.horizontal,
-            fraction: splits.col,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(col: v))
-                : null,
-            first: cells[0],
-            second: _Axis(
-              axis: Axis.vertical,
-              fractions: splits.rows.length == 3
-                  ? splits.rows
-                  : PaneSplits.even(3),
-              minExtent: _MinTile.of().height,
-              onFractions: interactive
-                  ? (next) => put(splits.copyWith(rows: next))
-                  : null,
-              children: [cells[1], cells[2], cells[3]],
-            ),
+            children: [
+              cells[0],
+              _Axis(
+                axis: Axis.vertical,
+                children: [cells[1], cells[2], cells[3]],
+              ),
+            ],
           );
         }
-        return _Split(
+        // The square. Both rows are cut at the same place, so the column wall
+        // is one line down the whole grid rather than a staircase.
+        return _Axis(
           axis: Axis.vertical,
-          fraction: splits.row,
-          onFraction: interactive ? (v) => put(splits.copyWith(row: v)) : null,
-          // BOTH rows read and write the same fraction, so the column is one
-          // line down the whole grid and dragging it anywhere moves all of it —
-          // the same way the row divider already spans the full width. Per-row
-          // columns were tried first and read as a staircase: moving one
-          // boundary left the tile under it behind, and the second drag existed
-          // only to undo the damage of the first.
-          first: _Split(
-            axis: Axis.horizontal,
-            fraction: splits.col,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(col: v))
-                : null,
-            first: cells[0],
-            second: cells[1],
-          ),
-          second: _Split(
-            axis: Axis.horizontal,
-            fraction: splits.col,
-            onFraction: interactive
-                ? (v) => put(splits.copyWith(col: v))
-                : null,
-            first: cells[2],
-            second: cells[3],
-          ),
+          children: [
+            _Axis(axis: Axis.horizontal, children: [cells[0], cells[1]]),
+            _Axis(axis: Axis.horizontal, children: [cells[2], cells[3]]),
+          ],
         );
     }
   }
@@ -264,18 +177,11 @@ class PaneGrid extends StatelessWidget {
 ///
 /// Every line is draggable, and each axis remembers its own fractions.
 class _Lattice extends StatelessWidget {
-  const _Lattice({
-    required this.cells,
-    required this.splits,
-    required this.onSplits,
-    this.columns,
-  });
+  const _Lattice({required this.cells, this.columns});
 
   final List<Widget> cells;
-  final PaneSplits splits;
-  final ValueChanged<PaneSplits>? onSplits;
 
-  /// A column count the user asked for, instead of the one the width implies.
+  /// A column count the shape asked for, instead of the one the width implies.
   /// Still bounded by the floor below — a shape cannot conjure room that is
   /// not there, and four columns on a narrow window is four unusable tiles.
   final int? columns;
@@ -293,9 +199,6 @@ class _Lattice extends StatelessWidget {
         final columns = wanted.clamp(1, n);
         final rows = (n / columns).ceil();
 
-        final colFractions = _axis(splits.cols, columns);
-        final rowFractions = _axis(splits.rows, rows);
-
         // Does the window have the height for this many rows at the floor?
         //
         // When it does not, the grid SCROLLS rather than squeezing. Squeezing
@@ -305,29 +208,15 @@ class _Lattice extends StatelessWidget {
         // measured at six tiles in 736px, which is 115px each against a 46px
         // header. Nine usable tiles behind a scrollbar beat nine unusable ones
         // in view.
-        final needed = rows * minTile.height + _Split.grab * (rows - 1);
+        final needed = rows * minTile.height + _Wall.thickness * (rows - 1);
         final scrolls = needed > constraints.maxHeight;
 
         final grid = _Axis(
           axis: Axis.vertical,
-          // Fixed rows while scrolling: a fraction of a height the window does
-          // not have is not a thing anyone can drag meaningfully.
-          fractions: scrolls ? PaneSplits.even(rows) : rowFractions,
-          minExtent: minTile.height,
-          onFractions: scrolls || onSplits == null
-              ? null
-              : (next) => onSplits!(splits.copyWith(rows: next)),
           children: [
             for (var r = 0; r < rows; r++)
               _Axis(
                 axis: Axis.horizontal,
-                fractions: colFractions,
-                minExtent: minTile.width,
-                // One column line down the whole grid, so dragging it in any
-                // row moves all of it — the same rule the four-tile shape got.
-                onFractions: onSplits == null
-                    ? null
-                    : (next) => onSplits!(splits.copyWith(cols: next)),
                 children: [
                   for (var c = 0; c < columns; c++)
                     // The last row can be short. An empty box rather than a
@@ -355,30 +244,21 @@ class _Lattice extends StatelessWidget {
       },
     );
   }
-
-  /// The stored fractions if they still describe this many slots, else even.
-  ///
-  /// A count change invalidates them rather than stretching them: three columns
-  /// of remembered widths say nothing about where two lines belong, and a
-  /// guessed answer is worse than the even one nobody has an opinion about yet.
-  static List<double> _axis(List<double> stored, int slots) =>
-      stored.length == slots ? stored : PaneSplits.even(slots);
 }
 
-/// N children along one axis, with a draggable line between each pair.
+/// N children along one axis, sharing the space evenly, with one wall between
+/// each pair.
+///
+/// The proportions come from the SHAPE — which nesting it puts the tiles in —
+/// and nothing moves them. Dragging a
+/// boundary used to be how you got a layout the app did not offer; now the
+/// shapes themselves are the list, and a boundary that cannot be dragged does
+/// not need a grab strip, a cursor, a floor to clamp against, or a remembered
+/// position — all of which have gone with it.
 class _Axis extends StatelessWidget {
-  const _Axis({
-    required this.axis,
-    required this.fractions,
-    required this.minExtent,
-    required this.onFractions,
-    required this.children,
-  });
+  const _Axis({required this.axis, required this.children});
 
   final Axis axis;
-  final List<double> fractions;
-  final double minExtent;
-  final ValueChanged<List<double>>? onFractions;
   final List<Widget> children;
 
   @override
@@ -386,69 +266,22 @@ class _Axis extends StatelessWidget {
     if (children.length < 2) {
       return children.isEmpty ? const SizedBox.shrink() : children.first;
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final horizontal = axis == Axis.horizontal;
-        final total = horizontal ? constraints.maxWidth : constraints.maxHeight;
-        final available = total - _Split.grab * (children.length - 1);
-        // No room to honour the floor for everyone: share it out evenly and
-        // refuse the drag, rather than offering a line that cannot be obeyed.
-        final cramped =
-            !available.isFinite || available <= minExtent * children.length;
-        final extents = [
-          for (final f in fractions)
-            cramped ? available / children.length : available * f,
-        ];
-
-        final laid = <Widget>[];
-        for (var i = 0; i < children.length; i++) {
-          laid.add(
-            SizedBox(
-              width: horizontal ? extents[i] : null,
-              height: horizontal ? null : extents[i],
-              child: children[i],
-            ),
-          );
-          if (i == children.length - 1) continue;
-          laid.add(
-            _Divider(
-              axis: axis,
-              grab: _Split.grab,
-              onDelta: cramped || onFractions == null
-                  ? null
-                  : (delta) => onFractions!(
-                      _moved(extents, i, delta, available, minExtent),
-                    ),
-              onReset: cramped || onFractions == null
-                  ? null
-                  : () => onFractions!(PaneSplits.even(children.length)),
-            ),
-          );
-        }
-        return Flex(direction: axis, children: laid);
-      },
+    final laid = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      // Equal shares, and no arithmetic here to disagree with the box being
+      // divided — every shape in this grid turns out to be an even cut at some
+      // level of nesting, including the main-and-stack one: half the width, and
+      // three equal rows in that half.
+      laid.add(Expanded(child: children[i]));
+      if (i < children.length - 1) laid.add(_Wall(axis: axis));
+    }
+    return Flex(
+      direction: axis,
+      // Stretch, so a wall fills the cross axis without being told a height it
+      // cannot know.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: laid,
     );
-  }
-
-  /// Move ONE line: the pair either side of it trade space and nothing else
-  /// moves. Pushing every slot along would make one drag rearrange the whole
-  /// row, which is not what a hand on a boundary is asking for.
-  static List<double> _moved(
-    List<double> extents,
-    int line,
-    double delta,
-    double available,
-    double minExtent,
-  ) {
-    final next = [...extents];
-    final room = next[line] + next[line + 1];
-    // Snapped against the PAIR's own room, so a boundary between two tiles in a
-    // row of five feels the same as the only boundary on the screen.
-    final wanted = snapFraction((next[line] + delta) / room, room) * room;
-    final first = wanted.clamp(minExtent, room - minExtent);
-    next[line] = first;
-    next[line + 1] = room - first;
-    return [for (final e in next) e / available];
   }
 }
 
@@ -492,130 +325,30 @@ class _MinTile {
   }
 }
 
-/// Two children and a draggable boundary between them.
+/// The line between two tiles: one pixel, and it belongs to both of them.
 ///
-/// `onFraction == null` means the boundary is drawn but inert — used while an
-/// agent is being dragged across the grid.
-class _Split extends StatelessWidget {
-  const _Split({
-    required this.axis,
-    required this.first,
-    required this.second,
-    required this.fraction,
-    required this.onFraction,
-  });
+/// It used to be nine pixels — one of line inside eight of grab, because the
+/// boundary was draggable and a boundary you have to hit exactly is one people
+/// give up on. What that left on screen was THREE lines between every pair of
+/// tiles: this one, plus the 1px border each tile drew around itself. With the
+/// drag gone the grab is dead space, so the tiles stopped drawing their own
+/// border (see [_PaneCell]) and this is the only line there is.
+class _Wall extends StatelessWidget {
+  const _Wall({required this.axis});
 
+  /// The axis the tiles are laid along — so a wall between two columns is
+  /// vertical, and this is [Axis.horizontal].
   final Axis axis;
-  final Widget first;
-  final Widget second;
-  final double fraction;
-  final ValueChanged<double>? onFraction;
 
-  /// 1px of line, 9px of grab. A boundary you have to hit exactly is a
-  /// boundary people give up on, and the extra 8px sit over tile edges where
-  /// there is nothing else to press.
-  static const double grab = 9;
-
-  @override
-  Widget build(BuildContext context) {
-    final minTile = _MinTile.of();
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final horizontal = axis == Axis.horizontal;
-        final total = horizontal ? constraints.maxWidth : constraints.maxHeight;
-        final minEach = horizontal ? minTile.width : minTile.height;
-        final available = total - grab;
-
-        // Too small to honour both floors: centre it and refuse the drag. The
-        // alternative is a boundary that can be moved but never obeyed.
-        if (!available.isFinite || available <= minEach * 2) {
-          return Flex(
-            direction: axis,
-            children: [
-              Expanded(child: first),
-              _Divider(axis: axis, grab: grab, onDelta: null),
-              Expanded(child: second),
-            ],
-          );
-        }
-
-        final firstExtent = (available * fraction).clamp(
-          minEach,
-          available - minEach,
-        );
-
-        return Flex(
-          direction: axis,
-          children: [
-            SizedBox(
-              width: horizontal ? firstExtent : null,
-              height: horizontal ? null : firstExtent,
-              child: first,
-            ),
-            _Divider(
-              axis: axis,
-              grab: grab,
-              onDelta: onFraction == null
-                  ? null
-                  : (delta) => onFraction!(
-                      snapFraction(
-                        ((firstExtent + delta) / available).clamp(0.0, 1.0),
-                        available,
-                      ),
-                    ),
-              onReset: onFraction == null ? null : () => onFraction!(0.5),
-            ),
-            Expanded(child: second),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  const _Divider({
-    required this.axis,
-    required this.grab,
-    required this.onDelta,
-    this.onReset,
-  });
-
-  final Axis axis;
-  final double grab;
-  final ValueChanged<double>? onDelta;
-  final VoidCallback? onReset;
+  static const double thickness = 1;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final horizontal = axis == Axis.horizontal;
-    final line = ColoredBox(
-      color: AppColors.border,
-      child: SizedBox(
-        width: horizontal ? 1 : double.infinity,
-        height: horizontal ? double.infinity : 1,
-      ),
-    );
-    final bar = SizedBox(
-      width: horizontal ? grab : null,
-      height: horizontal ? null : grab,
-      child: Center(child: line),
-    );
-    if (onDelta == null) return bar;
-    return MouseRegion(
-      cursor: horizontal
-          ? SystemMouseCursors.resizeColumn
-          : SystemMouseCursors.resizeRow,
-      child: GestureDetector(
-        // Opaque: the grab strip lies over the tiles either side, and a drag
-        // that started on it must not also reach the terminal underneath.
-        behavior: HitTestBehavior.opaque,
-        onDoubleTap: onReset,
-        onHorizontalDragUpdate: horizontal ? (d) => onDelta!(d.delta.dx) : null,
-        onVerticalDragUpdate: horizontal ? null : (d) => onDelta!(d.delta.dy),
-        child: bar,
-      ),
+    return SizedBox(
+      width: axis == Axis.horizontal ? thickness : null,
+      height: axis == Axis.horizontal ? null : thickness,
+      child: ColoredBox(color: AppColors.border),
     );
   }
 }
@@ -652,14 +385,17 @@ class _PaneCell extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: grid.AppPalette.windowBg,
+          // The tile draws a line ONLY when it is the focused one. An
+          // unfocused border would sit right beside the wall its neighbour
+          // shares with it, and two lines a pixel apart is what made every
+          // boundary in this grid read as three.
+          //
+          // Transparent rather than absent, so the 1px it takes is there in
+          // both states and a tile does not resize as focus moves to it.
           border: Border.all(
             // Only meaningful with company. A ring around the only tile would
             // be decoration, since there is nowhere else focus could be.
-            color: _single
-                ? Colors.transparent
-                : focused
-                ? AppColors.accent
-                : AppColors.border,
+            color: !_single && focused ? AppColors.accent : Colors.transparent,
             width: 1,
           ),
         ),
