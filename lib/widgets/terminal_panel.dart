@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
@@ -753,13 +754,11 @@ class _TerminalHeader extends StatelessWidget {
   }
 }
 
-/// The pane header's transport badge: which of the three paths a terminal's bytes take.
+/// The pane header's transport badge: a compact topology for the path carrying terminal bytes.
 ///
-/// Only the middle state is new. `bolt`/green has always meant "the best path" and `cloud_outlined`
-/// /grey has always meant "relayed through Harness", so neither is repurposed here — people who
-/// already read this header do not have to relearn it. TURN slots between them: still WebRTC, still
-/// E2EE, but every byte detours through Cloudflare and is billed per GB, which is worth more than the
-/// grey of a plain fallback.
+/// The three shapes describe one hop, an intermediate hop, and a central server respectively. That
+/// makes the modes distinguishable without colour while keeping the badge small enough for a four-pane
+/// layout. The wire name `relay` still means the backend WebSocket; only its human-facing label is WS.
 class _LinkModeMark extends StatelessWidget {
   final String mode;
 
@@ -767,22 +766,26 @@ class _LinkModeMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color, message) = switch (mode) {
-      'p2p' => (Icons.bolt, AppColors.success, 'Direct peer-to-peer connection'),
+    final (icon, color, label) = switch (mode) {
+      'p2p' => (
+        LucideIcons.link2,
+        AppColors.success,
+        'P2P · Direct peer connection',
+      ),
       'turn' => (
-        Icons.alt_route,
+        LucideIcons.waypoints,
         AppColors.warning,
-        'Relayed through Cloudflare TURN',
+        'TURN · Via Cloudflare relay',
       ),
       _ => (
-        Icons.cloud_outlined,
+        LucideIcons.server,
         AppColors.mutedStrong,
-        'Relayed through Harness',
+        'WS · Via Harness WebSocket relay',
       ),
     };
     return Tooltip(
-      message: message,
-      child: Icon(icon, size: 13, color: color),
+      message: label,
+      child: Icon(icon, size: 14, color: color, semanticLabel: label),
     );
   }
 }

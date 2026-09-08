@@ -14,8 +14,10 @@ import 'package:harness/core/config.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/terminal/terminal_session.dart';
+import 'package:harness/theme/app_theme.dart';
 import 'package:harness/widgets/agent_model_menu.dart';
 import 'package:harness/widgets/terminal_panel.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 void main() {
   /// The strip's own right edge: the panel width less the padding the header
@@ -170,34 +172,54 @@ void main() {
     expect(menu.width, lessThanOrEqualTo((220 - headerPadding * 2) / 2 + 0.5));
   });
 
-  // The transport badge. Three states the CLI can report, plus the local case where it reports none —
-  // and the wire words are not the words a person reads, so assert the mapping, not the mode string.
-  testWidgets('the transport badge draws one icon per link mode', (
-    tester,
-  ) async {
-    const marks = {
-      'p2p': Icons.bolt,
-      'turn': Icons.alt_route,
-      'relay': Icons.cloud_outlined,
-    };
+  // Each shape describes the path topology, not an assumed speed: direct link, intermediate hop,
+  // backend server. Tooltip and semantics use the protocol names people will diagnose with.
+  testWidgets(
+    'the transport badge describes each link mode by shape, colour, and label',
+    (tester) async {
+      final marks = {
+        'p2p': (
+          icon: LucideIcons.link2,
+          color: AppColors.success,
+          label: 'P2P · Direct peer connection',
+        ),
+        'turn': (
+          icon: LucideIcons.waypoints,
+          color: AppColors.warning,
+          label: 'TURN · Via Cloudflare relay',
+        ),
+        'relay': (
+          icon: LucideIcons.server,
+          color: AppColors.mutedStrong,
+          label: 'WS · Via Harness WebSocket relay',
+        ),
+      };
 
-    for (final entry in marks.entries) {
-      final session = sessionNamed('a');
-      addTearDown(session.dispose);
-      session.linkMode = entry.key;
-      await pump(tester, session);
+      for (final entry in marks.entries) {
+        final session = sessionNamed('a');
+        addTearDown(session.dispose);
+        session.linkMode = entry.key;
+        await pump(tester, session);
 
-      expect(
-        find.byIcon(entry.value),
-        findsOneWidget,
-        reason: 'link mode ${entry.key} should draw ${entry.value}',
-      );
-      // Exactly one of the three, never two at once.
-      for (final other in marks.values.where((i) => i != entry.value)) {
-        expect(find.byIcon(other), findsNothing);
+        final mark = find.byIcon(entry.value.icon);
+        expect(
+          mark,
+          findsOneWidget,
+          reason: 'link mode ${entry.key} has the wrong topology',
+        );
+        expect(tester.widget<Icon>(mark).color, entry.value.color);
+        expect(tester.widget<Icon>(mark).size, 14);
+        expect(find.byTooltip(entry.value.label), findsOneWidget);
+        expect(find.bySemanticsLabel(entry.value.label), findsOneWidget);
+        // Exactly one of the three, never two at once.
+        for (final other in marks.values.where(
+          (value) => value.icon != entry.value.icon,
+        )) {
+          expect(find.byIcon(other.icon), findsNothing);
+        }
       }
-    }
-  });
+    },
+  );
 
   testWidgets('a terminal with no link mode gets no badge at all', (
     tester,
@@ -209,9 +231,36 @@ void main() {
     expect(session.linkMode, isNull);
     await pump(tester, session);
 
-    for (final icon in [Icons.bolt, Icons.alt_route, Icons.cloud_outlined]) {
+    for (final icon in [
+      LucideIcons.link2,
+      LucideIcons.waypoints,
+      LucideIcons.server,
+    ]) {
       expect(find.byIcon(icon), findsNothing);
     }
+  });
+
+  testWidgets('a live transport change replaces the badge in place', (
+    tester,
+  ) async {
+    final session = sessionNamed('a');
+    addTearDown(session.dispose);
+    session.linkMode = 'p2p';
+    await pump(tester, session);
+
+    expect(find.byIcon(LucideIcons.link2), findsOneWidget);
+    final position = tester.getCenter(find.byIcon(LucideIcons.link2));
+    session.linkMode = 'turn';
+    await pump(tester, session);
+    expect(find.byIcon(LucideIcons.link2), findsNothing);
+    expect(find.byIcon(LucideIcons.waypoints), findsOneWidget);
+    expect(tester.getCenter(find.byIcon(LucideIcons.waypoints)), position);
+
+    session.linkMode = 'relay';
+    await pump(tester, session);
+    expect(find.byIcon(LucideIcons.waypoints), findsNothing);
+    expect(find.byIcon(LucideIcons.server), findsOneWidget);
+    expect(tester.getCenter(find.byIcon(LucideIcons.server)), position);
   });
 
   testWidgets('the badge does not push the model control off the right edge', (
@@ -225,7 +274,7 @@ void main() {
     await pump(tester, session);
 
     final menu = tester.getRect(find.byType(AgentModelMenu));
-    final badge = tester.getRect(find.byIcon(Icons.alt_route));
+    final badge = tester.getRect(find.byIcon(LucideIcons.waypoints));
     expect(menu.right, lessThanOrEqualTo(badge.left + 1));
     expect(badge.right, lessThanOrEqualTo(paneWidth - headerPadding + 1));
   });
