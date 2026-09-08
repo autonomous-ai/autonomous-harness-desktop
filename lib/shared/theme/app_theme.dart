@@ -448,6 +448,41 @@ abstract final class AppSurface {
   static Color get accentWashHover =>
       AppTheme.pick(const Color(0x1F2F5BEA), const Color(0x332F5BEA));
 
+  /// A cool slate wash for a block that is deliberately NOT the accent one.
+  ///
+  /// Settings ▸ Grid's headline has two live states — a grid is chosen, or the
+  /// agents run on each engine's own account — and both are legitimate
+  /// settings. The second one wore a plain grey surface and read as disabled or
+  /// still-loading, because grey in this app means the absence of a state, not
+  /// a state of its own.
+  ///
+  /// So: a hue, but not the accent's. Slate sits far enough off `#2F5BEA` that
+  /// the two headlines never read as the same thing at a glance, and the
+  /// deliberately narrow choice of colour matters — [AppPalette.teal] already
+  /// marks a grid you own, [AppPalette.online] marks one that is up, and
+  /// [AppPalette.warn] is amber, so borrowing any of them would have this block
+  /// asserting something it does not mean.
+  ///
+  /// An overlay rather than an opaque fill, for the reason [wellFill] gives: it
+  /// rides whatever it is drawn on instead of being picked against one ground
+  /// and vanishing on another.
+  ///
+  /// ⚠️ The alphas are MEASURED against the two states sitting side by side,
+  /// not picked off a scale. At 0x26 the dark wash landed on #24272a, which is
+  /// a block whose edges you cannot find; at 0x40 it lands on #2b3037 and
+  /// separates from the page about as far as [accentWash] does from it — which
+  /// is the bar, because the two are the same control in its two states and one
+  /// must not read as louder than the other.
+  static Color get neutralWash =>
+      AppTheme.pick(const Color(0x1464748B), const Color(0x4064748B));
+
+  /// The rim that goes with [neutralWash] — the same slate, held a step
+  /// stronger so the block keeps an edge instead of bleeding into the page.
+  /// Paired here rather than left to the call site, so the two cannot be
+  /// changed apart.
+  static Color get neutralRim =>
+      AppTheme.pick(const Color(0x2464748B), const Color(0x4064748B));
+
   /// The icon well inside a list row.
   ///
   /// Translucent on purpose. An opaque fill would be picked against the row's
@@ -1740,6 +1775,12 @@ ButtonStyle _filledButtonStyle() => FilledButton.styleFrom(
   // sits in.
   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   visualDensity: VisualDensity.standard,
+  // Its own wash, not [AppSurface.hoverFill]: this button already carries the
+  // accent as a FILL, so the hover has to read against that rather than against
+  // the page. White at 12% lifts the accent a step without turning it into a
+  // second colour. See [_textButtonStyle] for why any of these are needed at
+  // all — `NoSplash` took the ripple away and left nothing behind it.
+  overlayColor: const Color(0x1FFFFFFF),
 );
 
 /// The secondary action: a hairline rim, no fill — Apple's "bordered" button.
@@ -1763,6 +1804,19 @@ ButtonStyle _textButtonStyle() => TextButton.styleFrom(
   textStyle: _buttonTextStyle,
   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   visualDensity: VisualDensity.standard,
+  // ⚠️ Without this a text button has NO hover state at all.
+  //
+  // `splashFactory: NoSplash` turns Material's ripple off app-wide — right, it
+  // is an Android idiom — but the ripple was also the only thing this theme
+  // left drawing a response to the pointer. M3 derives its own overlay from
+  // `foregroundColor`, and `styleFrom` here passes none, so the resolved
+  // overlay came back **null**: the button lit up on press and on focus and did
+  // nothing whatsoever on hover. On a desktop app, where the pointer is how you
+  // find out what is clickable, that is a control that reads as a label.
+  //
+  // [AppSurface.hoverFill] is the same wash the rows and menu items already
+  // use, so a button now answers the pointer the way everything around it does.
+  overlayColor: AppSurface.hoverFill,
 );
 
 TextTheme _appTextTheme(Color primary, Color secondary) {

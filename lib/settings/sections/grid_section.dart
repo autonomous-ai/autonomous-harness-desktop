@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../analytics/analytics.dart';
+import '../../grid/grid_access.dart';
 import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
@@ -13,10 +14,11 @@ import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/section_scaffold.dart';
 import '../../shared/widgets/skeleton.dart';
+import '../../widgets/share_grid/share_grid_dialog.dart';
 import 'create_grid_dialog.dart';
+import 'grid_hero.dart';
 import 'rename_grid_dialog.dart';
 import 'grid_network_table.dart';
-import 'grid_target_strip.dart';
 
 /// Settings ▸ Grid: where new agents send their inference, and every grid this
 /// account could send it to instead.
@@ -25,11 +27,12 @@ import 'grid_target_strip.dart';
 /// go through the `harness` CLI, which knows nothing about Grid accounts. See
 /// [GridApiClient].
 ///
-/// The pane is a **picker wearing a table**: the strip at the top says what is
-/// in force, the table under it is the radio group that changes it, and the
-/// filter between them exists because an account on twenty grids should not
-/// have to scroll to find the one it means. Picking here retargets nothing that
-/// is already running — the strip's own wording is what says so.
+/// The pane is a **picker wearing a table**: the headline at the top says what
+/// is in force and carries that grid's own actions ([GridHero]), the table
+/// under it is the radio group that changes it, and the filter between them
+/// exists because an account on twenty grids should not have to scroll to find
+/// the one it means. Picking here retargets nothing that is already running —
+/// the subtitle is what says so.
 class GridSection extends StatefulWidget {
   const GridSection({
     super.key,
@@ -138,9 +141,10 @@ class _GridSectionState extends State<GridSection> {
               'Every grid this account can reach, and which one new agents '
               'launch against. Agents already running stay where they are.',
           child: switch (state) {
-            // The strip does not wait on the network — it reads the choice
-            // already on disk — so it is real from the first frame. Only the
-            // table and the count are placeholders.
+            // The headline does not wait on the network — the chosen grid's
+            // NAME is on disk beside its id — so it is real from the first
+            // frame, and only its facts and actions arrive with the fetch.
+            // Only the table and the count are placeholders.
             GridNetworksIdle() || GridNetworksLoading() => _body(null, null),
             GridNetworksSignedOut() => _SignedOut(
               session: widget.session,
@@ -184,7 +188,17 @@ class _GridSectionState extends State<GridSection> {
       builder: (context, chosen, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GridTargetStrip(chosen: chosen),
+          GridHero(
+            chosen: chosen,
+            network: _chosenNetwork(networks, chosen),
+            owned: _ownsChosen(networks, chosen, email),
+            onShare: _shareTarget(networks, chosen),
+            onRename: _renameTarget(networks, chosen),
+            onDelete: _deleteTarget(networks, chosen),
+            deleting:
+                chosen.networkId != null &&
+                _mutations.isDeleting(chosen.networkId!),
+          ),
           if (_mismatch(email) case final String grid) ...[
             const SizedBox(height: 12),
             _AccountMismatch(
@@ -295,6 +309,64 @@ class _GridSectionState extends State<GridSection> {
     messenger.showSnackBar(
       SnackBar(content: Text(error ?? 'Deleted "$name".')),
     );
+  }
+
+  /// The chosen grid as the fetched list describes it, or null when the list
+  /// has not arrived or no longer holds it (deleted elsewhere, or a remembered
+  /// id from an account this machine has since signed out of).
+  GridNetwork? _chosenNetwork(
+    List<GridNetwork>? networks,
+    GridSelection chosen,
+  ) {
+    final id = chosen.networkId;
+    if (id == null || networks == null) return null;
+    for (final network in networks) {
+      if (network.networkId == id) return network;
+    }
+    return null;
+  }
+
+  bool _ownsChosen(
+    List<GridNetwork>? networks,
+    GridSelection chosen,
+    String? email,
+  ) {
+    final network = _chosenNetwork(networks, chosen);
+    return network != null && gridIsOwnedBy(network, email);
+  }
+
+  /// The headline's actions, bound to the chosen grid — null while there is no
+  /// grid to act on, which leaves the buttons off the headline entirely rather
+  /// than drawing them dead.
+  VoidCallback? _shareTarget(List<GridNetwork>? networks, GridSelection chosen) {
+    final network = _chosenNetwork(networks, chosen);
+    if (network == null) return null;
+    return () => unawaited(
+      showShareGridDialog(
+        context,
+        networkId: network.networkId,
+        gridName: network.displayName,
+        networks: widget.controller,
+      ),
+    );
+  }
+
+  VoidCallback? _renameTarget(
+    List<GridNetwork>? networks,
+    GridSelection chosen,
+  ) {
+    final network = _chosenNetwork(networks, chosen);
+    if (network == null) return null;
+    return () => unawaited(_rename(network));
+  }
+
+  VoidCallback? _deleteTarget(
+    List<GridNetwork>? networks,
+    GridSelection chosen,
+  ) {
+    final network = _chosenNetwork(networks, chosen);
+    if (network == null) return null;
+    return () => unawaited(_confirmDelete(network));
   }
 
   /// The grids the filter and the query leave standing.
@@ -455,13 +527,32 @@ class _FilterBar extends StatelessWidget {
                 tooltip: 'Reload grids',
                 onPressed: onReload,
               ),
-              const SizedBox(width: 2),
-              AppIconButton(
+              const SizedBox(width: 6),
+              // Labelled, not a bare glyph. Creating a grid is the one thing on
+              // this bar that MAKES something rather than filtering or
+              // reloading what is already there, and a lone `+` beside the
+              // reload icon read as a second, quieter icon rather than as the
+              // pane's only constructive action.
+              OutlinedButton.icon(
                 key: const Key('grid-create-button'),
-                icon: LucideIcons.plus300,
-                size: 16,
-                tooltip: 'New grid',
                 onPressed: onCreate,
+                style: OutlinedButton.styleFrom(
+                  // Restated for the reason `_textButtonStyle` gives: a
+                  // `styleFrom` replaces the theme's whole style, hover wash
+                  // included, and NoSplash leaves nothing in its place.
+                  overlayColor: grid.AppSurface.hoverFill,
+                  minimumSize: const Size(0, grid.AppControl.heightSmall),
+                  padding: grid.AppControl.paddingSmallIcon,
+                  textStyle: TextStyle(
+                    fontFamily: grid.AppFont.sans,
+                    fontSize: 12.5,
+                  ),
+                ),
+                icon: const Icon(
+                  LucideIcons.plus300,
+                  size: grid.AppControl.iconSize,
+                ),
+                label: const Text('New grid'),
               ),
             ],
           ),

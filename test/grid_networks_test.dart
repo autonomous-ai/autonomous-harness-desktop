@@ -9,7 +9,7 @@ import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
-import 'package:harness/settings/sections/grid_target_strip.dart';
+import 'package:harness/settings/sections/grid_hero.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
@@ -202,8 +202,12 @@ void main() {
       expect(find.text('Water Grid'), findsOneWidget);
       // Ownership is stated, not left to the reader to work out from an email.
       expect(find.text('YOURS'), findsOneWidget);
-      expect(find.text('admin'), findsOneWidget);
-      expect(find.text('consumer'), findsOneWidget);
+      // The access rule in plain language, not the control plane's wire value.
+      // The role tags that used to sit above it are gone: they repeated what
+      // YOURS already says, and cost every row a second line to do it.
+      expect(find.text('Invite only'), findsOneWidget);
+      expect(find.text('permissioned-public'), findsNothing);
+      expect(find.text('admin'), findsNothing);
       // The advisor names live in the drawer; the row only says how many.
       expect(find.text('on · 1 model'), findsOneWidget);
       expect(find.text('off'), findsOneWidget);
@@ -227,7 +231,7 @@ void main() {
       expect(selection.value.hasGrid, isFalse);
     });
 
-    testWidgets('the strip says what new agents use', (tester) async {
+    testWidgets('the headline says what new agents use', (tester) async {
       await ready(tester);
       // No model control at all — a model is chosen per agent, in the agent
       // view's header, not for the grid as a whole.
@@ -237,12 +241,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('NEW AGENTS USE'), findsOneWidget);
-      // Scoped to the strip itself: the network table below also has a row
-      // named "Water Grid", so an unscoped match would pass even if the strip
-      // rendered nothing.
+      // Scoped to the headline itself: the network table below keeps its row
+      // named "Water Grid" — picking a grid must not remove it, or the list
+      // would reflow under the pointer — so an unscoped match would pass even
+      // if the headline rendered nothing.
       expect(
         find.descendant(
-          of: find.byType(GridTargetStrip),
+          of: find.byType(GridHero),
           matching: find.text('Water Grid'),
         ),
         findsOneWidget,

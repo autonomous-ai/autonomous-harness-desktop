@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../grid/grid_access.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
@@ -157,28 +158,26 @@ class _GridNetworkTableState extends State<GridNetworkTable> {
 /// narrowing the window hides nothing — it only moves it one click away.
 @immutable
 class _Columns {
-  const _Columns({
-    required this.router,
-    required this.signaling,
-    required this.status,
-  });
+  const _Columns({required this.router, required this.status});
 
   final bool router;
-  final bool signaling;
   final bool status;
 
   static _Columns forWidth(double width) => _Columns(
     status: width >= 560,
     router: width >= 700,
-    signaling: width >= 860,
   );
 
-  // Flex weights for the columns that stretch. Name and access carry two lines
-  // each and get the room; signaling is a URL that may ellipsize.
+  /// Flex weights for the columns that stretch.
+  ///
+  /// ⚠️ There is no signaling column, deliberately. It printed one clipped
+  /// `grid.autonomous.ai/grid-…` per row — the same eleven visible characters
+  /// on every grid — so a quarter of the table's width distinguished nothing.
+  /// The full URL lives in the row's drawer, where it can be read AND copied,
+  /// which is the only way anybody uses it.
   static const int nameFlex = 32;
   static const int accessFlex = 28;
   static const int routerFlex = 15;
-  static const int signalingFlex = 25;
 
   // Fixed cells. The pick and the chevron are targets, not text.
   static const double pickWidth = 38;
@@ -214,11 +213,7 @@ class _HeaderRow extends StatelessWidget {
               flex: _Columns.routerFlex,
               child: _Caption('Router'),
             ),
-          if (columns.signaling)
-            const Expanded(
-              flex: _Columns.signalingFlex,
-              child: _Caption('Signaling'),
-            ),
+
           if (columns.status)
             const SizedBox(
               width: _Columns.statusWidth,
@@ -377,13 +372,7 @@ class _NetworkRow extends StatelessWidget {
                   flex: _Columns.routerFlex,
                   child: _RouterCell(network: network),
                 ),
-              if (columns.signaling)
-                Expanded(
-                  flex: _Columns.signalingFlex,
-                  child: _MonoCell(
-                    value: _shortUrl(network.lanSignalingUrl) ?? '—',
-                  ),
-                ),
+
               if (columns.status)
                 SizedBox(
                   width: _Columns.statusWidth,
@@ -624,25 +613,34 @@ class _AccessCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final roles = network.member?.roles ?? const <String>[];
+    // One line of plain language, not a stack of tags.
+    //
+    // It was `admin` `both` over `permissioned-public` over `@domain` — three
+    // wrapped rows of wire values, which made every row twice the height it
+    // needed and halved how many grids fit on the screen. Two of the three said
+    // nothing a reader wanted: the roles repeat what the YOURS badge already
+    // says, and `permissioned-public` is the control plane's own spelling of
+    // "Invite only". [gridAccessRule] is the same translation the share sheet
+    // and the headline use, so all three cannot drift apart.
+    final rule = gridAccessRule(network);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Wrap(
-            spacing: 5,
-            runSpacing: 4,
-            children: [
-              for (final role in roles) _Tag(label: role, outlined: true),
-              _Tag(label: network.networkType),
-              if (network.accessDomain != null)
-                _Tag(label: '@${network.accessDomain}'),
-            ],
+          Text(
+            rule?.label ?? network.networkType,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: grid.AppPalette.textSecondary,
+              fontFamily: grid.AppFont.sans,
+              fontSize: 12,
+            ),
           ),
           if (!owned) ...[
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(
               network.ownerEmail,
               maxLines: 1,
@@ -651,35 +649,6 @@ class _AccessCell extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _Tag extends StatelessWidget {
-  const _Tag({required this.label, this.outlined = false});
-
-  final String label;
-  final bool outlined;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: outlined ? null : grid.AppSurface.selectedFill,
-        borderRadius: BorderRadius.circular(5),
-        border: outlined ? Border.all(color: grid.AppGlass.hair) : null,
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: outlined
-              ? grid.AppPalette.textPrimary
-              : grid.AppPalette.textSecondary,
-          fontSize: 11,
-        ),
       ),
     );
   }
@@ -721,30 +690,6 @@ class _RouterCell extends StatelessWidget {
   }
 }
 
-class _MonoCell extends StatelessWidget {
-  const _MonoCell({required this.value});
-
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Text(
-        value,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: grid.AppPalette.textFaint,
-          fontSize: 11,
-          fontFamily: grid.AppFont.mono,
-          fontFamilyFallback: grid.AppFont.monoFallback,
-        ),
-      ),
-    );
-  }
-}
 
 /// The same dot the machine rail gives a reachable machine, so one colour keeps
 /// meaning one thing across the app.
@@ -926,7 +871,16 @@ class _DetailDrawer extends StatelessWidget {
           // Owner-only, and checked here rather than left to the server: a
           // grid somebody else owns answers 403, and an action that can only
           // fail is worse than one that was never offered.
-          if (owned && (onRename != null || onDelete != null)) ...[
+          //
+          // ⚠️ And NOT on the chosen grid, which the headline above already
+          // draws in full — with these same two buttons. Drawing them here too
+          // put one grid's Rename and Delete on screen twice, 400px apart, and
+          // a reader who finds the same irreversible action in two places has
+          // to work out whether they are the same one. The headline wins
+          // because it is the surface that names the grid; every OTHER grid you
+          // own keeps its pair here, since the headline only ever describes the
+          // one in use.
+          if (owned && !selected && (onRename != null || onDelete != null)) ...[
             const SizedBox(height: 16),
             // One row: the two things an owner can do to the grid itself, in
             // the order of what they cost. Rename reads as ordinary ink and
@@ -939,6 +893,10 @@ class _DetailDrawer extends StatelessWidget {
                     onPressed: onRename,
                     style: TextButton.styleFrom(
                       foregroundColor: grid.AppPalette.textSecondary,
+                      // Restated: `styleFrom` replaces the theme's style, and
+                      // with NoSplash app-wide a button without this has no
+                      // hover state at all. See `_textButtonStyle`.
+                      overlayColor: grid.AppSurface.hoverFill,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 6,
@@ -1039,6 +997,7 @@ class _DeleteGridButton extends StatelessWidget {
             onPressed: () => Navigator.of(dialogContext).pop(false),
             style: TextButton.styleFrom(
               foregroundColor: grid.AppPalette.textSecondary,
+              overlayColor: grid.AppSurface.hoverFill,
             ),
             child: const Text('Cancel'),
           ),
@@ -1046,6 +1005,7 @@ class _DeleteGridButton extends StatelessWidget {
             key: const Key('grid-delete-confirm'),
             style: FilledButton.styleFrom(
               backgroundColor: grid.AppPalette.dangerFill,
+              overlayColor: const Color(0x1FFFFFFF),
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Delete'),
@@ -1223,16 +1183,6 @@ class _EmptyRows extends StatelessWidget {
   }
 }
 
-/// `https://` carries no information in a column this narrow — the scheme is
-/// the same on every grid, and dropping it buys back eight characters of the
-/// host that is not.
-String? _shortUrl(String? url) {
-  if (url == null || url.isEmpty) return null;
-  for (final scheme in const ['https://', 'http://']) {
-    if (url.startsWith(scheme)) return url.substring(scheme.length);
-  }
-  return url;
-}
 
 /// The table while the grids are still on their way.
 ///
@@ -1365,14 +1315,7 @@ class _SkeletonRow extends StatelessWidget {
                 child: SkeletonText(style: TextStyle(fontSize: 12), width: 24),
               ),
             ),
-          if (columns.signaling)
-            const Expanded(
-              flex: _Columns.signalingFlex,
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: SkeletonText(style: mono, widthFactor: 0.7),
-              ),
-            ),
+
           if (columns.status)
             const SizedBox(
               width: _Columns.statusWidth,
