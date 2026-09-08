@@ -92,7 +92,10 @@ enum PanePreset {
   /// way. [auto] is drawn at the column count a typical wide window carries,
   /// since its real answer is not knowable without the window — which is
   /// exactly what "auto" means.
-  List<Rect> tilesFor(int count) => switch (this) {
+  /// [columns] answers the one shape that cannot know its own: `auto` measures
+  /// the window at build time, so the grid tells this what it actually laid out.
+  /// Every other shape states its columns and ignores the argument.
+  List<Rect> tilesFor(int count, {int? columns}) => switch (this) {
     PanePreset.columns || PanePreset.splitLong => const [
       Rect.fromLTRB(0, 0, .5, 1),
       Rect.fromLTRB(.5, 0, 1, 1),
@@ -128,7 +131,7 @@ enum PanePreset {
       Rect.fromLTRB(.5, 1 / 3, 1, 2 / 3),
       Rect.fromLTRB(.5, 2 / 3, 1, 1),
     ],
-    PanePreset.auto => _lattice(count, _autoColumnsForDrawing(count)),
+    PanePreset.auto => _lattice(count, columns ?? _autoColumnsForDrawing(count)),
     _ => _lattice(count, statedColumns!.clamp(1, count)),
   };
 

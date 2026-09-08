@@ -1,16 +1,29 @@
 # Releasing the desktop app
 
-Running apps self-update from a public GCS bucket (`lib/update/desktop_updater.dart`). Publishing is
-a single command run from a machine with an authenticated `gsutil` and `flutter` on PATH.
+Running apps self-update from a public GCS bucket (`lib/update/desktop_updater.dart`). Releasing is
+pushing a tag: `.github/workflows/release.yml` builds macOS and both Linux architectures, publishes
+them to that bucket, and cuts the GitHub Release. **The tag IS the version — CI never bumps.**
 
 ```bash
-make upload-desktop                     # auto-bump (1.2.3 -> 1.2.4; 1.2.99 -> 1.3.1)
-make upload-desktop ARGS="--force"      # bump the MINOR version (1.2.3 -> 1.3.1) — running apps
-                                         # treat this as a mandatory update and block until installed
-make upload-desktop ARGS="1.3.0"        # release an explicit version (a major bump is forced too)
-make upload-desktop ARGS="--no-bump"    # keep the current published version, rebuild + upload
-make upload-desktop ARGS="--no-build"   # upload the existing build/ artifact as-is
+make release                       # bump the patch, tag, push — CI does the rest
+make release ARGS="--dry-run"      # print the version it would cut and the notes, do nothing
+make release ARGS="--minor"        # bump the MINOR version — running apps treat this as a mandatory
+                                   # update and block until they install it
+make release ARGS="1.3.0"          # release an explicit version
+make release ARGS="--notes-file notes.md"   # hand-written release notes
 ```
+
+Nothing is built locally and no GCS credentials are needed: the only things the script touches are
+git and a public HTTPS read of the manifest.
+
+**Why the version comes from two places.** `scripts/release-desktop.sh` takes the highest of the last
+git tag and the highest version in the live `metadata.json`, across every `desktop-*` key. Publishing
+used to be a local command that bumped from the manifest and tagged nothing, so the two drifted: this
+repo once had a single tag `v1.0.52` while the manifest was already serving `1.0.61`. Bumping from
+tags alone there produces a version LOWER than what users run — every app refuses it (`semverGt`)
+while the release still reports success. That local path is gone; the tag is now the only way in.
+
+`pubspec.yaml`'s `version:` field is never touched; it's a dev-only placeholder.
 
 ## Managed Node runtime
 
@@ -41,11 +54,15 @@ not a replacement for publishing the managed runtime channel before release.
 
 Homebrew and `apt` are still used for **tmux**, which is a separate step and unrelated to Node.
 
-## What the script does
+## What CI runs
 
-1. Reads the current version from the **remote** `metadata.json` and bumps the patch. The manifest is
-   the single source of truth — nothing is git-committed, matching the CLI/firmware/orangepi flows.
-   `pubspec.yaml`'s `version:` field is never touched; it's a dev-only placeholder.
+`scripts/upload-desktop.sh` and `scripts/upload-desktop-linux.sh` are the publishing steps, invoked by
+`release.yml` with the version taken from the tag. They are no longer a human entry point — the
+`make upload-desktop*` targets were removed precisely because publishing without tagging is what let
+git and the manifest drift apart.
+
+1. Takes the version it was given (CI passes the tag's `X.Y.Z`). The bump/`--force`/`--no-bump` paths
+   inside the scripts are only reachable when they are run by hand.
 2. Runs `flutter build macos --release --build-name=<version> --build-number=<n>` — the version is
    stamped into the bundle's `Info.plist` at build time, not read from any file.
 3. Asserts the built bundle's `CFBundleShortVersionString` really carries that version before
@@ -165,10 +182,11 @@ which doesn't reliably pick up the quarantine flag in the first place).
 ## Rolling out safely
 
 Publish to a scratch manifest before touching the real one, and point a test build at it via
-`--dart-define`:
+`--dart-define`. `release.yml` has a `workflow_dispatch` trigger that takes both the version and the
+manifest to write, so a rehearsal never touches the real one:
 
 ```bash
-METADATA_PATH=harness/desktop/metadata-test.json make upload-desktop
+gh workflow run release.yml -f version=1.3.0 -f metadata_path=harness/desktop/metadata-test.json
 ```
 
 ```bash
@@ -184,19 +202,10 @@ running app back.
 
 ## Linux
 
-`make upload-desktop-linux` (`scripts/upload-desktop-linux.sh`) publishes architecture-specific
-Linux ARM64 and x64 releases to the **same** `metadata.json` as macOS. `amd64` and `x86_64` are
-accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`:
-
-```bash
-make upload-desktop-linux                     # auto-bump, same version semantics as upload-desktop
-make upload-desktop-linux ARGS="--force"      # mandatory update, same rule as macOS
-make upload-desktop-linux ARGS="1.3.0"        # explicit version
-make upload-desktop-linux ARGS="--no-bump"
-make upload-desktop-linux ARGS="--no-build"
-make upload-desktop-linux ARCH=arm64            # desktop-linux-arm64
-make upload-desktop-linux ARCH=amd64            # desktop-linux-x64
-```
+`scripts/upload-desktop-linux.sh` publishes architecture-specific Linux ARM64 and x64 releases to the
+**same** `metadata.json` as macOS. `release.yml` runs it on both a `ubuntu-24.04` and a
+`ubuntu-24.04-arm` runner, so one `make release` covers all three artifacts. `amd64` and `x86_64` are
+accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`.
 
 With no `ARCH`, the command detects the host architecture. A build must run on a matching
 Ubuntu/Linux host because Flutter Linux desktop builds use the host architecture. `--no-build` can

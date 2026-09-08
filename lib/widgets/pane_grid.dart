@@ -81,7 +81,11 @@ class PaneGrid extends StatelessWidget {
     // below stay as they are — three tiles are two over one with the bottom one
     // SPANNING, and no uniform grid can say that.
     if (cells.length > 4) {
-      return _Lattice(cells: cells, columns: preset?.statedColumns);
+      return _Lattice(
+        cells: cells,
+        columns: preset?.statedColumns,
+        onColumns: (c) => notifier.gridColumns = c,
+      );
     }
 
     switch (cells.length) {
@@ -177,9 +181,18 @@ class PaneGrid extends StatelessWidget {
 ///
 /// Every line is draggable, and each axis remembers its own fractions.
 class _Lattice extends StatelessWidget {
-  const _Lattice({required this.cells, this.columns});
+  const _Lattice({required this.cells, this.columns, this.onColumns});
 
   final List<Widget> cells;
+
+  /// Told what was actually laid out.
+  ///
+  /// `auto` is the one shape whose column count is not in its own description —
+  /// it is measured from the window here — and ⌘↑ / ⌘↓ have to know the real
+  /// shape to move by a row. A plain field write, never a notify: this runs
+  /// inside build, and telling the tree to rebuild from inside its own build is
+  /// how a frame loop starts.
+  final ValueChanged<int>? onColumns;
 
   /// A column count the shape asked for, instead of the one the width implies.
   /// Still bounded by the floor below — a shape cannot conjure room that is
@@ -198,6 +211,7 @@ class _Lattice extends StatelessWidget {
         final wanted = this.columns ?? byWidth;
         final columns = wanted.clamp(1, n);
         final rows = (n / columns).ceil();
+        onColumns?.call(columns);
 
         // Does the window have the height for this many rows at the floor?
         //

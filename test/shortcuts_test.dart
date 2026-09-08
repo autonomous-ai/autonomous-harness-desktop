@@ -184,7 +184,12 @@ void main() {
       }
     });
 
-    test('no shortcut is bound to an arrow key', () {
+    test('no shortcut takes a BARE arrow key', () {
+      // Bare arrows belong to the terminal — the cursor and shell history are
+      // the first thing anyone presses them for. A ⌘ chord is the app's: the
+      // terminal passes everything but ⌘V straight up
+      // (terminal_panel._onTerminalKey), which is what lets ⌘← / ⌘→ walk the
+      // grid the way the brackets already do.
       final arrows = {
         LogicalKeyboardKey.arrowLeft,
         LogicalKeyboardKey.arrowRight,
@@ -192,6 +197,7 @@ void main() {
         LogicalKeyboardKey.arrowDown,
       };
       for (final shortcut in appShortcuts()) {
+        if (shortcut.activator.meta) continue;
         expect(
           arrows.contains(shortcut.activator.trigger),
           isFalse,
@@ -214,9 +220,23 @@ void main() {
     test('every declared shortcut gets a binding when a handler exists', () {
       final bindings = buildShortcutBindings(
         handlers: {for (final s in appShortcuts()) s.action: () {}},
-        onSelectAgentIndex: (_) {},
+        onSelectPaneIndex: (_) {},
       );
       expect(bindings.length, appShortcuts().length + kAgentDigitCount);
+    });
+
+    test('the arrow keys walk the grid, with ⌘ held', () {
+      // Asked for by name: the grid reads left to right, so the keys that mean
+      // left and right should move along it. They sit BESIDE ⌘[ / ⌘], which
+      // stay — this adds a way, it does not take one.
+      chordFor(ShortcutAction a) => appShortcuts()
+          .where((s) => s.action == a)
+          .map((s) => describeShortcut(s.activator))
+          .toList();
+      expect(chordFor(ShortcutAction.focusPreviousPane), contains('⌘←'));
+      expect(chordFor(ShortcutAction.focusNextPane), contains('⌘→'));
+      expect(chordFor(ShortcutAction.focusPreviousPane), contains('⌘['));
+      expect(chordFor(ShortcutAction.focusNextPane), contains('⌘]'));
     });
 
     test(
@@ -230,7 +250,7 @@ void main() {
 
   group('the rows the UI prints', () {
     test('two chords for one action are one row, not two', () {
-      // ⌘] and ⌃⇥ both focus the next pane. Printed as two rows — which is
+      // ⌘], ⌘→ and ⌃⇥ all focus the next pane. Printed as three rows — which is
       // what the list did before it merged them — the screen reads as though
       // it forgot to collapse a duplicate.
       final rows = shortcutRows();
@@ -240,6 +260,7 @@ void main() {
       final next = rows.firstWhere((row) => row.label == 'Focus the next pane');
       expect(next.chords, [
         ['⌘', ']'],
+        ['⌘', '→'],
         ['⌃', '⇥'],
       ]);
     });
@@ -259,15 +280,19 @@ void main() {
     test('the digits are one row, at the end of their own group', () {
       final rows = shortcutRows();
       final digits = rows.indexWhere(
-        (row) => row.label == 'Jump to the 1st–9th agent',
+        (row) => row.label == 'Focus the 1st–9th pane',
       );
       expect(digits, isNot(-1));
       expect(rows[digits].chords, [
         ['⌘', '1 – 9'],
       ]);
-      expect(rows[digits].group, ShortcutGroup.navigate);
-      // Last of Navigate, so it does not split the group it belongs to.
-      expect(rows[digits + 1].group, isNot(ShortcutGroup.navigate));
+      // Panes: the digits address tiles on the grid, not rows in the sidebar.
+      expect(rows[digits].group, ShortcutGroup.panes);
+      // Last of its group, so it does not split the group it belongs to.
+      expect(
+        digits == rows.length - 1 || rows[digits + 1].group != ShortcutGroup.panes,
+        isTrue,
+      );
     });
 
     test('a chord is split into the keys a keyboard has', () {

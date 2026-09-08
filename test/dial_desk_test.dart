@@ -154,6 +154,56 @@ void main() {
     app.dispose();
   });
 
+  // ── a notification asks for a tile of its own ───────────────────────────────
+  //
+  // Turning the dial says where the eye is and a tile moves to match. Tapping a
+  // notification is a different verb: the turn just FINISHED, so it is something
+  // new to look at, not a replacement for what the person was already watching.
+  test('a notification opens a NEW tile, leaving the others alone', () async {
+    final app = await _withTiles(['a1', 'a2']);
+    await app.openAgentFromDial('m1', 'a3');
+
+    expect(_desk(app), ['a1', 'a2', 'a3']);
+    expect(app.focusedPane?.agentId, 'a3');
+    app.dispose();
+  });
+
+  test('at the ceiling it reuses the LAST tile rather than refusing', () async {
+    // Refusing would make the notification a liar: it says there is something to
+    // see and then does nothing when pressed. The last tile is already the place
+    // the desk treats as where things arrive — it is what the dial's own right
+    // edge replaces.
+    final app = _notifier();
+    _machine(app, 'm1', [for (var i = 0; i < AppNotifier.maxPanes + 1; i++) 'a$i']);
+    for (var i = 0; i < AppNotifier.maxPanes; i++) {
+      await app.assignAgentToPane(null, 'm1', 'a$i');
+    }
+    expect(app.canAddPane, isFalse);
+    final untouched = [for (final p in app.panes.take(app.panes.length - 1)) p.agentId];
+
+    await app.openAgentFromDial('m1', 'a${AppNotifier.maxPanes}');
+
+    expect(app.panes.length, AppNotifier.maxPanes, reason: 'the grid holds');
+    expect(app.panes.last.agentId, 'a${AppNotifier.maxPanes}');
+    expect(
+      [for (final p in app.panes.take(app.panes.length - 1)) p.agentId],
+      untouched,
+      reason: 'every other tile is where it was',
+    );
+    app.dispose();
+  });
+
+  test('a notification for a tile already open only focuses it', () async {
+    final app = await _withTiles(['a1', 'a2', 'a3']);
+    app.focusPane(app.panes.first.id);
+
+    await app.openAgentFromDial('m1', 'a3');
+
+    expect(_desk(app), ['a1', 'a2', 'a3'], reason: 'nothing opened twice');
+    expect(app.focusedPane?.agentId, 'a3');
+    app.dispose();
+  });
+
   // ── the wire ────────────────────────────────────────────────────────────────
   //
   // Everything above calls the method directly, which proves the rule and
@@ -210,6 +260,21 @@ void main() {
     await dialFocus(app, 'a4', edge: 'middle');
 
     expect(_desk(app), ['a1', 'a4', 'a3'], reason: 'the ordinary path');
+    app.dispose();
+  });
+
+  test('a dial_open frame opens a tile, where dial_focus would replace one', () async {
+    // The two verbs side by side, driven through the app's own handler: the same
+    // agent, one frame each, and the grid ends up a different size.
+    final app = await _withTiles(['a1', 'a2']);
+    await app.handleEventForTest('m1', {
+      'type': 'dial_open',
+      'payload': {'machineId': 'm1', 'agentId': 'a4'},
+    });
+    expect(_desk(app), ['a1', 'a2', 'a4']);
+
+    await dialFocus(app, 'a5', edge: 'tail');
+    expect(_desk(app), ['a1', 'a2', 'a5'], reason: 'focus replaces, open adds');
     app.dispose();
   });
 

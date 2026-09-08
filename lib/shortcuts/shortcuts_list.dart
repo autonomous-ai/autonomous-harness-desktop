@@ -51,8 +51,10 @@ class ShortcutsList extends StatelessWidget {
 class ShortcutsDeck extends StatelessWidget {
   const ShortcutsDeck({super.key});
 
-  /// Narrower than this and a label wraps under its own keycaps.
-  static const double _minCardWidth = 280;
+  /// Narrower than this and a label wraps under its own keycaps. Public so the
+  /// deck's tests can render a card at exactly the width it is least able to
+  /// fit a chord in, which is the only width the overflow ever showed up at.
+  static const double minCardWidth = 280;
   static const double _gap = 12;
 
   /// Past three columns the cards are wider than the deck needs and the eye
@@ -80,7 +82,7 @@ class ShortcutsDeck extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = math.min(constraints.maxWidth, maxWidth);
-        final columns = ((width + _gap) / (_minCardWidth + _gap))
+        final columns = ((width + _gap) / (minCardWidth + _gap))
             .floor()
             .clamp(1, _maxColumns);
 
@@ -299,26 +301,46 @@ class _ShortcutRowView extends StatelessWidget {
   final ShortcutRow row;
   final EdgeInsets? padding;
 
+  /// Between the label and its keycaps.
+  static const double _gutter = 16;
+
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     return Padding(
       padding: padding ?? const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Text(
-              row.label,
-              style: TextStyle(
-                color: grid.AppPalette.textSecondary,
-                fontSize: 12.5,
+      // [KeyChordView] is a Wrap, but a Row hands an INFLEXIBLE child unbounded
+      // width — so it never had the chance to wrap, and a chord wider than the
+      // space left simply overflowed the card. Capping it at the row gives the
+      // Wrap something to wrap inside.
+      //
+      // It took a flaky test to find: the widest chord ("Focus the previous
+      // pane", 246.5px) fits the 268px row of a three-column deck with 5.5px to
+      // spare, and only overflows — by 6.5px — once a card lands on
+      // [ShortcutsDeck.minCardWidth] exactly. So the deck looked fine at every
+      // width anyone had tried, and CI failed on a layout nobody could see.
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text(
+                row.label,
+                style: TextStyle(
+                  color: grid.AppPalette.textSecondary,
+                  fontSize: 12.5,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          KeyChordView(chords: row.chords),
-        ],
+            const SizedBox(width: _gutter),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: math.max(0, constraints.maxWidth - _gutter),
+              ),
+              child: KeyChordView(chords: row.chords),
+            ),
+          ],
+        ),
       ),
     );
   }

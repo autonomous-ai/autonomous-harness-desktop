@@ -84,12 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return result;
   }
 
-  void _selectAgentByIndex(int index) {
-    final agents = _visibleAgents();
-    if (index < 0 || index >= agents.length) return;
-    final target = agents[index];
-    unawaited(widget.notifier.selectAgent(target.machineId, target.agentId));
-  }
+
 
   void _stepAgent(int delta) {
     final agents = _visibleAgents();
@@ -109,16 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(widget.notifier.selectAgent(target.machineId, target.agentId));
   }
 
-  void _stepPane(int delta) {
-    final notifier = widget.notifier;
-    final panes = notifier.panes;
-    if (panes.length < 2) return;
-    final current = panes.indexWhere((p) => p.id == notifier.focusedPaneId);
-    final next = current < 0
-        ? 0
-        : (current + delta + panes.length) % panes.length;
-    notifier.focusPane(panes[next].id);
-  }
+
 
   void _closeFocusedPane() {
     final pane = widget.notifier.focusedPane;
@@ -157,8 +143,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() => _collapsed = !_collapsed),
               ShortcutAction.nextAgent: () => _stepAgent(1),
               ShortcutAction.previousAgent: () => _stepAgent(-1),
-              ShortcutAction.focusNextPane: () => _stepPane(1),
-              ShortcutAction.focusPreviousPane: () => _stepPane(-1),
+              ShortcutAction.focusNextPane: () => notifier.focusPaneBy(1),
+              ShortcutAction.focusPreviousPane: () => notifier.focusPaneBy(-1),
+              ShortcutAction.focusPaneAbove: () =>
+                  notifier.focusPaneVertically(-1),
+              ShortcutAction.focusPaneBelow: () =>
+                  notifier.focusPaneVertically(1),
               ShortcutAction.movePaneForward: () => notifier.movePaneBy(1),
               ShortcutAction.movePaneBackward: () => notifier.movePaneBy(-1),
 
@@ -186,7 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             },
-            onSelectAgentIndex: _selectAgentByIndex,
+            onSelectPaneIndex: notifier.focusPaneByIndex,
           ),
           child: Focus(
             // This is only a shortcuts scope. If it owns keyboard focus after
