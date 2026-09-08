@@ -2,10 +2,16 @@
 // mark sit at the RIGHT edge, whatever the agent is called. They are the
 // controls; everything to their left is a label, and a control that drifts
 // toward the middle when a name is short reads as part of the label.
+//
+// Every test here picks a grid first. The model control draws nothing at all
+// without one (see AgentModelMenu), and a zero-width pill satisfies "flush
+// right", "does not move" and "fits the pane" without measuring anything --
+// which is why the first test also insists the thing it measures has a width.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
+import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/terminal/terminal_session.dart';
 import 'package:harness/widgets/agent_model_menu.dart';
@@ -17,6 +23,17 @@ void main() {
   /// that padding moves the expectation with it.
   const double paneWidth = 900;
   const double headerPadding = 14;
+
+  // The store is app-wide, so it is put back afterwards rather than left
+  // pointing at a grid every later test in this isolate would see.
+  final beforeSelection = gridSelectionStore.value;
+  setUp(() {
+    gridSelectionStore.value = const GridSelection(
+      networkId: 'grid-live',
+      networkName: 'autonomous.ai',
+    );
+  });
+  tearDown(() => gridSelectionStore.value = beforeSelection);
 
   TerminalSession sessionNamed(String name) {
     final session = TerminalSession(
@@ -77,6 +94,12 @@ void main() {
     await pump(tester, session);
 
     final menu = tester.getRect(find.byType(AgentModelMenu));
+
+    expect(
+      menu.width,
+      greaterThan(0),
+      reason: 'a control with no width passes every assertion below for free',
+    );
 
     // The regression this exists for: the pill was a `Flexible` competing with
     // the name's `Expanded` for one flex share each. It wanted far less than
