@@ -133,10 +133,8 @@ void main() {
   });
 
   testWidgets('names the grid for an engine that can reach it', (tester) async {
-    // GridSelection.model is a leftover from the single global setting this
-    // dialog's own MODEL field replaces (see new_agent_dialog.dart) — the
-    // summary reads the dialog's state, never the store's, so the model the
-    // summary names here is the dialog's own default: Auto.
+    // The summary reads the dialog's own state, never the store's — and a new
+    // agent is always Auto, which is what it names here.
     gridSelectionStore.value = const GridSelection(
       networkId: 'grid-3378218621364f16',
       networkName: 'autonomous.ai',
@@ -144,6 +142,22 @@ void main() {
     await openDialog(tester, engine: 'claude');
     expect(find.text('autonomous.ai · Auto'), findsOneWidget);
     expect(warning, findsNothing);
+  });
+
+  testWidgets('offers no model to pick, even with a grid selected', (
+    tester,
+  ) async {
+    // A new agent launches on Auto and nothing else: the model is chosen per
+    // agent AFTER it is running, from the agent view's header menu. A control
+    // here would be a second door onto the same setting, open at the one moment
+    // there is no agent to apply it to.
+    gridSelectionStore.value = const GridSelection(
+      networkId: 'grid-3378218621364f16',
+      networkName: 'autonomous.ai',
+    );
+    await openDialog(tester, engine: 'claude');
+    expect(find.byKey(const Key('new-agent-model-field')), findsNothing);
+    expect(find.text('Model'), findsNothing);
   });
 
   testWidgets('warns before the CLI refuses, and names the way out', (
@@ -400,11 +414,11 @@ void main() {
     expect(find.byType(AppCheckbox), findsOneWidget);
   });
 
-  testWidgets('creates the agent with the model the user picked', (
+  testWidgets('creates the agent on Auto, with no model on the wire', (
     tester,
   ) async {
-    // Auto is the default, and Auto means "no model on the wire" — the grid's own choice, which is
-    // not the same as pinning a model named Auto.
+    // A new agent never pins a model: the dialog has no model control, and Auto means the grid
+    // chooses — which is not the same as pinning a model named Auto.
     gridSelectionStore.value = const GridSelection(
       networkId: 'grid-abc',
       networkName: 'autonomous.ai',
@@ -443,8 +457,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Select this folder'));
     await tester.pumpAndSettle();
 
-    // The model field defaults to Auto — nothing tapped here — so Create should carry that
-    // straight through.
+    // Nothing to pick: every new agent launches on Auto, so Create carries that straight through.
     await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
     await tester.pumpAndSettle();
 
@@ -459,77 +472,6 @@ void main() {
           'Auto means the key is left off the wire entirely, not sent as null',
     );
   });
-
-  testWidgets(
-    '"No grid" re-enables Create for an engine that cannot reach a grid, and sends no grid',
-    (tester) async {
-      // The gap this closes: `refused` only checked hasGrid + kGridCapableEngines, so Cursor
-      // stayed refused even after the user picked "No grid" in the Model field — the exact choice
-      // that makes the launch frame `gridOverride: null`, the one every engine already accepts.
-      // The button and the warning must both clear, and the frame that goes out must carry no grid.
-      gridSelectionStore.value = const GridSelection(
-        networkId: 'grid-abc',
-        networkName: 'autonomous.ai',
-      );
-      final notifier = RecordingCreateAgentNotifier();
-      addTearDown(notifier.dispose);
-      notifier.machineStates['machine-1'] = MachineState(machine);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: TextButton(
-                onPressed: () => showNewAgentDialog(
-                  context,
-                  notifier,
-                  'machine-1',
-                  source: 'machine_row',
-                  gridApiClient: FakeGridApi(),
-                ),
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      // The folder has to be picked regardless of the grid question — without it Create stays
-      // disabled for a reason unrelated to what this test is checking.
-      await tester.tap(find.text('Browse…'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Select this folder'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('new-agent-engine-field')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cursor').last);
-      await tester.pumpAndSettle();
-
-      expect(warning, findsOneWidget);
-      expect(tester.widget<FilledButton>(createButton()).onPressed, isNull);
-
-      await tester.tap(find.byKey(const Key('new-agent-model-field')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('No grid').last);
-      await tester.pumpAndSettle();
-
-      expect(warning, findsNothing);
-      expect(tester.widget<FilledButton>(createButton()).onPressed, isNotNull);
-
-      await tester.tap(createButton());
-      await tester.pumpAndSettle();
-
-      expect(notifier.createAgentCalled, isTrue);
-      expect(
-        notifier.lastGrid,
-        isNull,
-        reason: '"No grid" sends no grid override, for any engine',
-      );
-    },
-  );
 
   test('the grid-capable list matches what the CLI will accept', () {
     // Mirrors GRID_ENGINE_CONTRACTS in autonomous-harness/cli/src/lib/gridLaunch.ts, which has the

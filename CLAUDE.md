@@ -202,9 +202,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   on screen) and Settings ▸ Grid, which keeps the table because that is where a grid is *compared*
   rather than merely picked. Both list `gridNetworksController`, the shared singleton, so neither
   holds a half-stale copy. The label for "no grid" is `kNoGridTargetLabel` beside the store — four
-  places print it. The model is chosen per agent, not globally: the
-  agent view's header menu (`widgets/agent_model_menu.dart`) picks it for an already-running agent,
-  and the New agent dialog has its own model field for a new one. At create time the New agent
+  places print it. The model is chosen per agent, not globally, and
+  **only once the agent exists**: the agent view's header menu (`widgets/agent_model_menu.dart`)
+  picks it for a running agent, and the New agent dialog offers no model at all — every new agent
+  launches on Auto (no `model` on the wire, the grid chooses), because a model picked before there
+  is an agent to apply it to is a second door onto a setting the header menu already owns. At create
+  time the New agent
   dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
   as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
   always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field

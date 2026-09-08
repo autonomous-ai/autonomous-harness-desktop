@@ -8,14 +8,12 @@ import '../analytics/analytics.dart';
 import '../core/engine_availability.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_api_client.dart';
-import '../grid/grid_models_controller.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_checkbox.dart';
 import '../shared/widgets/app_select_field.dart';
 import '../shared/widgets/labeled_field.dart';
 import '../state/app_state.dart';
-import 'agent_model_menu.dart';
 import 'engine_identity.dart';
 import 'remote_folder_picker.dart';
 
@@ -81,30 +79,13 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool _bypassPermission = false;
   bool _submitting = false;
 
-  /// The model this NEW agent launches on. Null = Auto (the grid decides —
-  /// no model on the wire), [kNoGridModelOption] = off the grid, on the
-  /// engine's own account, even though a grid is picked. Only meaningful once
-  /// a grid is picked; dialog default is Auto either way.
-  String? _model;
-
   @override
   void initState() {
     super.initState();
-    // Lazy, like every other model picker in the app: nothing is fetched unless a grid is already
-    // picked. Deferred a frame so the load's synchronous first `notifyListeners()` (see
-    // GridModelsController.refresh) lands after this dialog — and everything else — has finished
-    // building, rather than mid-build.
-    final networkId = gridSelectionStore.value.networkId;
-    if (networkId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        gridModelsController.ensureLoadedFor(networkId);
-      });
-    }
     // Which engines this machine actually has. Asked here rather than at
     // connect because the answer costs the far side one interactive shell per
-    // engine and is only ever read on this screen. Deferred a frame for the
-    // same reason as the models load above: the probe's first notifyListeners()
-    // must not land mid-build.
+    // engine and is only ever read on this screen. Deferred a frame so the
+    // probe's first notifyListeners() does not land mid-build.
     //
     // `force`, every time this dialog opens. A cached answer is worth nothing
     // here: engines arrive and leave through a terminal this app never sees —
@@ -254,17 +235,16 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     });
     // A relay key is minted per launch, so it is fetched here rather than held
     // in the store. Null when no grid is picked, which leaves the frame exactly
-    // as it was before this feature existed — and null too when this agent is
-    // pinned to its own account despite a grid being picked, which mints no key
-    // at all rather than one that would go unused.
+    // as it was before this feature existed.
+    //
+    // No model is passed: a new agent always launches on Auto — the grid picks
+    // the model, and nothing goes on the wire. Changing it afterwards is the
+    // agent view's own header menu (see AgentModelMenu).
     final GridAgentOverride? gridOverride;
     try {
-      gridOverride = _model == kNoGridModelOption
-          ? null
-          : await resolveGridAgentOverride(
-              client: widget.gridApiClient,
-              model: _model,
-            );
+      gridOverride = await resolveGridAgentOverride(
+        client: widget.gridApiClient,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -324,12 +304,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         // launch will fail. Gating the button here is what stops a round trip
         // that only ever ends in an error the user was already warned about.
         //
-        // "No grid" is the escape hatch for exactly this case — picking it sends `gridOverride:
-        // null`, the same frame the CLI accepts for ANY engine — so it must not itself be refused.
+        // The escape hatch is the sidebar's grid picker set to "No grid", which
+        // sends `gridOverride: null` — the same frame the CLI accepts for ANY
+        // engine — and which the summary's refusal note names.
         final refused =
-            chosen.hasGrid &&
-            _model != kNoGridModelOption &&
-            !kGridCapableEngines.contains(_engine);
+            chosen.hasGrid && !kGridCapableEngines.contains(_engine);
         final canCreate = _folder != null && !refused && !_submitting;
 
         return AlertDialog(
@@ -347,7 +326,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 children: [
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final choices = _choices(bypassFlag, chosen);
+                      final choices = _choices(bypassFlag);
                       final summary = _NewAgentSummary(
                         engine: _engine,
                         folder: _folder,
@@ -355,7 +334,6 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                         machineIsThisComputer: _machineIsThisComputer,
                         bypassFlag: _bypassPermission ? bypassFlag : null,
                         selection: chosen,
-                        model: _model,
                         refused: refused,
                         installCommand: _willInstall
                             ? _availability(_engine)?.installCommand
@@ -421,7 +399,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   }
 
   /// The left column: what the user actually decides.
-  Widget _choices(String? bypassFlag, GridSelection selection) {
+  Widget _choices(String? bypassFlag) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -476,36 +454,6 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             }
           }),
         ),
-        // Only meaningful once a grid is picked — an unselected build behaves exactly as it did
-        // before this field existed, per the summary's own "no grid" branch below.
-        if (selection.hasGrid) ...[
-          const SizedBox(height: _gapField),
-          const FieldLabel('Model'),
-          // Wrapped in ListenableBuilder, not built bare: AppSelectField is a MenuAnchor underneath
-          // (see its own doc), so an ALREADY-OPEN panel picks up gridModelsController's rows as they
-          // move Idle -> Loading -> Ready/Failed rather than freezing at whatever they were when this
-          // field first opened — the same fix AgentModelMenu applies for its own model control.
-          // Options that carry no real value (the "Loading…"/error placeholder) are dropped rather
-          // than shown disabled: AppSelectField has no disabled row.
-          ListenableBuilder(
-            listenable: gridModelsController,
-            builder: (context, _) => AppSelectField<String?>(
-              key: const Key('new-agent-model-field'),
-              value: _model,
-              options: [
-                for (final option in agentModelMenuOptions(
-                  gridModelsController.state,
-                ))
-                  if (option.enabled)
-                    SelectOption<String?>(
-                      value: option.value,
-                      label: option.label,
-                    ),
-              ],
-              onChanged: (value) => setState(() => _model = value),
-            ),
-          ),
-        ],
         const SizedBox(height: _gapField),
         const FieldLabel('Working folder'),
         _FolderControl(
@@ -891,7 +839,6 @@ class _NewAgentSummary extends StatelessWidget {
     required this.machineIsThisComputer,
     required this.bypassFlag,
     required this.selection,
-    required this.model,
     required this.refused,
     this.installCommand,
     this.missingWithoutRecipe = false,
@@ -907,11 +854,6 @@ class _NewAgentSummary extends StatelessWidget {
   /// not what could.
   final String? bypassFlag;
   final GridSelection selection;
-
-  /// The dialog's own model choice for THIS agent — null (Auto) or
-  /// [kNoGridModelOption], never read off [selection]. `GridSelection.model`
-  /// is a leftover from the single global setting this field replaces.
-  final String? model;
   final bool refused;
 
   /// The line this machine will run before the engine, when the engine is not
@@ -1072,9 +1014,10 @@ class _NewAgentSummary extends StatelessWidget {
           _fact(
             context,
             'Inference',
-            refused || !selection.hasGrid || model == kNoGridModelOption
+            // Always Auto: a new agent pins no model, so the grid picks one.
+            refused || !selection.hasGrid
                 ? "${engineIdentity(engine).label}'s own account"
-                : '${selection.label} · ${model ?? 'Auto'}',
+                : '${selection.label} · Auto',
           ),
           if (refused) ...[
             const SizedBox(height: _gapBlock),
