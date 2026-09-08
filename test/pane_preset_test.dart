@@ -100,18 +100,41 @@ void main() {
     }
   });
 
+  testWidgets('five tiles: a full-height middle, two stacked either side', (
+    tester,
+  ) async {
+    // Drawn on paper and handed over: three columns, the middle one whole, the
+    // outer two split. The numbers in that drawing are the tile order — 1 and 4
+    // down the left, 2 in the middle, 3 and 5 down the right — so a person
+    // reading across the top gets 1, 2, 3.
+    final notifier = _withPanes(5);
+    notifier.setPreset(5, PanePreset.middleMain);
+    final shape = await _layout(tester, notifier);
+
+    expect(shape[0].right, closeTo(1 / 3, 0.02), reason: 'tile 1: left column');
+    expect(shape[0].bottom, closeTo(1 / 2, 0.02), reason: 'tile 1: top half');
+    expect(shape[1].top, closeTo(0, 0.02), reason: 'tile 2 runs the full height');
+    expect(shape[1].bottom, closeTo(1, 0.02));
+    expect(shape[2].left, closeTo(2 / 3, 0.02), reason: 'tile 3: right column');
+    expect(shape[3].top, closeTo(1 / 2, 0.02), reason: 'tile 4 is under tile 1');
+    expect(shape[4].left, closeTo(2 / 3, 0.02), reason: 'tile 5 is under tile 3');
+    expect(shape[4].bottom, closeTo(1, 0.02));
+  });
+
   test('a big grid offers auto first, then column counts that fit', () {
     expect(PanePreset.forCount(5).first, PanePreset.auto);
     for (var count = 5; count <= 9; count++) {
       for (final preset in PanePreset.forCount(count).skip(1)) {
         final columns = preset.statedColumns;
-        expect(columns, isNotNull, reason: '${preset.id} states no columns');
+        // A shape that is not a lattice carries its own rectangles instead —
+        // `middleMain` is a full-height column with two stacked either side, and
+        // no column count describes that.
+        if (columns == null) {
+          expect(preset.tilesFor(count).length, count, reason: preset.id);
+          continue;
+        }
         // More columns than tiles is the same grid with empty air in it.
-        expect(
-          columns! <= count,
-          isTrue,
-          reason: '$columns cols, $count tiles',
-        );
+        expect(columns <= count, isTrue, reason: '$columns cols, $count tiles');
       }
     }
   });
