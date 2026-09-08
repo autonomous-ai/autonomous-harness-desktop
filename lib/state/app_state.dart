@@ -981,6 +981,12 @@ class AppNotifier extends ChangeNotifier {
           // the dial goes back to beeping about tiles in plain sight until the
           // next time a pane happens to change.
           _announceOpenPanesToDial();
+          // ...nor which tile this window is looking at. The daemon repeats that to the dial after every
+          // list push, which is what keeps the two screens from drifting apart — but it can only repeat
+          // something it has been told, and until now the first telling waited for the focus to CHANGE.
+          // A daemon restarted mid-session therefore had nothing to say, and a dial that re-anchored onto
+          // the wrong tile stayed there.
+          _announceFocusToDial();
           // The local CLI never hands back `connected` until it has terminated E2EE (or confirmed
           // none is needed, for its own machine) — every machine's data is ready to load right away,
           // with no separate app-side readiness gate to wait on anymore.
@@ -2434,6 +2440,32 @@ class AppNotifier extends ChangeNotifier {
   /// Which end is the daemon's answer, not a guess made here: it owns the flat list of every agent on
   /// every machine, so it is the only side that can say whether an agent sits before the first tile or
   /// after the last. With no tiles at all there is no end to replace, and the agent opens a new one.
+  /// A notification on the dial was tapped: give that agent a tile of its OWN.
+  ///
+  /// A different verb from turning the dial, and the difference is the point. Turning says where the eye
+  /// is, and a tile moves to match; a notification is a turn that just FINISHED — something new to look
+  /// at, not a replacement for whatever the person was already watching. So the grid grows.
+  ///
+  /// At the ceiling it reuses the LAST tile. The alternative is refusing, and a notification that cannot
+  /// be opened is a notification that lies: it says there is something to see and then does nothing when
+  /// pressed. The last tile is the one the desk already treats as the place things arrive — it is what
+  /// the dial's own right edge replaces.
+  Future<void> openAgentFromDial(String machineId, String agentId) async {
+    // Already on the desk: it has its tile, so this is only "look at it".
+    final existing = paneOfAgent(machineId, agentId);
+    if (existing != null) {
+      focusPane(existing.id);
+      selectedMachineId = machineId;
+      notifyListeners();
+      return;
+    }
+    if (canAddPane) {
+      await assignAgentToPane(null, machineId, agentId);
+      return;
+    }
+    await assignAgentToPane(panes.last.id, machineId, agentId);
+  }
+
   Future<void> selectAgentFromDial(
     String machineId,
     String agentId, {
@@ -3052,6 +3084,17 @@ class AppNotifier extends ChangeNotifier {
                 },
               ),
             );
+          }
+        }
+        break;
+      case 'dial_open':
+        // A notification was tapped on the dial. Unlike `dial_focus` this asks for a tile of its own —
+        // see openAgentFromDial for why a finished turn is not a replacement for what is on screen.
+        final openId = payload['agentId'];
+        if (openId is String && openId.isNotEmpty) {
+          final targetMachineId = _dialFocusMachine(payload, openId);
+          if (targetMachineId != null) {
+            unawaited(openAgentFromDial(targetMachineId, openId));
           }
         }
         break;
