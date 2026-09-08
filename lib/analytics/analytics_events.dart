@@ -174,30 +174,32 @@ extension AnalyticsEvents on Analytics {
     },
   );
 
-  /// The first turn of an agent this app created — the moment somebody actually
-  /// *used* it, as opposed to making it and walking away.
+  /// The first message of a signed-in session — how long it took this person to
+  /// get from being logged in to actually talking to an agent, whichever agent
+  /// that turned out to be.
+  ///
+  /// **Once per sign-in, not per agent.** Which agent it was is
+  /// [agentCreated]'s question; this one is about the gap at the top of the
+  /// funnel, where somebody signs in and then does nothing.
+  ///
+  /// [from] says what started the clock, because the two populations behave
+  /// nothing alike: `sign_in` is a fresh log-in, `launch` is opening the app
+  /// with a session already on the machine. Averaging them together would hide
+  /// both.
   ///
   /// Driven by the CLI's `turn_started`, not by the composer, so a message
   /// typed straight into the terminal counts the same as one sent from the box
   /// underneath it — which is how most people drive these engines.
   ///
-  /// ⚠️ **No message text, ever.** [secondsSinceCreated] is the whole point:
-  /// who it was and when are already on every event (`user_email`,
-  /// `event_timestamp`), so what this adds is the gap between making an agent
-  /// and speaking to it.
-  void agentFirstMessage({
-    required String engine,
-    required bool onGrid,
-    required int secondsSinceCreated,
-    String? model,
+  /// ⚠️ **No message text, ever**, and no agent, machine or folder either. Who
+  /// it was and when are already on every event (`user_email`,
+  /// `event_timestamp`); what this adds is the wait.
+  void appFirstMessage({
+    required String from,
+    required int secondsSinceLogin,
   }) => track(
-    'agent_first_message',
-    params: {
-      'engine': engine,
-      'model': model,
-      'on_grid': onGrid,
-      'seconds_since_created': secondsSinceCreated,
-    },
+    'app_first_message',
+    params: {'from': from, 'seconds_since_login': secondsSinceLogin},
   );
 
   /// A RUNNING agent was moved onto a grid, or onto a different model.

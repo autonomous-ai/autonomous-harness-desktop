@@ -163,17 +163,15 @@ class AppNotifier extends ChangeNotifier {
   final DesktopUpdater? desktopUpdater;
   final Map<String, Timer> _turnActivityWatchdogs = {};
 
-  /// Agents THIS app created that have not taken a turn yet, keyed the way the
-  /// watchdogs are, with what they were created as.
+  /// When this launch became signed in, and by which route — until the first
+  /// message of that session has been reported, after which it is null.
   ///
-  /// Only agents created here, and only this launch: an agent adopted from a
-  /// session that has been running for days would otherwise report a "first
-  /// message" that is nothing of the kind. Emptied by the first `turn_started`
-  /// for each — see `analytics.agentFirstMessage`. An agent that is made and
-  /// never spoken to simply stays here until the app quits, which is exactly
-  /// the population this event exists to measure the absence of.
-  final Map<String, ({String engine, String? model, bool onGrid, DateTime at})>
-  _agentsAwaitingFirstTurn = {};
+  /// One record for the whole app, not one per agent: the question is how long
+  /// somebody sits signed in before talking to anything at all, and which agent
+  /// they finally picked is `agent_created`'s business. A session where nobody
+  /// ever sends a message simply leaves this set until sign-out or quit, which
+  /// is exactly the population the event exists to measure the absence of.
+  ({DateTime at, String from})? _awaitingFirstMessage;
 
   final Map<String, Timer> _offlineRetryTimers = {};
   // Periodic retry for a machine the relay reported NO_PEER_LINK for — a `harness link connect` run
@@ -573,7 +571,11 @@ class AppNotifier extends ChangeNotifier {
   void _trackAppOpened() {
     if (_appOpenedTracked) return;
     _appOpenedTracked = true;
-    analytics.appOpened(signedIn: status == AppStatus.authenticated);
+    final signedIn = status == AppStatus.authenticated;
+    analytics.appOpened(signedIn: signedIn);
+    // A returning user is signed in before the app is even on screen, so their
+    // wait starts here rather than at a sign-in that never happens.
+    if (signedIn) _armFirstMessage('launch');
   }
 
   /// Runs before we invoke a single Harness subcommand. A fresh mac used to
@@ -881,6 +883,10 @@ class AppNotifier extends ChangeNotifier {
       );
       await _finishBootstrapSignedIn();
       analytics.signedIn();
+      // Restarts the clock even if `_trackAppOpened` already started one: this
+      // person met the login screen, so their wait begins where the launch's
+      // did not.
+      _armFirstMessage('sign_in');
     } catch (error) {
       status = AppStatus.unauthenticated;
       _lastError = error.toString();
@@ -926,6 +932,10 @@ class AppNotifier extends ChangeNotifier {
     selectedMachineId = null;
     status = AppStatus.unauthenticated;
     analytics.signedOut();
+    // A session that ended without a message reports nothing — its absence IS
+    // the finding, and a stale clock would attach that wait to whoever signs in
+    // next.
+    _awaitingFirstMessage = null;
     analyticsAccount.clear();
     notifyListeners();
   }
@@ -1870,38 +1880,39 @@ class AppNotifier extends ChangeNotifier {
     return session is String && session.isNotEmpty ? session : null;
   }
 
-  /// Records that this app just made [agentId], so its first turn can be
-  /// reported. One body, called by [createAgent] and by the test seam below —
-  /// a second place building this record is a second place to get it wrong.
-  void _armAgentFirstMessage(
-    String machineId,
-    String agentId, {
-    required String engine,
-    required bool onGrid,
-    String? model,
-  }) => _agentsAwaitingFirstTurn[_turnActivityKey(machineId, agentId)] = (
-    engine: engine,
-    model: model,
-    onGrid: onGrid,
-    at: DateTime.now(),
-  );
+  /// Starts the clock `app_first_message` measures. [from] is `sign_in` for a
+  /// fresh log-in and `launch` for an app opened with a session already there.
+  ///
+  /// One body, called by both routes and by the test seam below — a second
+  /// place building this record is a second place to get it wrong.
+  void _armFirstMessage(String from) =>
+      _awaitingFirstMessage = (at: DateTime.now(), from: from);
 
-  /// [_armAgentFirstMessage], for a test: `createAgent` needs a live socket,
-  /// and what is worth pinning is what the turn AFTER it does.
+  /// Closes that clock out, once.
+  ///
+  /// A one-shot latch rather than a counter: the record is read and cleared in
+  /// the same breath, so every turn after the first finds nothing and there is
+  /// never a "which message is this" to get wrong.
+  ///
+  /// ⚠️ Called from `turn_started` ONLY, never from the other two routes into
+  /// [_markAgentProcessing]. A `turn_heartbeat`, and an adopted agent found
+  /// already mid-turn when this app connected, are both work that was under way
+  /// before anybody here typed anything — counting either would report a
+  /// near-zero wait for a returning user who has not said a word.
+  void _reportFirstMessage() {
+    if (_awaitingFirstMessage case final login?) {
+      _awaitingFirstMessage = null;
+      analytics.appFirstMessage(
+        from: login.from,
+        secondsSinceLogin: DateTime.now().difference(login.at).inSeconds,
+      );
+    }
+  }
+
+  /// [_armFirstMessage], for a test: signing in needs a live CLI, and what is
+  /// worth pinning is what the first turn AFTER it does.
   @visibleForTesting
-  void armAgentFirstMessageForTest(
-    String machineId,
-    String agentId, {
-    required String engine,
-    bool onGrid = false,
-    String? model,
-  }) => _armAgentFirstMessage(
-    machineId,
-    agentId,
-    engine: engine,
-    onGrid: onGrid,
-    model: model,
-  );
+  void armFirstMessageForTest(String from) => _armFirstMessage(from);
 
   String _turnActivityKey(String machineId, String agentId) =>
       '$machineId\u0000$agentId';
@@ -1909,17 +1920,6 @@ class AppNotifier extends ChangeNotifier {
   void _markAgentProcessing(MachineState machine, String agentId) {
     machine.processingAgentIds.add(agentId);
     final key = _turnActivityKey(machine.machine.machineId, agentId);
-    // The first turn of an agent we made is the moment somebody actually used
-    // it. Driven by the CLI's turn events rather than by the composer, so a
-    // message typed straight into the terminal counts the same.
-    if (_agentsAwaitingFirstTurn.remove(key) case final created?) {
-      analytics.agentFirstMessage(
-        engine: created.engine,
-        model: created.model,
-        onGrid: created.onGrid,
-        secondsSinceCreated: DateTime.now().difference(created.at).inSeconds,
-      );
-    }
     _turnActivityWatchdogs.remove(key)?.cancel();
     _turnActivityWatchdogs[key] = Timer(turnActivityTimeout, () {
       _turnActivityWatchdogs.remove(key);
@@ -2056,15 +2056,6 @@ class AppNotifier extends ChangeNotifier {
     // Idempotent on agent.id — safe even if the CLI's own agent_synced push for this session
     // arrives separately (it's fire-and-forget on the CLI side and unordered relative to this reply).
     _upsertAgent(machine, agent);
-    // Armed here rather than in the dialog, which never learns the agent's id:
-    // the reply is the first moment this agent can be named at all.
-    _armAgentFirstMessage(
-      machineId,
-      agent.id,
-      engine: engine,
-      model: grid?.model,
-      onGrid: grid != null,
-    );
     // Only when a grid was actually picked: an agent on the engine's own login
     // is the old behaviour, and counting it here would make the grid funnel
     // report every agent this app has ever created.
@@ -3053,6 +3044,10 @@ class AppNotifier extends ChangeNotifier {
         break;
       case 'turn_started':
       case 'turn_heartbeat':
+        // A turn that STARTS is somebody sending something; a heartbeat is a
+        // turn already under way, which for an agent this app merely reconnected
+        // to is work nobody here just asked for.
+        if (type == 'turn_started') _reportFirstMessage();
         final agentId = _eventAgentId(machine, event, payload);
         if (agentId != null) {
           _markAgentProcessing(machine, agentId);

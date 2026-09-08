@@ -1,13 +1,13 @@
-// The agent funnel: opening the New agent dialog, finishing it, and actually
-// speaking to what came out. Three separate events on purpose — the interesting
-// numbers are the DROPS between them, and one event per step is the only way to
-// see a drop at all.
+// The funnel: opening the New agent dialog, finishing it, and — once per
+// signed-in session — actually saying something. Separate events on purpose:
+// the interesting numbers are the DROPS between them, and one event per step is
+// the only way to see a drop at all.
 //
 // What is pinned here is the part that is easy to get subtly wrong: which door
 // a dialog says it was opened by, the difference between Auto and the engine's
-// own login (both reach the notifier as a null override), and that a first
-// message is reported once, for agents this app made, and never with any of
-// what was typed.
+// own login (both reach the notifier as a null override), and that the first
+// message is reported once per SESSION rather than per agent, and never with
+// any of what was typed.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/analytics/analytics.dart';
@@ -225,7 +225,7 @@ void main() {
     });
   });
 
-  group('agent_first_message', () {
+  group('app_first_message', () {
     AppNotifier notifierWithMachine() {
       final notifier = AppNotifier(
         config: AppConfig.dev,
@@ -237,57 +237,64 @@ void main() {
       return notifier;
     }
 
-    Future<void> turnStarted(AppNotifier notifier, String agentId) =>
+    Future<void> turn(AppNotifier notifier, String type, String agentId) =>
         notifier.handleEventForTest('machine-1', {
-          'type': 'turn_started',
+          'type': type,
           'agentId': agentId,
         });
 
-    test(
-      'the first turn of an agent we made reports how long it took',
-      () async {
-        final notifier = notifierWithMachine();
-        notifier.armAgentFirstMessageForTest(
-          'machine-1',
-          'agent-1',
-          engine: 'claude',
-          onGrid: true,
-          model: 'DeepSeek-V4-Flash-0731',
-        );
+    Future<void> turnStarted(AppNotifier notifier, String agentId) =>
+        turn(notifier, 'turn_started', agentId);
 
-        await turnStarted(notifier, 'agent-1');
-
-        final params = tracked.paramsOf('agent_first_message');
-        expect(params['engine'], 'claude');
-        expect(params['model'], 'DeepSeek-V4-Flash-0731');
-        expect(params['on_grid'], isTrue);
-        expect(params['seconds_since_created'], isA<int>());
-      },
-    );
-
-    test('only the FIRST turn reports, not every turn after it', () async {
+    test('reports the wait, and what started the clock', () async {
       final notifier = notifierWithMachine();
-      notifier.armAgentFirstMessageForTest(
-        'machine-1',
-        'agent-1',
-        engine: 'codex',
-      );
+      notifier.armFirstMessageForTest('sign_in');
 
       await turnStarted(notifier, 'agent-1');
-      await turnStarted(notifier, 'agent-1');
-      await turnStarted(notifier, 'agent-1');
 
-      expect(tracked.count('agent_first_message'), 1);
+      final params = tracked.paramsOf('app_first_message');
+      expect(params['from'], 'sign_in');
+      expect(params['seconds_since_login'], isA<int>());
+      // Not per agent: nothing here may name the agent, its engine or its
+      // machine. Which agent it was is `agent_created`'s question.
+      expect(params.keys, unorderedEquals(['from', 'seconds_since_login']));
     });
 
-    test('an agent this app did not make reports nothing', () async {
-      // An adopted session may have been running for days; calling its next
-      // turn a "first message" would be a straight lie.
+    test('once per session, however many agents are spoken to', () async {
+      final notifier = notifierWithMachine();
+      notifier.armFirstMessageForTest('launch');
+
+      await turnStarted(notifier, 'agent-1');
+      await turnStarted(notifier, 'agent-1');
+      await turnStarted(notifier, 'agent-2');
+
+      expect(tracked.count('app_first_message'), 1);
+      expect(tracked.paramsOf('app_first_message')['from'], 'launch');
+    });
+
+    test('a heartbeat is not a message', () async {
+      // The trap this closes: a returning user whose agent was already mid-turn
+      // when the app reconnected gets heartbeats, not a turn start. Counting
+      // one would report a near-zero wait for somebody who has not said a word.
+      final notifier = notifierWithMachine();
+      notifier.armFirstMessageForTest('launch');
+
+      await turn(notifier, 'turn_heartbeat', 'agent-1');
+      expect(tracked.count('app_first_message'), 0);
+
+      // And the real first message still lands afterwards.
+      await turnStarted(notifier, 'agent-1');
+      expect(tracked.count('app_first_message'), 1);
+    });
+
+    test('a turn with nobody signed in reports nothing', () async {
+      // Nothing started the clock, so there is no wait to measure — and an
+      // event with no login behind it is a number attached to nobody.
       final notifier = notifierWithMachine();
 
-      await turnStarted(notifier, 'adopted-agent');
+      await turnStarted(notifier, 'agent-1');
 
-      expect(tracked.count('agent_first_message'), 0);
+      expect(tracked.count('app_first_message'), 0);
     });
   });
 }

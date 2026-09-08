@@ -326,10 +326,13 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   true, no model) from the engine's own login (`on_grid` false) — both reach the notifier as one
   null override — and it covers EVERY agent, unlike `grid_agent_launched`, which counts only the
   ones pointed at a grid (so a grid agent fires both; `agent_created where on_grid` is the same set
-  and is the one to build on); `agent_first_message` rides the CLI's `turn_started` rather than the
-  composer, so a message typed straight into the terminal counts, and it fires once, only for
-  agents this app made this launch (`_agentsAwaitingFirstTurn`) — calling an adopted session's next
-  turn a first message would be a straight lie. `app_closed` hooks only
+  and is the one to build on); `app_first_message` rides the CLI's `turn_started` rather than the
+  composer, so a message typed straight into the terminal counts, and it fires **once per signed-in
+  session, not per agent** (`_awaitingFirstMessage`) — the question is how long somebody sits
+  logged in before talking to anything at all, so it carries the wait and `from` (`sign_in` against
+  `launch`, two populations that must not be averaged together) and deliberately names no agent,
+  engine or machine. Sign-out clears the clock: a session that ended without a message reports
+  nothing, and its absence is the finding. `app_closed` hooks only
   `didRequestAppExit` — intercepting the window's close button needs `setPreventClose(true)`, and a
   bug on that path leaves a window nobody can close.
   **Settings ▸ Tracking is where that stream is read back** (`analytics/analytics_log.dart`,
