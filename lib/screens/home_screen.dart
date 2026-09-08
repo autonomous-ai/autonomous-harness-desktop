@@ -32,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // window-relative default below keeps applying on its own.
   double? _railWidth;
   bool _collapsed = false;
-  final GlobalKey<MachineRailState> _railKey = GlobalKey<MachineRailState>();
 
   // Guards against opening a second popup for the same machine while one is already up — showDialog
   // itself has no such de-dup, and this rebuilds on every notifier change while the popup is open.
@@ -65,19 +64,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       _linkDialogMachineId = null;
     });
-  }
-
-  void _openFilter() {
-    // Folded, the filter has nowhere to appear — open the rail first, then ask
-    // for the field on the frame that has one.
-    if (_collapsed) {
-      setState(() => _collapsed = false);
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _railKey.currentState?.openFilter(),
-      );
-      return;
-    }
-    _railKey.currentState?.openFilter();
   }
 
   /// Every agent the rail is currently showing, in the order it shows them.
@@ -169,7 +155,6 @@ class _HomeScreenState extends State<HomeScreen> {
             handlers: {
               ShortcutAction.toggleRail: () =>
                   setState(() => _collapsed = !_collapsed),
-              ShortcutAction.filterAgents: _openFilter,
               ShortcutAction.nextAgent: () => _stepAgent(1),
               ShortcutAction.previousAgent: () => _stepAgent(-1),
               ShortcutAction.focusNextPane: () => _stepPane(1),
@@ -239,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 children: [
                                   _RailFold(
                                     notifier: notifier,
-                                    railKey: _railKey,
                                     collapsed: _collapsed,
                                     wideWidth: railWidth,
                                     onCollapse: () =>
@@ -334,7 +318,6 @@ class _HomeScreenState extends State<HomeScreen> {
 class _RailFold extends StatelessWidget {
   const _RailFold({
     required this.notifier,
-    required this.railKey,
     required this.collapsed,
     required this.wideWidth,
     required this.onCollapse,
@@ -343,9 +326,6 @@ class _RailFold extends StatelessWidget {
 
   final AppNotifier notifier;
 
-  /// Lets ⌘F reach the filter field, which the rail owns but the key that
-  /// opens it cannot be bound inside — it has to sit above the terminal.
-  final GlobalKey<MachineRailState> railKey;
   final bool collapsed;
   final double wideWidth;
   final VoidCallback onCollapse;
@@ -403,7 +383,6 @@ class _RailFold extends StatelessWidget {
                         child: Transform.translate(
                           offset: Offset(-_drift * (1 - open), 0),
                           child: MachineRail(
-                            key: railKey,
                             notifier: notifier,
                             onCollapse: onCollapse,
                           ),

@@ -55,46 +55,13 @@ class MachineRail extends StatefulWidget {
   const MachineRail({super.key, required this.notifier, this.onCollapse});
 
   @override
-  State<MachineRail> createState() => MachineRailState();
+  State<MachineRail> createState() => _MachineRailState();
 }
 
-/// Public so ⌘F can reach the filter it already draws — the field lives in the
-/// rail's head, but the key that opens it has to be bound above the terminal.
-class MachineRailState extends State<MachineRail> {
+class _MachineRailState extends State<MachineRail> {
   /// The wordmark strip. The same 46px the terminal panes draw, so the
   /// wordmark and a pane's title sit on one baseline.
   static const _headerHeight = 46.0;
-
-  /// The filter box. Shorter than [grid.AppControl.heightField]'s 36 on
-  /// purpose: this one is chrome inside a toolbar, not a field in a form, and
-  /// at 36 it made the header taller than the first two rows of the list it is
-  /// meant to introduce.
-  static const _filterHeight = 30.0;
-
-  String _query = '';
-  final FocusNode _filterFocus = FocusNode();
-  final TextEditingController _filter = TextEditingController();
-
-  /// Puts the caret in the filter. There is nothing to open any more — the box
-  /// is always drawn — so ⌘F is now purely "type here", and pressing it twice
-  /// never takes away what the user just asked for.
-  void openFilter() => _filterFocus.requestFocus();
-
-  @override
-  void dispose() {
-    _filterFocus.dispose();
-    _filter.dispose();
-    super.dispose();
-  }
-
-  /// The filter's rim. 8px, one step tighter than a form field's, because this
-  /// box is 30 tall rather than 36 and the same radius on a shorter box reads
-  /// as rounder than its neighbours.
-  static OutlineInputBorder _filterBorder(Color color, {double width = 1}) =>
-      OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: color, width: width),
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -106,31 +73,15 @@ class MachineRailState extends State<MachineRail> {
     return ListenableBuilder(
       listenable: widget.notifier,
       builder: (context, _) {
-        final filteredMachines = widget.notifier.machines.where((machine) {
-          if (_query.isEmpty) return true;
-          final state = widget.notifier.stateOf(machine.machineId);
-          return machine.displayName.toLowerCase().contains(_query) ||
-              (state?.agents.any(
-                    (agent) =>
-                        agent.name.toLowerCase().contains(_query) ||
-                        (agent.engine?.toLowerCase().contains(_query) ??
-                            false) ||
-                        (agent.engineDisplayName?.toLowerCase().contains(
-                              _query,
-                            ) ??
-                            false),
-                  ) ??
-                  false);
-        }).toList();
         // Keep the current computer immediately reachable while preserving
         // the backend order for every other machine.
         final machines = <Machine>[
-          ...filteredMachines.where(
+          ...widget.notifier.machines.where(
             (machine) =>
                 widget.notifier.stateOf(machine.machineId)?.isLocalMachine ==
                 true,
           ),
-          ...filteredMachines.where(
+          ...widget.notifier.machines.where(
             (machine) =>
                 widget.notifier.stateOf(machine.machineId)?.isLocalMachine !=
                 true,
@@ -140,18 +91,12 @@ class MachineRailState extends State<MachineRail> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // The rail's head is a TOOLBAR, and it is built to look like one:
-            // its own surface, its own bottom edge, and the filter box living
-            // inside it rather than floating under it.
+            // its own surface and its own bottom edge.
             //
             // It used to be a wordmark and three glyphs on the same fill as the
             // list, with no edge under them — so "Harness" read as the first
             // entry in the rail rather than as the thing above the entries, and
             // the three buttons bunched into the right corner 2px apart.
-            //
-            // The filter is no longer behind a toggle. A magnifier that swaps a
-            // box in and out changed the rail's height on a click and spent a
-            // button on hiding a control that costs 30px; drawn always, it also
-            // tells the user the rail can be filtered without them guessing.
             //
             // [grid.AppSurface.recess] over the rail's own fill, not a colour
             // of its own: it is an overlay, so it separates in BOTH themes —
@@ -248,84 +193,6 @@ class MachineRailState extends State<MachineRail> {
                       ),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                    child: SizedBox(
-                      height: _filterHeight,
-                      child: TextField(
-                        key: const Key('rail-filter-field'),
-                        controller: _filter,
-                        focusNode: _filterFocus,
-                        style: grid.kFieldTextStyle.copyWith(fontSize: 12.5),
-                        // The app's field theme builds a 36px form control with
-                        // a 10px gutter and a full rim. Inside a toolbar that
-                        // is the wrong object, so the metrics are restated here
-                        // — the tokens are not: fill, rim and ink all still
-                        // come from the palette.
-                        decoration: InputDecoration(
-                          isDense: true,
-                          filled: true,
-                          // The rail's OWN fill, not another `recess` on top of
-                          // the toolbar's. `recess` lightens in dark and darkens
-                          // in light — it always raises a surface off its
-                          // ground — so stacking it here built the field UP out
-                          // of the toolbar when the whole point is that it sits
-                          // down in it. Painting it back at the rail's level
-                          // makes the three layers read in the right order:
-                          // list, toolbar above it, field cut back down into
-                          // the toolbar. Which is also a Finder search field —
-                          // white, in a toolbar greyer than the list below.
-                          fillColor: grid.AppGlass.sidebarFill,
-                          hintText: 'Filter machines and agents',
-                          hintStyle: TextStyle(
-                            color: grid.AppPalette.textFaint,
-                            fontFamily: grid.AppFont.sans,
-                            fontSize: 12.5,
-                          ),
-                          constraints: const BoxConstraints(
-                            minHeight: _filterHeight,
-                            maxHeight: _filterHeight,
-                          ),
-                          contentPadding: const EdgeInsets.fromLTRB(0, 0, 8, 0),
-                          prefixIcon: Icon(
-                            LucideIcons.search300,
-                            size: 14,
-                            color: grid.AppPalette.textFaint,
-                          ),
-                          prefixIconConstraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: _filterHeight,
-                          ),
-                          // A suffix that only exists once there is something
-                          // to clear — an ✕ on an empty box is a button that
-                          // does nothing.
-                          suffixIcon: _query.isEmpty
-                              ? null
-                              : AppIconButton(
-                                  icon: LucideIcons.x300,
-                                  size: 13,
-                                  tooltip: 'Clear filter',
-                                  onPressed: () {
-                                    _filter.clear();
-                                    setState(() => _query = '');
-                                  },
-                                ),
-                          suffixIconConstraints: const BoxConstraints(
-                            minWidth: 28,
-                            minHeight: _filterHeight,
-                          ),
-                          border: _filterBorder(grid.AppGlass.hair),
-                          enabledBorder: _filterBorder(grid.AppGlass.hair),
-                          focusedBorder: _filterBorder(
-                            grid.AppPalette.accentOnSurface,
-                            width: 1.4,
-                          ),
-                        ),
-                        onChanged: (value) =>
-                            setState(() => _query = value.trim().toLowerCase()),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -352,7 +219,6 @@ class MachineRailState extends State<MachineRail> {
                       itemBuilder: (context, index) => _MachineNode(
                         notifier: widget.notifier,
                         machine: machines[index],
-                        query: _query,
                         isFirst: index == 0,
                       ),
                     ),
@@ -463,12 +329,10 @@ class _MachineNode extends StatefulWidget {
 
   final AppNotifier notifier;
   final Machine machine;
-  final String query;
 
   const _MachineNode({
     required this.notifier,
     required this.machine,
-    required this.query,
     required this.isFirst,
   });
 
@@ -483,7 +347,6 @@ class _MachineNodeState extends State<_MachineNode> {
 
   AppNotifier get notifier => widget.notifier;
   Machine get machine => widget.machine;
-  String get query => widget.query;
 
   Future<void> _showRenameDialog() async {
     final controller = TextEditingController(text: machine.displayName);
@@ -631,7 +494,7 @@ class _MachineNodeState extends State<_MachineNode> {
       // Hoisted so the rows are not rebuilt on every frame of the fold. Built
       // here but only *mounted* below while `fold > 0`, so a closed machine
       // costs nothing.
-      child: _AgentTree(notifier: notifier, state: state, query: query),
+      child: _AgentTree(notifier: notifier, state: state),
       builder: (context, fold, tree) =>
           _node(context, fold, tree!, state, connectionColor),
     );
@@ -856,12 +719,10 @@ class _MachineNodeState extends State<_MachineNode> {
 class _AgentTree extends StatelessWidget {
   final AppNotifier notifier;
   final MachineState state;
-  final String query;
 
   const _AgentTree({
     required this.notifier,
     required this.state,
-    required this.query,
   });
 
   @override
@@ -902,18 +763,7 @@ class _AgentTree extends StatelessWidget {
           : null;
       byParent.putIfAbsent(parent, () => []).add(agent);
     }
-    final visible = query.isEmpty
-        ? state.agents.map((agent) => agent.id).toSet()
-        : state.agents
-              .where(
-                (agent) =>
-                    agent.name.toLowerCase().contains(query) ||
-                    (agent.engine?.toLowerCase().contains(query) ?? false) ||
-                    (agent.engineDisplayName?.toLowerCase().contains(query) ??
-                        false),
-              )
-              .map((agent) => agent.id)
-              .toSet();
+    final visible = state.agents.map((agent) => agent.id).toSet();
 
     final rows = <Widget>[
       for (final root in byParent[null] ?? const <Agent>[])

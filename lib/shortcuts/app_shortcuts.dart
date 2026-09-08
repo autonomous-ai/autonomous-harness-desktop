@@ -46,7 +46,6 @@ import '../logging/debug_surface.dart';
 
 enum ShortcutAction {
   toggleRail,
-  filterAgents,
   nextAgent,
   previousAgent,
   focusPreviousPane,
@@ -109,13 +108,6 @@ const List<AppShortcut> kAppShortcuts = [
       shift: true,
     ),
     label: 'Previous agent',
-    group: ShortcutGroup.navigate,
-  ),
-  AppShortcut(
-    action: ShortcutAction.filterAgents,
-    // "Find" — the rail already has the field, it just had no key.
-    activator: SingleActivator(LogicalKeyboardKey.keyF, meta: true),
-    label: 'Filter machines and agents',
     group: ShortcutGroup.navigate,
   ),
   AppShortcut(
