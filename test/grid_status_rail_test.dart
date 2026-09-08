@@ -148,7 +148,9 @@ void main() {
     // trailing `.0` — 1024 GB of 1740 is "1 / 1.7 TB".
     expect(find.text('1 / 1.7 TB'), findsOneWidget);
     expect(find.text('92.4M'), findsOneWidget);
-    expect(find.text(' / 24h'), findsOneWidget);
+    // The figure names what it counts on screen, not only to a screen reader:
+    // a bare `92.4M / 24h` is a number nobody can read without hovering it.
+    expect(find.text(' tokens / 24h'), findsOneWidget);
     // What it is MADE OF, on the right.
     expect(find.text('33'), findsOneWidget);
     expect(find.text('8'), findsOneWidget);

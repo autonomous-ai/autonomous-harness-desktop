@@ -277,9 +277,10 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   machine and that is far too short to browse. Both are shown, labelled apart. A version's
   `pull_spec` names only the FIRST file, so a split GGUF is downloaded through every URL in `urls`
   (`share/pull_spec.dart`) — pulling the named one alone leaves a model that will not load.
-- **The status rail is the app's one polling reader** (`lib/widgets/status_rail/`,
+- **The status rail is where the app polls** (`lib/widgets/status_rail/`,
   `grid/grid_overview_controller.dart`): a 26px full-bleed strip along the window's bottom edge
-  showing what the chosen grid is made of. Its data is `GET {relay}/grid/overview` — the RELAY, not
+  showing what the chosen grid is made of. Two pollers now hang off it, never both at once — the grid
+  overview below, and the agent-account usage further down. Its data is `GET {relay}/grid/overview` — the RELAY, not
   the control plane, because the relay is what dispatches the work — reached with a fresh key from
   `credentials(networkId)` every 60s. **A figure the relay did not send is null, never zero**: a zero
   is a measurement and a blank is an admission, and on this strip the difference is the whole point.
@@ -295,6 +296,35 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
   `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
   exist to fit.
+- **Agent-account usage is the rail's OTHER readout, and it stands exactly where the grid's
+  cannot** (`lib/usage/`, `widgets/status_rail/usage_readout.dart` + `usage_panel.dart`). With a grid
+  chosen the strip reads the grid; with none — or in a build where `kGridSurfaceEnabled` is off — it
+  reads what the Claude and Codex accounts on this machine have spent. The two never share the strip,
+  which is why they share one hover/pin surface (`rail_figure.dart`, extracted from the grid rail
+  rather than copied) and one `_PanelKind`. It replaced the words "No grid chosen", a sentence that
+  tells someone what they already know and hands a riddle to anyone whose build has no picker.
+  **This is the SECOND exception to "the app talks only to the local CLI"**, after Grid, and it is a
+  narrower one: nothing here is dialled on the app's own behalf. `UsageCredentials` reads the tokens
+  the agent CLIs already wrote — the macOS Keychain item `Claude Code-credentials` (falling back to
+  `~/.claude/.credentials.json`, which is all Linux has) and `~/.codex/auth.json` — and spends them
+  against the vendors' own usage endpoints. It never writes or refreshes them: one sign-in per
+  machine, owned by the CLI that made it, the same rule Grid follows with `credentials.toml`.
+  A rate limit is scoped to an **account**, not a machine, so reading it here is right even though
+  the agents run elsewhere — provided the remote machines sign in as the same account. They are also
+  the reason this poller is not gated on a grid: an account's limit is true with no grid at all.
+  ⚠️ **Both endpoints are undocumented** — `api.anthropic.com/api/oauth/usage` (needs
+  `anthropic-beta: oauth-2025-04-20` and the CLI's own user agent, because the OAuth token was minted
+  for the CLI) and `chatgpt.com/backend-api/wham/usage`. Either can change without notice; both
+  failures land as a `ProviderUsage` state rather than an exception. **`signedOut` is kept apart from
+  `failed`** for the reason Grid keeps `GridNetworksSignedOut` apart from `GridNetworksFailed`:
+  retrying a sign-out fails identically forever. Claude's Fable window has been spelled three ways
+  across releases and all three are tried; Codex names its windows from `limit_window_seconds` rather
+  than assuming, because a confident "5h" beside a real percentage reads as measured.
+  `loading` is false **before** `start()` as well as after the first answer — a controller nobody
+  started is not waiting for anything, and a skeleton for it would promise an answer never coming.
+  That is also what keeps `flutter test` honest: `kUnderTest` (`core/test_run.dart`, shared with
+  `AnalyticsConfig`) stops the poll auto-starting, since a `Timer.periodic` is a `pumpAndSettle` that
+  never settles and these sources would otherwise shell out to `security` and open real sockets.
 - **The rail's two panels open the only surfaces this app grew that the CLI
   knows nothing about.** "View dashboard" opens the node dashboard
   (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`
