@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../autonomous_device/autonomous_device_cli.dart';
 import '../../core/test_run.dart';
 import '../../shared/widgets/app_icon_button.dart';
+import '../../shared/widgets/app_select_field.dart';
 import '../../shared/widgets/labeled_field.dart';
 import '../../shared/widgets/setting_row.dart';
 import '../../shared/widgets/skeleton.dart';
@@ -24,13 +24,15 @@ class _DevicesSectionState extends State<DevicesSection> {
   late final AutonomousDeviceCli _cli = widget.cli ?? AutonomousDeviceCli();
   Timer? _timer;
   final _code = TextEditingController();
-  bool _replace = false;
   bool _loading = true;
   bool _busy = false;
   bool _refreshing = false;
   int _generation = 0;
   bool _unsupported = false;
   String? _error;
+  String? _actionError;
+  String? _selectedDevice;
+  List<Map<String, dynamic>> _discovered = [];
   Map<String, dynamic> _status = {};
   Map<String, dynamic> _pair = {};
   List<Map<String, dynamic>> _devices = [];
@@ -45,15 +47,12 @@ class _DevicesSectionState extends State<DevicesSection> {
     unawaited(_refresh());
   }
 
-  bool get _pairing =>
-      const {'listening', 'waiting', 'running'}.contains(_pair['state']);
-
   void _scheduleRefresh() {
     _timer?.cancel();
     // Tests may inject a fake for the initial fetch and user actions, but must
     // never start a background clock or invoke a real CLI.
     if (!mounted || kUnderTest || _unsupported || _busy) return;
-    _timer = Timer(Duration(seconds: _pairing ? 2 : 60), () {
+    _timer = Timer(const Duration(seconds: 60), () {
       unawaited(_refresh());
     });
   }
@@ -62,14 +61,13 @@ class _DevicesSectionState extends State<DevicesSection> {
   void dispose() {
     _timer?.cancel();
     _code.dispose();
-    // Leaving the screen does not revoke trust or stop the daemon. An open
-    // pairing window expires at the CLI's deadline unless explicitly cancelled.
+    // Leaving the screen does not revoke trust or stop the daemon.
     super.dispose();
   }
 
   void _failed(Object error) {
     _error = error is AutonomousDeviceCliException
-        ? error.message
+        ? error.userMessage
         : 'Could not reach the Harness CLI.';
     if (error is AutonomousDeviceCliException && error.unsupported) {
       _unsupported = true;
@@ -82,32 +80,33 @@ class _DevicesSectionState extends State<DevicesSection> {
     final generation = _generation;
     try {
       final status = await _cli.status();
-      final results = await Future.wait([_cli.list(), _cli.pairStatus()]);
+      final results = await Future.wait([_cli.list(), _cli.discover()]);
       if (!mounted || generation != _generation) return;
       final devices = <Map<String, dynamic>>[
         for (final row in results[0]['devices'] as List? ?? [])
           if (row is Map<String, dynamic>) row,
       ];
-      final pair = <String, dynamic>{...results[1]}..remove('code');
-      for (final key in ['address', 'machineName']) {
-        if (pair[key] == null && _pair[key] != null) pair[key] = _pair[key];
-      }
-      if (pair['state'] != 'waiting' ||
-          pair['pairId'] != _pair['pairId'] ||
-          pair['expiresAt'] != _pair['expiresAt'] ||
-          _secondsRemaining(pair) <= 0) {
+      final discovered = <Map<String, dynamic>>[
+        for (final row in results[1]['devices'] as List? ?? [])
+          if (row is Map<String, dynamic> &&
+              row['id'] is String &&
+              (row['id'] as String).isNotEmpty)
+            row,
+      ];
+      if (_selectedDevice != null &&
+          !discovered.any((device) => device['id'] == _selectedDevice)) {
+        _selectedDevice = null;
         _code.clear();
       }
       if (_loading ||
           _unsupported ||
           _error != null ||
-          jsonEncode([status, devices, pair]) !=
-              jsonEncode([_status, _devices, _pair]) ||
-          _pairing) {
+          jsonEncode([status, devices, discovered]) !=
+              jsonEncode([_status, _devices, _discovered])) {
         setState(() {
           _status = status;
           _devices = devices;
-          _pair = pair;
+          _discovered = discovered;
           _loading = false;
           _unsupported = false;
           _error = null;
@@ -173,100 +172,60 @@ class _DevicesSectionState extends State<DevicesSection> {
     setState(() {
       _busy = true;
       _error = null;
+      _actionError = null;
     });
     try {
       await action();
     } catch (error) {
-      if (mounted) setState(() => _failed(error));
+      if (mounted) {
+        setState(
+          () => _actionError = error is AutonomousDeviceCliException
+              ? error.userMessage
+              : 'Could not reach the Harness CLI.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
       _scheduleRefresh();
     }
   }
 
-  Future<void> _start() async {
-    // CLI AutonomousDeviceTransport.pairStart only stages a candidate; receive confirms it
-    // after authenticated autonomous_device_finished, then disconnects the previous Autonomous device.
-    final replace = _devices.isNotEmpty;
-    if (replace &&
-        !await _confirm(
-          'Replace paired Autonomous device?',
-          'The current Autonomous device keeps access until the new Autonomous device connects securely. '
-              'Cancelling or letting the code expire keeps the current pairing.',
-          'Replace Autonomous device',
-        )) {
-      return;
-    }
-    if (!mounted) return;
-    await _act(() async {
-      final result = await _cli.listen(replace: replace);
-      if (mounted) {
-        setState(() {
-          _replace = replace;
-          _code.clear();
-          _pair = {...result, 'state': 'listening'}..remove('code');
-        });
-      }
-    });
-  }
-
   Future<void> _submitCode() async {
-    final pairId = _pair['pairId'];
-    // Match Harness core.normalizeCode before validating the Crockford alphabet.
-    final code = _code.text
-        .toUpperCase()
-        .replaceAll(RegExp(r'[\s\-·_]'), '')
-        .replaceAll('I', '1')
-        .replaceAll('L', '1')
-        .replaceAll('O', '0')
-        .replaceAll('U', 'V');
-    if (_busy ||
-        _pair['state'] != 'waiting' ||
-        pairId is! String ||
-        _remaining <= 0) {
+    final deviceId = _selectedDevice;
+    final code = normalizeAutonomousDeviceCode(_code.text);
+    if (_busy) return;
+    if (deviceId == null ||
+        !_discovered.any((device) => device['id'] == deviceId)) {
+      setState(
+        () => _actionError = 'Select your discovered Autonomous device first.',
+      );
       return;
     }
-    if (!RegExp(r'^[0-9A-HJKMNP-TV-Z]{6}$').hasMatch(code)) {
+    if (!RegExp(r'^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$').hasMatch(code)) {
       setState(
-        () => _error =
+        () => _actionError =
             'Enter the six-character code shown on your Autonomous device.',
       );
       return;
     }
-    if (_devices.isNotEmpty && !_replace) {
-      if (!await _confirm(
-        'Replace paired Autonomous device?',
-        'The current Autonomous device keeps access until its replacement connects securely.',
-        'Replace Autonomous device',
-      )) {
-        return;
-      }
-      if (!mounted) return;
-      _replace = true;
-    }
     await _act(() async {
       _code.clear();
-      // Verify the pending intent before submitting; the CLI also checks pair-id.
-      final fresh = await _cli.pairStatus();
-      if (fresh['state'] != 'waiting' ||
-          fresh['pairId'] != pairId ||
-          fresh['expiresAt'] != _pair['expiresAt'] ||
-          _remaining <= 0) {
-        throw const AutonomousDeviceCliException(
-          'STALE_PAIR',
-          'The pairing request changed. Refresh and enter the code from the current Autonomous device.',
-        );
-      }
-      final result = await _cli.pair(
-        code: code,
-        pairId: pairId,
-        replace: _replace,
-      );
+      // The daemon resolves this selected discovery identity, never a UI address.
+      final result = await _cli.pair(code: code, deviceId: deviceId);
       if (mounted) {
-        setState(
-          () =>
-              _pair = {..._pair, ...result, 'state': 'running'}..remove('code'),
-        );
+        setState(() {
+          _pair = {...result, 'state': 'paired'}..remove('code');
+          _selectedDevice = null;
+        });
+        final devices = await _cli.list();
+        if (mounted) {
+          setState(
+            () => _devices = [
+              for (final row in devices['devices'] as List? ?? [])
+                if (row is Map<String, dynamic>) row,
+            ],
+          );
+        }
       }
     });
   }
@@ -287,37 +246,10 @@ class _DevicesSectionState extends State<DevicesSection> {
     });
   }
 
-  int get _remaining => _secondsRemaining(_pair);
-
-  int _secondsRemaining(Map<String, dynamic> pair) {
-    final raw = pair['expiresAt'];
-    final expiry = raw is num
-        ? DateTime.fromMillisecondsSinceEpoch(raw.toInt())
-        : raw is String
-        ? DateTime.tryParse(raw)
-        : null;
-    if (expiry == null) return 0;
-    return math.max(
-      0,
-      (expiry.difference(DateTime.now()).inMilliseconds + 999) ~/ 1000,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final disabled = _busy || _loading || (kUnderTest && widget.cli == null);
-    final remaining = _remaining;
-    final pairError = switch (_pair['error']) {
-      'CODE_MISMATCH' =>
-        'That code did not match. Check the device and try again.',
-      'RATE_LIMITED' =>
-        'Too many pairing attempts. Start a new pairing window and try again.',
-      'EXPIRED' => 'The pairing window expired. Start again to retry.',
-      'CANCELLED' => null,
-      final String value when value.isNotEmpty => 'Pairing failed: $value',
-      _ => _pair['state'] == 'failed' ? 'Start again to retry.' : null,
-    };
     Widget action(String label, VoidCallback? onPressed) => SizedBox(
       width: SettingRow.controlWidth,
       child: OutlinedButton(onPressed: onPressed, child: Text(label)),
@@ -339,7 +271,7 @@ class _DevicesSectionState extends State<DevicesSection> {
     );
     return SectionScaffold(
       title: 'Devices',
-      subtitle: 'Pair one Autonomous device with this computer.',
+      subtitle: 'Connect directly to your Autonomous device.',
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -371,11 +303,11 @@ class _DevicesSectionState extends State<DevicesSection> {
                   child: SelectableText('harness update'),
                 ),
               ),
-            if (_error != null && !_unsupported)
+            if ((_actionError != null || _error != null) && !_unsupported)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
-                  _error!,
+                  _actionError ?? _error!,
                   style: TextStyle(
                     fontFamily: grid.AppFont.sans,
                     fontSize: 13,
@@ -403,112 +335,84 @@ class _DevicesSectionState extends State<DevicesSection> {
                 fact('Fingerprint', device['fingerprint']?.toString() ?? ''),
                 const SizedBox(height: 10),
               ],
-              if (_pairing) ...[
-                fact(
-                  'Computer address',
-                  (_pair['address'] ?? _status['address'] ?? '').toString(),
-                  detail: (_pair['machineName'] ?? '').toString(),
-                ),
-                const SizedBox(height: 10),
-                SettingRow(
-                  title: _pair['state'] == 'running'
-                      ? 'Pairing…'
-                      : _pair['state'] == 'listening'
-                      ? 'Waiting for your Autonomous device'
-                      : 'Enter the code from your Autonomous device',
-                  detail: remaining > 0
-                      ? 'Open Harness pairing on your Autonomous device and enter this computer address. Expires in $remaining seconds.'
-                      : 'The pairing window expired. Cancel and start again.',
-                  control: action(
-                    'Cancel pairing',
-                    disabled
-                        ? null
-                        : () => _act(() async {
-                            await _cli.cancel();
-                            if (mounted) {
-                              setState(() {
-                                _pair = {'state': 'idle'};
-                                _code.clear();
-                                _replace = false;
-                              });
-                            }
-                          }),
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (_pair['state'] == 'waiting' &&
-                  _pair['pairId'] is String &&
-                  remaining > 0) ...[
-                SettingRow(
-                  title: 'Code from Autonomous device',
-                  detail:
-                      _pair['deviceLabel']?.toString() ??
-                      'The code appears on your Autonomous device.',
-                  control: SizedBox(
-                    width: SettingRow.controlWidth,
-                    child: TextField(
-                      key: const Key('autonomous-device-code'),
-                      controller: _code,
-                      enabled: !disabled,
-                      maxLength: 6,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      style: TextStyle(
-                        fontFamily: grid.AppFont.sans,
-                        fontSize: 13,
-                        color: grid.AppPalette.textPrimary,
-                      ),
-                      decoration: labeledFieldDecoration(
-                        'Six-character code',
-                        fill: grid.AppCard.inset,
-                      ).copyWith(counterText: ''),
-                      onSubmitted: (_) => unawaited(_submitCode()),
+              SettingRow(
+                title: 'Autonomous device',
+                detail: _discovered.isEmpty
+                    ? 'No Autonomous devices found. Keep your device powered on and on the same network, then refresh.'
+                    : 'Choose the Autonomous device showing your pairing code.',
+                control: SizedBox(
+                  width: SettingRow.controlWidth,
+                  child: IgnorePointer(
+                    ignoring: disabled,
+                    child: AppSelectField<String?>(
+                      key: const Key('autonomous-device-selection'),
+                      value: _selectedDevice,
+                      options: [
+                        const SelectOption<String?>(
+                          value: null,
+                          label: 'Select a device',
+                        ),
+                        for (final device in _discovered)
+                          SelectOption<String?>(
+                            value: device['id'] as String,
+                            label:
+                                device['name']?.toString() ??
+                                'Autonomous device',
+                          ),
+                      ],
+                      onChanged: (value) => setState(() {
+                        _selectedDevice = value;
+                        _code.clear();
+                        _actionError = null;
+                      }),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                SettingRow(
-                  title: 'Confirm pairing',
-                  detail: 'The code is sent privately to Harness CLI.',
-                  control: action(
-                    'Connect Autonomous device',
-                    disabled ? null : () => unawaited(_submitCode()),
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (_pair['state'] == 'paired') ...[
-                fact(
-                  'Autonomous device paired successfully.',
-                  _pair['deviceFingerprint']?.toString() ?? '',
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (pairError != null) ...[
-                SettingRow(
-                  title: 'Pairing failed',
-                  detail: pairError,
-                  control: const SizedBox.shrink(),
-                ),
-                const SizedBox(height: 10),
-              ],
+              ),
+              const SizedBox(height: 10),
               SettingRow(
-                title: _devices.isEmpty
-                    ? 'No Autonomous device paired'
-                    : 'Pair another Autonomous device',
-                detail: _devices.isEmpty
-                    ? 'Connect an Autonomous device to this computer’s agents.'
-                    : 'The current Autonomous device keeps access until its replacement connects securely.',
-                control: action(
-                  _devices.isEmpty
-                      ? 'Pair an Autonomous device'
-                      : 'Replace Autonomous device',
-                  disabled || _pairing ? null : _start,
+                title: 'Code from Autonomous device',
+                detail: 'Enter the six-character code from your Autonomous device. Separators are allowed, for example ABC-123.',
+                control: SizedBox(
+                  width: SettingRow.controlWidth,
+                  child: TextField(
+                    key: const Key('autonomous-device-code'),
+                    controller: _code,
+                    enabled: !disabled,
+                    maxLength: 32,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    style: TextStyle(
+                      fontFamily: grid.AppFont.sans,
+                      fontSize: 13,
+                      color: grid.AppPalette.textPrimary,
+                    ),
+                    decoration: labeledFieldDecoration(
+                      'Six-character code',
+                      fill: grid.AppCard.inset,
+                    ).copyWith(counterText: ''),
+                    onSubmitted: (_) => unawaited(_submitCode()),
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
+              SettingRow(
+                title: _busy ? 'Pairing…' : 'Pair an Autonomous device',
+                detail: 'The Mac connects directly to your selected Autonomous device.',
+                control: action(
+                  'Connect Autonomous device',
+                  disabled ? null : () => unawaited(_submitCode()),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (_pair['state'] == 'paired') ...[
+                fact(
+                  'Autonomous device paired successfully.',
+                  _pair['fingerprint']?.toString() ?? '',
+                ),
+                const SizedBox(height: 10),
+              ],
             ],
             SettingRow(
               title: 'Refresh',

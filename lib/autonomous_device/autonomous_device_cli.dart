@@ -4,10 +4,25 @@ import 'dart:convert';
 import '../core/harness_cli_runner.dart';
 import '../core/test_run.dart';
 
+/// Matches the original Harness core.normalizeCode without exposing the secret.
+String normalizeAutonomousDeviceCode(String code) => code
+    .toUpperCase()
+    .replaceAll(RegExp(r'[\s\-·_]'), '')
+    .replaceAll('I', '1')
+    .replaceAll('L', '1')
+    .replaceAll('O', '0')
+    .replaceAll('U', 'V');
+
 class AutonomousDeviceCliException implements Exception {
   const AutonomousDeviceCliException(this.code, this.message);
   final String code;
   final String message;
+  String get userMessage => switch (code) {
+    'CODE_MISMATCH' => 'That code did not match. Generate a new code on your Autonomous device, then try again.',
+    'RATE_LIMITED' => 'Too many pairing attempts. Wait five minutes, then generate a new code on your Autonomous device and try again.',
+    'EXPIRED' => 'The pairing code expired. Generate a new code on your Autonomous device, then try again.',
+    _ => message,
+  };
   bool get unsupported =>
       const {'NOT_FOUND', 'UNSUPPORTED', 'UNKNOWN_COMMAND'}.contains(code);
   @override
@@ -22,15 +37,15 @@ class AutonomousDeviceCli {
 
   Future<Map<String, dynamic>> status() => command('status');
   Future<Map<String, dynamic>> list() => command('list');
-  Future<Map<String, dynamic>> pairStatus() => command('pair-status');
-  Future<Map<String, dynamic>> listen({bool replace = false}) =>
-      command('listen', arguments: [if (replace) '--replace']);
+  Future<Map<String, dynamic>> discover() => command('discover');
   Future<Map<String, dynamic>> pair({
     required String code,
-    required String pairId,
-    bool replace = false,
+    required String deviceId,
   }) async {
-    if (!RegExp(r'^[A-Z0-9]{6}$').hasMatch(code) || pairId.isEmpty) {
+    final normalized = normalizeAutonomousDeviceCode(code);
+    if (!RegExp(r'^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$')
+            .hasMatch(normalized) ||
+        deviceId.isEmpty) {
       throw const AutonomousDeviceCliException(
         'BAD_REQUEST',
         'Enter the six-character code shown on your Autonomous device.',
@@ -38,17 +53,11 @@ class AutonomousDeviceCli {
     }
     return command(
       'pair',
-      arguments: [
-        '--code-stdin',
-        '--pair-id',
-        pairId,
-        if (replace) '--replace',
-      ],
-      secretStdin: code,
+      arguments: ['--code-stdin', '--device', deviceId],
+      secretStdin: normalized,
     );
   }
 
-  Future<Map<String, dynamic>> cancel() => command('cancel');
   Future<Map<String, dynamic>> revoke(String id) =>
       command('revoke', arguments: [id]);
 
@@ -76,7 +85,9 @@ class AutonomousDeviceCli {
     await process.stdin.close();
     final int exitCode;
     try {
-      exitCode = await process.exitCode.timeout(const Duration(seconds: 35));
+      exitCode = await process.exitCode.timeout(
+        Duration(seconds: operation == 'pair' ? 50 : 35),
+      );
     } on TimeoutException {
       process.kill();
       // A timed-out mutation may have succeeded. Read state before retrying it.
@@ -110,7 +121,7 @@ class AutonomousDeviceCli {
       ).hasMatch('$output\n$errorOutput');
       throw AutonomousDeviceCliException(
         unsupported ? 'UNKNOWN_COMMAND' : 'FAILED',
-        unsupported ? 'This Harness CLI does not support Autonomous devices.' : 'The Autonomous device command failed. Check that Harness is signed in and running.',
+        unsupported ? 'This Harness CLI does not support Autonomous devices.' : 'The Autonomous device command failed. Check that Harness is running and the device is on the same network.',
       );
     }
     return result;

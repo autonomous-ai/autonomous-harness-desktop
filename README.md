@@ -53,33 +53,32 @@ commit evidence before it sends terminal traffic to production.
 
 ## Autonomous device pairing
 
-Open **Settings → Devices → Pair an Autonomous device**. Desktop runs
-`harness autonomous-device listen --json` to open a 60-second listening window
-and shows this computer's address. On the Autonomous device, enter that address
-and start pairing: **the Autonomous device generates and displays the code**.
-Once its intent reaches Harness, Desktop shows a code input. Enter the code
-from the Autonomous device to confirm the matching request.
+Settings → Devices discovers Autonomous devices on the same network using the
+CLI's `_autonomous._tcp` discovery, reusing the device's existing advertisement. Start pairing on the Autonomous
+device to generate its code, select that device in Desktop, and enter the code.
+The Mac connects directly to the selected device without backend routing or a
+manually entered IP address. The device needs no backend credentials; Harness’s
+existing Mac login/start requirements remain unchanged.
 
-Desktop passes the code only through the stdin pipe of
-`harness autonomous-device pair --code-stdin --pair-id <id> --json`.
-It never puts the code in command arguments, logs, URLs or persisted settings.
-Status responses contain no code. Typed codes are cleared on submit, cancellation,
-expiry, a changed intent, or leaving the page; stale intents are never submitted.
+Desktop uses `harness autonomous-device discover --json` to populate the picker.
+The CLI resolves the selected discovery ID to its host and port. Pairing runs
+`harness autonomous-device pair --code-stdin --device <discoveryId> --json` through
+`HarnessCliRunner`; the code travels through stdin only, never argv or logs.
+Code normalization matches the original Harness pairing implementation, including
+Crockford aliases and separators. The original PAKE handshake authenticates the
+connection. Changing or losing the selected discovery identity clears entered
+code, and a code mismatch remains visible through background refreshes. A mismatch
+consumes the device pairing window: generate a new code before retrying. Rate
+limits require waiting five minutes before another attempt. Desktop allows the
+pair command fifty seconds to finish, beyond the CLI’s bounded handshake deadline.
 
-**Replace Autonomous device** requires confirmation before opening the listener.
-Both listen and pair carry `--replace`. The current Autonomous device keeps access
-until its replacement finishes an authenticated connection; cancelling or expiry
-preserves the incumbent. **Revoke Autonomous device** requires separate confirmation.
-Closing Desktop does not stop Harness CLI or revoke an existing pairing.
-
-Desktop polls `pair-status` every two seconds in `listening`, `waiting`, or `running`,
-and every sixty seconds otherwise. The CLI implements the protocol in
-`cli/src/lib/autonomous-device/transport.ts`; encrypted `autonomous_device_finished`
-confirms the new identity before replacement. An older CLI shows `harness update`.
-`lib/autonomous_device/autonomous_device_cli.dart` uses `HarnessCliRunner.start`
-(lifecycle logging only); tests inject a fake and disable real CLI execution and
-background polling. `test/autonomous_device_pairing_test.dart` covers device-owned
-codes, stdin-only command construction, intent changes and replacement confirmation.
+`status` and `list` report direct connections and saved device identities.
+Revocation requires confirmation and targets the complete saved fingerprint.
+Closing Desktop leaves the CLI daemon running. Discovery and status refresh every sixty seconds, including when no device is
+paired. Use Refresh to discover a newly started device immediately. Pasted codes
+may include separators, for example `ABC-123`. Older CLIs show `harness update`
+guidance. Widget tests inject a fake CLI, and the `kUnderTest` gate prevents real
+processes and background polling.
 
 ## Releases
 
@@ -97,6 +96,5 @@ make upload-node-runtime ARGS="22.23.2"
 See [RELEASE.md](RELEASE.md) for signing, notarization, versioning, managed
 Node runtime publishing, safe test releases, and rollback behavior.
 
-Pairing errors remain visible when the CLI returns to listening after a code mismatch.
-Desktop normalizes code look-alikes (`I/L → 1`, `O → 0`, `U → V`) like the CLI before
-checking the six-character Crockford alphabet. Exhausted attempts require a new window.
+Pairing failures use the original Harness manager's validation and attempt limits.
+If the device code expires, start pairing again on the Autonomous device.

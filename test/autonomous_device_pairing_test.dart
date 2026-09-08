@@ -4,21 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/autonomous_device/autonomous_device_cli.dart';
 import 'package:harness/shared/widgets/app_icon_button.dart';
+import 'package:harness/shared/widgets/app_select_field.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
 import 'package:harness/settings/sections/devices_section.dart';
 
 class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
-  bool paired = false;
-  int statusCalls = 0;
-  Duration window = const Duration(seconds: 60);
-  Map<String, dynamic> pairState = {'state': 'idle'};
-  Completer<void>? statusWait;
   bool unsupported = false;
-  final replacements = <bool>[];
+  int statusCalls = 0;
+  Completer<void>? statusWait;
+  String? pairFailure;
+  List<Map<String, dynamic>> discovered = [
+    {'id': 'device-1', 'name': 'Kitchen', 'host': '192.168.1.2', 'port': 5000},
+  ];
+  List<Map<String, dynamic>> devices = [];
   final submissions = <Map<String, dynamic>>[];
-  int expiry = DateTime.now()
-      .add(const Duration(seconds: 60))
-      .millisecondsSinceEpoch;
   final revoked = <String>[];
   @override
   Future<Map<String, dynamic>> status() async {
@@ -27,51 +26,33 @@ class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
     if (unsupported) {
       throw const AutonomousDeviceCliException('NOT_FOUND', 'Unsupported CLI');
     }
-    return {'proto': 1, 'address': '192.168.1.10:18474'};
+    return {'transport': 'direct', 'connected': true, 'paired': devices.length};
   }
 
   @override
-  Future<Map<String, dynamic>> list() async => {
-    'devices': [
-      if (paired)
-        {
-          'id': 'device-public-key',
-          'label': 'Kitchen',
-          'online': false,
-          'fingerprint': 'ABCD 1234',
-        },
-    ],
-  };
+  Future<Map<String, dynamic>> list() async => {'devices': devices};
   @override
-  Future<Map<String, dynamic>> pairStatus() async => pairState;
+  Future<Map<String, dynamic>> discover() async => {'devices': discovered};
   @override
-  Future<Map<String, dynamic>> listen({bool replace = false}) async {
-    replacements.add(replace);
+  Future<Map<String, dynamic>> pair({
+    required String code,
+    required String deviceId,
+  }) async {
+    submissions.add({'code': code, 'deviceId': deviceId});
+    if (pairFailure != null) {
+      throw AutonomousDeviceCliException('CODE_MISMATCH', pairFailure!);
+    }
     return {
-      'state': 'listening',
-      'address': '192.168.1.10:18474',
-      'expiresAt': expiry = DateTime.now().add(window).millisecondsSinceEpoch,
-      'machineName': 'My computer',
+      'state': 'paired',
+      'label': 'Autonomous device',
+      'fingerprint': '1234',
     };
   }
 
   @override
-  Future<Map<String, dynamic>> pair({
-    required String code,
-    required String pairId,
-    bool replace = false,
-  }) async {
-    submissions.add({'code': code, 'pairId': pairId, 'replace': replace});
-    return {'state': 'running'};
-  }
-
-  @override
-  Future<Map<String, dynamic>> cancel() async => {'cancelled': true};
-
-  @override
   Future<Map<String, dynamic>> revoke(String id) async {
     revoked.add(id);
-    paired = false;
+    devices.removeWhere((device) => device['id'] == id);
     return {'revoked': 1};
   }
 }
@@ -86,74 +67,212 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('listen shows address and asks the device to generate its code', (
+  final codeField = find.byKey(const Key('autonomous-device-code'));
+  Future<void> select(WidgetTester tester, String id) async {
+    tester
+        .widget<AppSelectField<String?>>(
+          find.byKey(const Key('autonomous-device-selection')),
+        )
+        .onChanged(id);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> submit(WidgetTester tester, String code) async {
+    await tester.enterText(codeField, code);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> refresh(WidgetTester tester) async {
+    await tester.ensureVisible(find.byType(AppIconButton));
+    await tester.tap(find.byType(AppIconButton));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'code input and discovery are immediate without address or intent',
+    (tester) async {
+      await open(tester, FakeAutonomousDeviceCli());
+      expect(codeField, findsOneWidget);
+      expect(
+        find.textContaining('Separators are allowed, for example ABC-123.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('autonomous-device-selection')),
+        findsOneWidget,
+      );
+      expect(find.text('Computer address'), findsNothing);
+      expect(find.text('Cancel pairing'), findsNothing);
+    },
+  );
+  testWidgets('single discovered device still requires explicit selection', (
     tester,
   ) async {
     final cli = FakeAutonomousDeviceCli();
     await open(tester, cli);
-    await tester.tap(find.text('Pair an Autonomous device'));
-    await tester.pumpAndSettle();
-    expect(cli.replacements, [false]);
-    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
-    expect(find.text('192.168.1.10:18474'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
+    await submit(tester, 'ABC234');
+    expect(cli.submissions, isEmpty);
+    expect(
+      find.text('Select your discovered Autonomous device first.'),
+      findsOneWidget,
+    );
   });
-
-  testWidgets('replacement requires explicit confirmation', (tester) async {
-    final cli = FakeAutonomousDeviceCli()..paired = true;
+  testWidgets(
+    'normalizes original Harness code and binds selected discovery identity',
+    (tester) async {
+      final cli = FakeAutonomousDeviceCli();
+      await open(tester, cli);
+      await select(tester, 'device-1');
+      await submit(tester, 'o-i_l·u23');
+      expect(cli.submissions, [
+        {'code': '011V23', 'deviceId': 'device-1'},
+      ]);
+      expect(tester.widget<TextField>(codeField).controller!.text, isEmpty);
+      expect(
+        find.text('Autonomous device paired successfully.'),
+        findsOneWidget,
+      );
+    },
+  );
+  testWidgets('changing selected device clears typed code', (tester) async {
+    final cli = FakeAutonomousDeviceCli()
+      ..discovered.add({'id': 'device-2', 'name': 'Desk'});
     await open(tester, cli);
-    expect(find.text('Paired · Offline'), findsOneWidget);
-    await tester.tap(find.text('Replace Autonomous device'));
-    await tester.pumpAndSettle();
-    expect(cli.replacements, isEmpty);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(cli.replacements, isEmpty);
-    await tester.tap(find.text('Replace Autonomous device'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('device-confirm')));
-    await tester.pumpAndSettle();
-    expect(cli.replacements, [true]);
-    expect(find.text('Kitchen'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
+    await select(tester, 'device-1');
+    await tester.enterText(codeField, 'ABC234');
+    await select(tester, 'device-2');
+    expect(tester.widget<TextField>(codeField).controller!.text, isEmpty);
+  });
+  testWidgets('lost discovery clears selection and never retargets code', (
+    tester,
+  ) async {
+    final cli = FakeAutonomousDeviceCli();
+    await open(tester, cli);
+    await select(tester, 'device-1');
+    await tester.enterText(codeField, 'ABC234');
+    cli.discovered = [
+      {'id': 'device-2', 'name': 'Desk'},
+    ];
+    await refresh(tester);
+    expect(tester.widget<TextField>(codeField).controller!.text, isEmpty);
+    expect(
+      tester
+          .widget<AppSelectField<String?>>(
+            find.byKey(const Key('autonomous-device-selection')),
+          )
+          .value,
+      isNull,
+    );
+    expect(cli.submissions, isEmpty);
+  });
+  testWidgets('code mismatch persists through successful status refresh', (
+    tester,
+  ) async {
+    final cli = FakeAutonomousDeviceCli()..pairFailure = 'CODE_MISMATCH';
+    await open(tester, cli);
+    await select(tester, 'device-1');
+    await submit(tester, 'ABC234');
+    await refresh(tester);
+    expect(
+      find.text(
+        'That code did not match. Generate a new code on your Autonomous device, then try again.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
-    'unsupported CLI offers update guidance without pairing actions',
+    'revocation confirms and targets the exact existing trust fingerprint',
     (tester) async {
-      await open(tester, FakeAutonomousDeviceCli()..unsupported = true);
-      expect(
-        find.text('Update Harness CLI to use Autonomous devices.'),
-        findsOneWidget,
-      );
-      expect(find.text('Unsupported CLI'), findsNothing);
-      expect(find.text('Pair an Autonomous device'), findsNothing);
-      expect(find.text('Refresh'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
+      final cli = FakeAutonomousDeviceCli()
+        ..devices = [
+          {
+            'id': 'fingerprint-1',
+            'fingerprint': 'fingerprint-1',
+            'label': 'Kitchen',
+            'online': true,
+          },
+          {
+            'id': 'fingerprint-2',
+            'fingerprint': 'fingerprint-2',
+            'label': 'Desk',
+            'online': false,
+          },
+        ];
+      await open(tester, cli);
+      await tester.tap(find.text('Revoke Autonomous device').first);
+      await tester.pumpAndSettle();
+      expect(cli.revoked, isEmpty);
+      await tester.tap(find.byKey(const Key('device-confirm')));
+      await tester.pumpAndSettle();
+      expect(cli.revoked, ['fingerprint-1']);
+      expect(cli.devices.single['id'], 'fingerprint-2');
     },
   );
 
-  testWidgets('default construction never calls the real CLI in tests', (
-    tester,
-  ) async {
+  testWidgets(
+    'empty discovery gives network guidance without implicit target',
+    (tester) async {
+      final cli = FakeAutonomousDeviceCli()..discovered = [];
+      await open(tester, cli);
+      expect(
+        find.textContaining('No Autonomous devices found.'),
+        findsOneWidget,
+      );
+      await submit(tester, 'ABC234');
+      expect(cli.submissions, isEmpty);
+    },
+  );
+  testWidgets(
+    'retry after mismatch pairs the same explicitly selected device',
+    (tester) async {
+      final cli = FakeAutonomousDeviceCli()..pairFailure = 'CODE_MISMATCH';
+      await open(tester, cli);
+      await select(tester, 'device-1');
+      await submit(tester, 'ABC234');
+      cli.pairFailure = null;
+      await submit(tester, 'DEF567');
+      expect(cli.submissions.map((row) => row['deviceId']), [
+        'device-1',
+        'device-1',
+      ]);
+      expect(
+        find.text(
+          'That code did not match. Generate a new code on your Autonomous device, then try again.',
+        ),
+        findsNothing,
+      );
+      expect(
+        find.text('Autonomous device paired successfully.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('unsupported CLI offers update guidance', (tester) async {
+    await open(tester, FakeAutonomousDeviceCli()..unsupported = true);
+    expect(
+      find.text('Update Harness CLI to use Autonomous devices.'),
+      findsOneWidget,
+    );
+    expect(codeField, findsNothing);
+  });
+
+  testWidgets('default construction never invokes a real CLI', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: DevicesSection())),
     );
     await tester.pumpAndSettle();
     await tester.pump(const Duration(minutes: 2));
     expect(tester.takeException(), isNull);
-    final refresh = tester.widget<AppIconButton>(find.byType(AppIconButton));
-    expect(refresh.onPressed, isNull);
-  });
-
-  test('real AutonomousDeviceCli refuses commands in tests', () async {
-    await expectLater(
-      AutonomousDeviceCli().status(),
-      throwsA(isA<AutonomousDeviceCliException>()),
+    expect(
+      tester.widget<AppIconButton>(find.byType(AppIconButton)).onPressed,
+      isNull,
     );
   });
 
-  testWidgets('injected CLI does not start background polling in tests', (
+  testWidgets('injected CLI has no background polling in tests', (
     tester,
   ) async {
     final cli = FakeAutonomousDeviceCli();
@@ -162,9 +281,7 @@ void main() {
     expect(cli.statusCalls, 1);
   });
 
-  testWidgets('first fetch shows a skeleton then replaces it with state', (
-    tester,
-  ) async {
+  testWidgets('first status request has a skeleton', (tester) async {
     final pending = Completer<void>();
     final cli = FakeAutonomousDeviceCli()..statusWait = pending;
     await tester.pumpWidget(
@@ -174,207 +291,28 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(SkeletonBlock), findsOneWidget);
-    expect(find.text('No Autonomous device paired'), findsNothing);
     pending.complete();
     await tester.pumpAndSettle();
     expect(find.byType(SkeletonBlock), findsNothing);
-    expect(find.text('No Autonomous device paired'), findsOneWidget);
   });
 
-  testWidgets('device intent reveals code input and submits the exact intent', (
-    tester,
-  ) async {
-    final cli = FakeAutonomousDeviceCli();
-    await open(tester, cli);
-    await tester.tap(find.text('Pair an Autonomous device'));
-    await tester.pumpAndSettle();
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'intent-1',
-      'deviceLabel': 'My Autonomous device',
-      'expiresAt': cli.expiry,
-    };
-    await tester.ensureVisible(find.byType(AppIconButton));
-    await tester.tap(find.byType(AppIconButton));
-    await tester.pumpAndSettle();
-    final field = find.byKey(const Key('autonomous-device-code'));
-    await tester.ensureVisible(field);
-    await tester.enterText(field, 'abc234');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(cli.submissions, [
-      {'code': 'ABC234', 'pairId': 'intent-1', 'replace': false},
-    ]);
-    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
-    await tester.pumpWidget(const SizedBox());
+  test('real CLI is unavailable under tests', () async {
+    await expectLater(
+      AutonomousDeviceCli().status(),
+      throwsA(isA<AutonomousDeviceCliException>()),
+    );
   });
 
-  testWidgets('stale intent refuses submission without sending a code', (
-    tester,
-  ) async {
-    final cli = FakeAutonomousDeviceCli();
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'old',
-      'expiresAt': cli.expiry,
-    };
-    await open(tester, cli);
-    final field = find.byKey(const Key('autonomous-device-code'));
-    await tester.ensureVisible(field);
-    await tester.enterText(field, 'ABC234');
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'new',
-      'expiresAt': cli.expiry,
-    };
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(cli.submissions, isEmpty);
-    expect(find.textContaining('The pairing request changed.'), findsOneWidget);
-    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets('polling a different intent clears typed code', (tester) async {
-    final cli = FakeAutonomousDeviceCli();
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'old',
-      'expiresAt': cli.expiry,
-    };
-    await open(tester, cli);
-    final field = find.byKey(const Key('autonomous-device-code'));
-    await tester.ensureVisible(field);
-    await tester.enterText(field, 'ABC234');
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'new',
-      'expiresAt': cli.expiry,
-    };
-    await tester.ensureVisible(find.byType(AppIconButton));
-    await tester.tap(find.byType(AppIconButton));
-    await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
-    await tester.pumpWidget(const SizedBox());
-  });
-
-  testWidgets(
-    'terminal status clears entered code and never displays a returned code',
-    (tester) async {
-      final cli = FakeAutonomousDeviceCli();
-      cli.pairState = {
-        'state': 'waiting',
-        'pairId': 'intent-1',
-        'expiresAt': cli.expiry,
-        'code': 'WRONG1',
-      };
-      await open(tester, cli);
-      final field = find.byKey(const Key('autonomous-device-code'));
-      final controller = tester.widget<TextField>(field).controller!;
-      expect(controller.text, isEmpty);
-      expect(find.text('WRONG1'), findsNothing);
-      await tester.ensureVisible(field);
-      await tester.enterText(field, 'ABC234');
-      cli.pairState = {'state': 'paired', 'deviceFingerprint': '1234'};
-      await tester.ensureVisible(find.byType(AppIconButton));
-      await tester.tap(find.byType(AppIconButton));
-      await tester.pumpAndSettle();
-      expect(controller.text, isEmpty);
-      expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
-
-  test('code is passed exclusively as stdin, never CLI arguments', () async {
+  test('pair code travels only through stdin and selected discovery identity is bound', () async {
     final cli = RecordingAutonomousDeviceCli();
-    await cli.pair(code: 'ABC234', pairId: 'intent-1', replace: true);
-    expect(cli.operation, 'pair');
-    expect(cli.arguments, [
-      '--code-stdin',
-      '--pair-id',
-      'intent-1',
-      '--replace',
-    ]);
+    await cli.pair(code: 'ABC234', deviceId: 'device-1');
+    expect(cli.arguments, ['--code-stdin', '--device', 'device-1']);
     expect(cli.arguments.join(' '), isNot(contains('ABC234')));
     expect(cli.secret, 'ABC234');
   });
-  testWidgets('mismatched code stays visible when CLI returns to listening', (
-    tester,
-  ) async {
-    final cli = FakeAutonomousDeviceCli()
-      ..pairState = {
-        'state': 'listening',
-        'error': 'CODE_MISMATCH',
-        'expiresAt': DateTime.now()
-            .add(const Duration(seconds: 60))
-            .millisecondsSinceEpoch,
-      };
-    await open(tester, cli);
-    expect(
-      find.text('That code did not match. Check the device and try again.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
-    cli.pairState = {
-      'state': 'waiting',
-      'pairId': 'next-intent',
-      'expiresAt': cli.expiry,
-    };
-    await tester.ensureVisible(find.byType(AppIconButton));
-    await tester.tap(find.byType(AppIconButton));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('That code did not match. Check the device and try again.'),
-      findsNothing,
-    );
-  });
-
-  testWidgets('exhausted attempts explain how to retry', (tester) async {
-    final cli = FakeAutonomousDeviceCli()
-      ..pairState = {'state': 'failed', 'error': 'RATE_LIMITED'};
-    await open(tester, cli);
-    expect(
-      find.text(
-        'Too many pairing attempts. Start a new pairing window and try again.',
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets(
-    'code normalization matches CLI and invalid punctuation stays local',
-    (tester) async {
-      final cli = FakeAutonomousDeviceCli()
-        ..pairState = {
-          'state': 'waiting',
-          'pairId': 'intent-1',
-          'expiresAt': DateTime.now()
-              .add(const Duration(seconds: 60))
-              .millisecondsSinceEpoch,
-        };
-      await open(tester, cli);
-      final field = find.byKey(const Key('autonomous-device-code'));
-      await tester.ensureVisible(field);
-      await tester.enterText(field, 'AB!234');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-      expect(cli.submissions, isEmpty);
-      expect(
-        find.text(
-          'Enter the six-character code shown on your Autonomous device.',
-        ),
-        findsOneWidget,
-      );
-      await tester.enterText(field, 'oilu23');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-      expect(cli.submissions.single['code'], '011V23');
-    },
-  );
 }
 
 class RecordingAutonomousDeviceCli extends AutonomousDeviceCli {
-  String? operation;
   List<String> arguments = [];
   String? secret;
   @override
@@ -383,9 +321,8 @@ class RecordingAutonomousDeviceCli extends AutonomousDeviceCli {
     List<String> arguments = const [],
     String? secretStdin,
   }) async {
-    this.operation = operation;
     this.arguments = arguments;
     secret = secretStdin;
-    return {'state': 'running'};
+    return {'state': 'paired'};
   }
 }
