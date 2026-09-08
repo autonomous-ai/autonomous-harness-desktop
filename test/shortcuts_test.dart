@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:harness/logging/debug_surface.dart';
 import 'package:harness/shortcuts/app_shortcuts.dart';
 import 'package:xterm/xterm.dart';
 
@@ -82,7 +83,7 @@ void main() {
       // because a widget test runs as Android. Now the escape is uniform, so
       // pin it on both, arrows included: with ⌘ held, nothing reaches the pty.
       //
-      // Arrows still go unbound in kAppShortcuts ('no shortcut is bound to an
+      // Arrows still go unbound in appShortcuts() ('no shortcut is bound to an
       // arrow key' below), but that is now a choice about what the hand expects
       // a terminal to do — not a limit on what can be bound.
       for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
@@ -138,7 +139,7 @@ void main() {
   group('the declared set', () {
     test('no two shortcuts claim the same chord', () {
       final seen = <String>{};
-      for (final shortcut in kAppShortcuts) {
+      for (final shortcut in appShortcuts()) {
         final chord = describeShortcut(shortcut.activator);
         expect(seen.add(chord), isTrue, reason: '$chord is bound twice');
       }
@@ -159,7 +160,7 @@ void main() {
       // ⌃⌥⇥ through as well, and the point of pinning is that a THIRD Ctrl
       // chord still fails.
       const ctrlAllowed = {'⌃⇥', '⌃⇧⇥'};
-      for (final shortcut in kAppShortcuts) {
+      for (final shortcut in appShortcuts()) {
         final chord = describeShortcut(shortcut.activator);
         if (shortcut.activator.control) {
           expect(
@@ -190,7 +191,7 @@ void main() {
         LogicalKeyboardKey.arrowUp,
         LogicalKeyboardKey.arrowDown,
       };
-      for (final shortcut in kAppShortcuts) {
+      for (final shortcut in appShortcuts()) {
         expect(
           arrows.contains(shortcut.activator.trigger),
           isFalse,
@@ -201,7 +202,7 @@ void main() {
 
     test('does not take the three chords xterm already owns on macOS', () {
       const claimedByTerminal = {'⌘C', '⌘V', '⌘A'};
-      for (final shortcut in kAppShortcuts) {
+      for (final shortcut in appShortcuts()) {
         expect(
           claimedByTerminal.contains(describeShortcut(shortcut.activator)),
           isFalse,
@@ -212,10 +213,10 @@ void main() {
 
     test('every declared shortcut gets a binding when a handler exists', () {
       final bindings = buildShortcutBindings(
-        handlers: {for (final s in kAppShortcuts) s.action: () {}},
+        handlers: {for (final s in appShortcuts()) s.action: () {}},
         onSelectAgentIndex: (_) {},
       );
-      expect(bindings.length, kAppShortcuts.length + kAgentDigitCount);
+      expect(bindings.length, appShortcuts().length + kAgentDigitCount);
     });
 
     test(
@@ -245,7 +246,7 @@ void main() {
 
     test('every declared shortcut reaches a row', () {
       final rows = shortcutRows();
-      for (final shortcut in kAppShortcuts) {
+      for (final shortcut in appShortcuts()) {
         final row = rows.firstWhere((row) => row.label == shortcut.label);
         expect(
           row.chords,
@@ -286,6 +287,33 @@ void main() {
           const SingleActivator(LogicalKeyboardKey.tab, control: true),
         ),
         ['⌃', '⇥'],
+      );
+    });
+  });
+
+  group('the developer shortcut', () {
+    // ⌘D opens Settings ▸ Debug. It is the one shortcut that is not always
+    // there — a release build has no Debug screen — so what is guarded is that
+    // the list and the build agree, in both directions.
+    test(
+      'is declared only where the debug surface is, and a test build is',
+      () {
+        expect(kDebugSurfaceEnabled, isTrue, reason: 'tests run in debug mode');
+        expect(appShortcuts(), contains(kDebugShortcut));
+        expect(kAppShortcuts, isNot(contains(kDebugShortcut)));
+        expect(describeShortcut(kDebugShortcut.activator), '⌘D');
+      },
+    );
+
+    test('reaches a binding and a printed row like any other', () {
+      final bindings = buildShortcutBindings(
+        handlers: {ShortcutAction.showDebug: () {}},
+      );
+      expect(bindings.containsKey(kDebugShortcut.activator), isTrue);
+      expect(shortcutHintFor(ShortcutAction.showDebug), '⌘D');
+      expect(
+        shortcutRows().map((row) => row.label),
+        contains(kDebugShortcut.label),
       );
     });
   });

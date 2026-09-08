@@ -66,3 +66,54 @@ String redactValue(Object? value) {
   final text = '$value';
   return text.length <= _maxValue ? text : '${text.substring(0, _maxValue)}…';
 }
+
+/// Anything in free-form CLI output that could be a secret, blanked.
+///
+/// [redactValue] above works on a decoded frame, where a secret is identified
+/// by its KEY. A CLI's stdout has no keys: `harness auth status --json` prints
+/// a session, `grid login` prints what it wrote, and both go into the transcript
+/// `cliLog` keeps. This is the same denylist idea applied to text — ported from
+/// Grid's `redactLogSecrets` (`features/feedback/logic/log_bundle.dart`), so a
+/// log line means the same thing in both products. Keep the two in step.
+///
+/// Conservative on purpose: it would rather blank a harmless high-entropy
+/// string than write a live token to a file with a fortnight's retention.
+String redactSecretsInText(String input) {
+  var out = input;
+  for (final rule in _textRedactions) {
+    out = out.replaceAllMapped(rule.pattern, rule.replace);
+  }
+  return out;
+}
+
+typedef _Redaction = ({RegExp pattern, String Function(Match) replace});
+
+final List<_Redaction> _textRedactions = [
+  // `Bearer <token>` — the shape auth takes if it ever lands in output.
+  (
+    pattern: RegExp(r'(Bearer\s+)[A-Za-z0-9._\-]{8,}', caseSensitive: false),
+    replace: (m) => '${m[1]}<redacted>',
+  ),
+  // Vendor keys with a well-known prefix (OpenAI `sk-…`, Anthropic `sk-ant-…`).
+  (
+    pattern: RegExp(r'\bsk-[A-Za-z0-9_\-]{8,}'),
+    replace: (_) => 'sk-<redacted>',
+  ),
+  // `"session_token": "…"`, `key = …`, `password=…` — the value after any
+  // secret-named field, however it is punctuated.
+  (
+    pattern: RegExp(
+      '''(["']?\\b\\w*(?:token|secret|password|passphrase|credential|api[_-]?key)\\w*\\b["']?\\s*[:=]\\s*["']?)([^\\s"',}]{6,})''',
+      caseSensitive: false,
+    ),
+    replace: (m) => '${m[1]}<redacted>',
+  ),
+  // A `?…token=…` or `?…key=…` inside a logged URL.
+  (
+    pattern: RegExp(
+      r'([?&][^=\s&]*(?:token|key|secret|sig|signature)[^=\s&]*=)[^\s&]+',
+      caseSensitive: false,
+    ),
+    replace: (m) => '${m[1]}<redacted>',
+  ),
+];

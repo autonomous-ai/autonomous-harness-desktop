@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../api/api_client.dart' show ApiException;
+import '../logging/http_log.dart';
 import '../share/catalog_models.dart';
 import 'grid_credentials.dart';
 import 'grid_network.dart';
@@ -28,20 +29,24 @@ import 'member_usage.dart';
 class GridApiClient {
   GridApiClient({Dio? dio, this.token, GridSessionStore? session})
     : _session = session ?? gridSessionStore,
+      // Only the one this client makes: an injected Dio belongs to whoever
+      // passed it in, and in the tests that is a mock with its own interceptors.
       _dio =
           dio ??
-          Dio(
-            BaseOptions(
-              baseUrl:
-                  (session ?? gridSessionStore).value?.apiBaseUrl ??
-                  kGridApiBaseUrl,
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 30),
-              // Let the wrapper below turn HTTP failures into short,
-              // user-facing ApiExceptions; transport failures stay
-              // DioExceptions, the same split `ApiClient` uses.
-              validateStatus: (status) =>
-                  status != null && status >= 200 && status < 600,
+          attachHttpLog(
+            Dio(
+              BaseOptions(
+                baseUrl:
+                    (session ?? gridSessionStore).value?.apiBaseUrl ??
+                    kGridApiBaseUrl,
+                connectTimeout: const Duration(seconds: 15),
+                receiveTimeout: const Duration(seconds: 30),
+                // Let the wrapper below turn HTTP failures into short,
+                // user-facing ApiExceptions; transport failures stay
+                // DioExceptions, the same split `ApiClient` uses.
+                validateStatus: (status) =>
+                    status != null && status >= 200 && status < 600,
+              ),
             ),
           );
 

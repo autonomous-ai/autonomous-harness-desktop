@@ -89,4 +89,43 @@ void main() {
 
     expect(summariseForLog(reply), contains('DeepSeek-V4-Flash-0731'));
   });
+
+  group('free-form CLI output, which has no keys to go by', () {
+    test('a session token printed by the CLI is blanked', () {
+      const line =
+          '{"session_token": "sess-live-abcdef123456", "email": "dev@x.ai"}';
+
+      final redacted = redactSecretsInText(line);
+
+      expect(redacted, isNot(contains('sess-live-abcdef123456')));
+      expect(redacted, contains('<redacted>'));
+      // What makes the line worth keeping survives.
+      expect(redacted, contains('dev@x.ai'));
+    });
+
+    test('a bearer header and a vendor key are both caught', () {
+      expect(
+        redactSecretsInText('Authorization: Bearer abcdef1234567890'),
+        isNot(contains('abcdef1234567890')),
+      );
+      expect(
+        redactSecretsInText('using sk-ant-api03-not-a-real-key'),
+        'using sk-<redacted>',
+      );
+    });
+
+    test('a key in a URL query is caught', () {
+      final redacted = redactSecretsInText(
+        'GET https://grid.autonomous.ai/relay/overview?api_key=abc123def456',
+      );
+
+      expect(redacted, isNot(contains('abc123def456')));
+      expect(redacted, contains('grid.autonomous.ai/relay/overview'));
+    });
+
+    test('ordinary output is left exactly as it was', () {
+      const line = 'harness 1.4.2 — 3 machines, 2 agents running';
+      expect(redactSecretsInText(line), line);
+    });
+  });
 }

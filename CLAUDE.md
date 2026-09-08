@@ -320,7 +320,7 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   `didRequestAppExit` — intercepting the window's close button needs `setPreventClose(true)`, and a
   bug on that path leaves a window nobody can close.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
-  whose rail lists `kSettingsGroups` from `settings_section.dart` and whose pane is one widget per
+  whose rail lists `settingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
   section widget — nothing else. Panes are framed by `shared/widgets/section_scaffold.dart` (copied
   from Grid), and one setting inside a pane is a `shared/widgets/setting_row.dart` — a raised block
@@ -328,6 +328,24 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   right. Appearance and Terminal both use it; a pane that invents its own row shape is the bug.
   Controls come from `shared/widgets/` too (`AppSelectField`, `AppIconButton`) — raw Material
   `DropdownButton`/`IconButton` do not match anything else in the app.
+- **The log is written to files, and Settings ▸ Debug reads them back** (`lib/logging/`,
+  `settings/sections/debug_*.dart`). `appLog` (`app-YYYYMMDD.log`) is the narrative — `app`, `ws`,
+  `api`, `flutter` — and `cliLog` (`cli-YYYYMMDD.log`) is a transcript of every child process, both
+  ported from Grid and both pruned after 14 days. The two CLI chokepoints write it:
+  `HarnessCliRunner.run/start` and `GridCli.run/start` go through `logging/cli_transcript.dart`,
+  which logs the command **as a person reads it** (`harness auth status --json`, never the managed
+  tier's `<node> <cli.js>` argv) and never its environment — a key rides there precisely to stay out
+  of argv. Both Dio clients carry `attachHttpLog`, one `api` line per finished request, method and
+  URL only. **What a child PRINTS can still be a credential**, so CLI output and URLs go through
+  `redactSecretsInText` (`logging/redact.dart`, beside the frame-level `redactValue`) before
+  anything is written. The Debug pane is a **mirror** of those sinks, not a second stream
+  (`log_stream.dart` + `log_stream_sinks.dart`): a bounded ring of the last 500 entries that
+  `installFileLogs` tees into, so a line on screen is a line the file already has. It is developer
+  furniture — `kDebugSurfaceEnabled` (`logging/debug_surface.dart`, `kDebugMode` or
+  `--dart-define=HARNESS_DEBUG_SURFACE=true`) gates the rail row, the ⌘D shortcut
+  (`kDebugShortcut`, in `appShortcuts()` rather than `kAppShortcuts`) and the ring itself; the log
+  FILES are written either way, because a shipped app with no stderr is exactly the one whose logs
+  matter.
 - **A screen that waits on a call waits in the shape of its answer.** `shared/widgets/skeleton.dart`
   (`Skeleton`, `SkeletonText`, `SkeletonLine`, `SkeletonList`, `SkeletonBlock`) draws placeholders and
   `shared/widgets/pulse.dart` owns the app's one loading rhythm — an opacity breath between

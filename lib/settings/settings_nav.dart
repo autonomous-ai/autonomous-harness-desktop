@@ -32,9 +32,12 @@ class _SettingsNavState extends State<SettingsNav> {
   /// typing "help" surfaces the whole run rather than nothing.
   List<SettingsGroup> get _visible {
     final query = _query.trim().toLowerCase();
-    if (query.isEmpty) return kSettingsGroups;
+    // The list this build actually has: [settingsGroups] drops the developer
+    // rows a release build does not ship.
+    final all = settingsGroups;
+    if (query.isEmpty) return all;
     final groups = <SettingsGroup>[];
-    for (final group in kSettingsGroups) {
+    for (final group in all) {
       if (group.title.toLowerCase().contains(query)) {
         groups.add(group);
         continue;

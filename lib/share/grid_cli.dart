@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../logging/cli_transcript.dart';
+
 /// Runs the **Grid** CLI, the way [HarnessCliRunner] runs the Harness one.
 ///
 /// Two CLIs, on purpose. `harness` owns this app's machines, agents and
@@ -105,10 +107,13 @@ class GridCli {
     final executable = await locate();
     if (executable == null) return GridCliResult.notInstalled;
     try {
-      final result = await _runProcess(executable, [
-        remoteFlag,
-        ...arguments,
-      ], environment: commandEnvironment());
+      final result = await logProcessRun(
+        _displayLine(arguments),
+        () => _runProcess(executable, [
+          remoteFlag,
+          ...arguments,
+        ], environment: commandEnvironment()),
+      );
       return GridCliResult(
         exitCode: result.exitCode,
         stdout: '${result.stdout}',
@@ -147,12 +152,21 @@ class GridCli {
     if (executable == null) {
       throw const GridCliMissing();
     }
-    return _startProcess(
-      executable,
-      [remoteFlag, ...arguments],
-      environment: {...commandEnvironment(), ...secrets},
+    return logProcessStart(
+      _displayLine(arguments),
+      () => _startProcess(
+        executable,
+        [remoteFlag, ...arguments],
+        environment: {...commandEnvironment(), ...secrets},
+      ),
     );
   }
+
+  /// The invocation as a person reads it — `grid --remote join …`. The
+  /// [secrets] a streamed command carries are not part of it: they are in the
+  /// child's environment, which is the whole reason they are not in its argv.
+  static String _displayLine(List<String> arguments) =>
+      'grid $remoteFlag ${arguments.join(' ')}';
 
   /// The environment a child gets: this process's, with the CLI's own bin
   /// directory on PATH and a UTF-8 locale forced, so a model name with a

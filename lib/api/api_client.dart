@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../auth/auth_session.dart';
 import '../core/config.dart';
 import '../core/models.dart';
+import '../logging/http_log.dart';
 
 /// Control-plane REST client. Every call here goes to the LOCAL `harness` CLI
 /// (loopback, no credential — see CLAUDE.md's naming/architecture notes for why), which proxies to
@@ -11,15 +12,17 @@ import '../core/models.dart';
 class ApiClient {
   final AppConfig config;
   final AuthSession session;
-  late final Dio _dio = Dio(
-    BaseOptions(
-      baseUrl: config.localCliBaseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 30),
-      // Let the API wrapper turn HTTP failures into short, user-facing
-      // ApiExceptions. Transport failures still surface as DioExceptions.
-      validateStatus: (status) =>
-          status != null && status >= 200 && status < 600,
+  late final Dio _dio = attachHttpLog(
+    Dio(
+      BaseOptions(
+        baseUrl: config.localCliBaseUrl,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+        // Let the API wrapper turn HTTP failures into short, user-facing
+        // ApiExceptions. Transport failures still surface as DioExceptions.
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 600,
+      ),
     ),
   );
 

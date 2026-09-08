@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import '../logging/cli_transcript.dart';
+
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
 ///
@@ -105,21 +107,35 @@ class HarnessCliRunner {
 
   Future<ProcessResult> run(List<String> arguments) async {
     final invocation = await resolve(arguments);
-    return _runProcess(
-      invocation.executable,
-      invocation.arguments,
-      environment: invocation.environment,
+    return logProcessRun(
+      _displayLine(arguments),
+      () => _runProcess(
+        invocation.executable,
+        invocation.arguments,
+        environment: invocation.environment,
+      ),
     );
   }
 
   Future<Process> start(List<String> arguments) async {
     final invocation = await resolve(arguments);
-    return _startProcess(
-      invocation.executable,
-      invocation.arguments,
-      environment: invocation.environment,
+    return logProcessStart(
+      _displayLine(arguments),
+      () => _startProcess(
+        invocation.executable,
+        invocation.arguments,
+        environment: invocation.environment,
+      ),
     );
   }
+
+  /// The invocation as a person reads it — `harness auth status --json`.
+  ///
+  /// The [arguments] this was asked for, never [HarnessCliInvocation.arguments]:
+  /// on the managed tier the real argv is `<node> <cli.js> …`, two absolute
+  /// paths of noise in front of the only part that says what ran.
+  static String _displayLine(List<String> arguments) =>
+      'harness ${arguments.join(' ')}';
 
   Future<File?> _managedNode() async {
     try {

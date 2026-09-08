@@ -183,6 +183,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   unawaited(showLayoutPalette(context, notifier)),
               ShortcutAction.showShortcuts: () =>
                   unawaited(showShortcutsSheet(context)),
+              // Bound whether or not this build has the screen: an unlisted
+              // action is simply never in the bindings (see appShortcuts()),
+              // so the handler costs nothing where the key does not exist.
+              ShortcutAction.showDebug: () => unawaited(
+                showSettingsScreen(
+                  context,
+                  notifier,
+                  initialSection: SettingsSection.debug,
+                ),
+              ),
             },
             onSelectAgentIndex: _selectAgentByIndex,
           ),

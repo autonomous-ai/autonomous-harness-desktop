@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../logging/debug_surface.dart';
+
 /// Every keyboard shortcut in the app, declared once.
 ///
 /// One list feeds both the live bindings and the ⌘/ sheet, so a shortcut can
@@ -58,6 +60,7 @@ enum ShortcutAction {
   showLayout,
   pinPane,
   showShortcuts,
+  showDebug,
 }
 
 enum ShortcutGroup { navigate, panes, actions }
@@ -235,6 +238,31 @@ const List<AppShortcut> kAppShortcuts = [
   ),
 ];
 
+/// Open Settings ▸ Debug — the app's own log, as this session still holds it.
+///
+/// Kept out of [kAppShortcuts] because it is not always there: a release build
+/// has no Debug screen (see [kDebugSurfaceEnabled]), and a key that opens
+/// nothing is worse than a key that was never taken. `⌘D` is free on this list
+/// and on this OS's own menus, and — like every other shortcut here — never
+/// reaches the pty.
+const AppShortcut kDebugShortcut = AppShortcut(
+  action: ShortcutAction.showDebug,
+  activator: SingleActivator(LogicalKeyboardKey.keyD, meta: true),
+  label: 'Open the debug log',
+  group: ShortcutGroup.actions,
+);
+
+/// Every shortcut THIS build has — [kAppShortcuts], plus the developer ones the
+/// build is allowed to show.
+///
+/// The one list the bindings, the ⌘/ sheet and the tooltips all read, so a
+/// build cannot bind a key it does not document or document one it does not
+/// bind.
+List<AppShortcut> appShortcuts() => [
+  ...kAppShortcuts,
+  if (kDebugSurfaceEnabled) kDebugShortcut,
+];
+
 /// `⌘1`…`⌘9` jump to the nth agent in the sidebar.
 ///
 /// Not in [kAppShortcuts] because nine near-identical rows would bury the sheet;
@@ -286,7 +314,7 @@ List<ShortcutRow> shortcutRows() {
   final labels = <ShortcutAction, String>{};
   final groups = <ShortcutAction, ShortcutGroup>{};
 
-  for (final shortcut in kAppShortcuts) {
+  for (final shortcut in appShortcuts()) {
     if (byAction.putIfAbsent(shortcut.action, () => []).isEmpty) {
       order.add(shortcut.action);
       labels[shortcut.action] = shortcut.label;
@@ -354,7 +382,7 @@ Map<ShortcutActivator, VoidCallback> buildShortcutBindings({
   void Function(int index)? onSelectAgentIndex,
 }) {
   final bindings = <ShortcutActivator, VoidCallback>{};
-  for (final shortcut in kAppShortcuts) {
+  for (final shortcut in appShortcuts()) {
     final handler = handlers[shortcut.action];
     if (handler != null) bindings[shortcut.activator] = handler;
   }
@@ -405,7 +433,7 @@ String _keyLabel(LogicalKeyboardKey key) {
 /// Tooltips read this instead of spelling the keys out, so a rebinding cannot
 /// leave a button advertising a key that no longer works.
 String? shortcutHintFor(ShortcutAction action) {
-  for (final shortcut in kAppShortcuts) {
+  for (final shortcut in appShortcuts()) {
     if (shortcut.action == action) return describeShortcut(shortcut.activator);
   }
   return null;
