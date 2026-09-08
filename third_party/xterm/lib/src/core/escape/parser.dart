@@ -100,7 +100,10 @@ class EscapeParser {
     'E'.charCode: _escHandleNextLine,
     'H'.charCode: _escHandleTabSet,
     'M'.charCode: _escHandleReverseIndex,
-    // 'P'.charCode: _unsupportedHandler, // Sixel
+    'P'.charCode: _escHandleStringSequence, // DCS (incl. Sixel, tmux passthrough)
+    '_'.charCode: _escHandleStringSequence, // APC
+    '^'.charCode: _escHandleStringSequence, // PM
+    'X'.charCode: _escHandleStringSequence, // SOS
     // 'c'.charCode: _unsupportedHandler,
     // '#'.charCode: _unsupportedHandler,
     '('.charCode: _escHandleDesignateCharset0, //  SCS - G0
@@ -110,6 +113,36 @@ class EscapeParser {
     '>'.charCode: _escHandleResetAppKeypadMode, // TODO: Normal Keypad
     '='.charCode: _escHandleSetAppKeypadMode, // TODO: Application Keypad
   });
+
+  /// `ESC P` DCS, and its siblings `ESC _` APC, `ESC ^` PM, `ESC X` SOS.
+  ///
+  /// We render none of them, but they still have to be SWALLOWED. Each carries a
+  /// body that runs until String Terminator, and leaving that body to the normal
+  /// parser puts it on screen as text.
+  ///
+  /// tmux wraps passthrough exactly this way — `ESC P tmux; <body> ESC \` — so a
+  /// program asking the outer terminal for its background colour from inside tmux
+  /// used to paint `tmux;]11;?` into the pane: `ESC P` was an unknown escape, then
+  /// `tmux;` printed, then the body's doubled `ESC ESC` was eaten as another
+  /// unknown escape, then `]11;?` printed too.
+  bool _escHandleStringSequence() => _consumeStringSequence();
+
+  /// Consumes a string sequence's body. Only `ESC \` (ST) ends it: tmux DOUBLES
+  /// every ESC inside its body, so stopping at the first one would hand the rest
+  /// back to the text path — the very bug this exists to close. BEL does not end
+  /// it either, because an inner OSC's own BEL sits in the middle of that body.
+  ///
+  /// Returns false when the queue runs dry so the parser rolls back and waits for
+  /// the rest, the same contract [_consumeOsc] keeps — a sequence can straddle
+  /// two chunks of pty output.
+  bool _consumeStringSequence() {
+    while (true) {
+      if (_queue.isEmpty) return false;
+      if (_queue.consume() != Ascii.ESC) continue;
+      if (_queue.isEmpty) return false;
+      if (_queue.consume() == Ascii.backslash) return true;
+    }
+  }
 
   /// `ESC 7` Save Cursor (DECSC)
   ///

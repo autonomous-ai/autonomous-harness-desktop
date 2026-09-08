@@ -43,3 +43,15 @@ it if one is dropped.
    which read cell `-1` while checking a wide-character boundary. The range
    guard now accepts an empty range, and erase-left includes the cursor cell as
    required by its terminal contract. Regression: `test/terminal_session_test.dart`.
+
+5. **String sequences (DCS/APC/PM/SOS) are consumed instead of leaking**
+   (`lib/src/core/escape/parser.dart`). `ESC P` had no handler, so its body was
+   handed to the text path one fragment at a time. tmux wraps passthrough as
+   `ESC P tmux; <body> ESC \` and doubles every ESC inside that body, so a
+   program asking the outer terminal for its background colour from inside tmux
+   painted `tmux;]11;?` into the pane — seen in Claude Code's theme picker.
+   Only ST ends the body: neither the doubled `ESC ESC` nor an inner OSC's BEL
+   may terminate it, and a body split across two pty chunks rolls back and waits
+   the same way `_consumeOsc` does. Regression: the two string-sequence tests in
+   `test/terminal_session_test.dart`.
+

@@ -104,6 +104,50 @@ void main() {
     },
   );
 
+  test('a tmux passthrough sequence is swallowed, not painted', () async {
+    await ready();
+
+    // Verbatim shape of what Claude Code emits inside tmux to ask the OUTER
+    // terminal for its background colour: OSC 11 wrapped in tmux's DCS
+    // passthrough, which doubles every ESC in the body.
+    //
+    //   ESC P tmux; ESC ESC ] 11 ; ? BEL ESC \
+    //
+    // Untreated it reached the screen as `tmux;]11;?` in the middle of Claude's
+    // theme picker, because ESC P was an unknown escape and the body then fell
+    // through to the text path one fragment at a time.
+    await session.handleBinary(
+      output(
+        0,
+        utf8.encode('1. \x1bPtmux;\x1b\x1b]11;?\x07\x1b\\(match terminal)'),
+        keyframe: true,
+        cols: 80,
+        rows: 24,
+      ),
+    );
+
+    final text = session.terminal.buffer.getText();
+    expect(text, startsWith('1. (match terminal)'));
+    expect(text, isNot(contains('tmux;')));
+    expect(text, isNot(contains(']11;?')));
+  });
+
+  test('an unterminated string sequence never leaks its body', () async {
+    await ready();
+
+    // Split across two writes with no ST in sight: the parser must hold the body
+    // back rather than print what it has, the same contract OSC keeps.
+    await session.handleBinary(
+      output(0, utf8.encode('A\x1bPtmux;partial'), keyframe: true, cols: 80, rows: 24),
+    );
+    expect(session.terminal.buffer.getText(), isNot(contains('partial')));
+
+    await session.handleBinary(output(1, utf8.encode('\x1b\\B')));
+    final text = session.terminal.buffer.getText();
+    expect(text, startsWith('AB'));
+    expect(text, isNot(contains('tmux;')));
+  });
+
   test('CSI erase-left at column zero renders without a resync', () async {
     await ready();
 
