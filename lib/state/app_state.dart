@@ -2618,6 +2618,20 @@ class AppNotifier extends ChangeNotifier {
     _dismissedLinkPrompts.remove(machineId);
     machine.activeAgentId = agentId;
     _persistLayout();
+    // SAID OUTRIGHT, like every other move.
+    //
+    // This path — a rail click on an agent with no tile — was the one that never said it. It relied on
+    // the daemon inferring the move from the `terminal_open` that follows, which is the old
+    // one-terminal-per-window equivalence [see _announceFocusToDial]. Two things wrong with that: the
+    // roster below changes the dial's carousel, so the focus and the roster are one transaction and the
+    // inference arrives after it by luck; and every early return under here (machine offline, terminal
+    // capability missing, a session already attached) opens no stream at all, so nothing was ever sent
+    // and the dial stayed on the old agent with the window on the new one.
+    //
+    // After _persistLayout, so the daemon has the new tile roster before it is told to move onto it. A
+    // duplicate with the inferred one is free: the daemon drops the second against where the dial
+    // already is.
+    _announceFocusToDial();
 
     if (machine.nodeOnline == false) {
       machine.pendingOfflineAgentId = agentId;
