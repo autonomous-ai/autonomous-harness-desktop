@@ -14,7 +14,8 @@ enum SettingsSection {
   shareIntelligence(LucideIcons.share2300, 'Share this computer'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
-  devices(LucideIcons.zap300, 'Devices'),
+  usage(LucideIcons.chartNoAxesColumn300, 'Usage'),
+  devices(LucideIcons.zap300, 'Autonomous devices'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
   debug(LucideIcons.bug300, 'Debug'),
   tracking(LucideIcons.activity300, 'Tracking'),
@@ -110,9 +111,15 @@ const _kSettingsGroups = [
     SettingsSection.grid,
     SettingsSection.shareIntelligence,
   ]),
+  // Usage sits with the preferences rather than with Debug and Tracking, which
+  // it otherwise resembles: those two are developer furniture a shipped build
+  // hides, and this is a screen anybody is meant to open. It earns its place in
+  // a run titled "what you change" by carrying the three switches that decide
+  // which logs are read at all — the pane is off until somebody sets it.
   SettingsGroup('Preferences', [
     SettingsSection.appearance,
     SettingsSection.terminal,
+    SettingsSection.usage,
     SettingsSection.devices,
   ]),
   // Debug and Tracking sit between the two things they are most often reached

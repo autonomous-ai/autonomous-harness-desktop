@@ -2,6 +2,7 @@ import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../shared/theme/theme_mode_store.dart';
+import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
 
 /// Every preference that has to be in place BEFORE the first frame.
@@ -22,6 +23,7 @@ Future<void> loadPersistedSettings({
   GridSelectionStore? gridSelection,
   GridSessionStore? gridSession,
   AppearancePrefsStore? appearance,
+  HarnessStats? stats,
 }) async {
   await (themeMode ?? themeModeStore).load();
   await (terminalFont ?? terminalFontStore).load();
@@ -38,4 +40,9 @@ Future<void> loadPersistedSettings({
   // the first frame would relayout the whole window one frame in — a worse
   // flicker than a late theme, because the geometry moves and not just the ink.
   await (appearance ?? appearancePrefsStore).load();
+  // Not for the first frame — nothing paints these counters until Settings ▸
+  // Usage is opened. It is loaded here anyway because the counters START moving
+  // as soon as an agent does, and a load that landed after the first
+  // `onAgentSpawned` would overwrite it with the number from disk.
+  await (stats ?? harnessStats).load();
 }

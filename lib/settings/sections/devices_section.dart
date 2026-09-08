@@ -270,7 +270,7 @@ class _DevicesSectionState extends State<DevicesSection> {
       ),
     );
     return SectionScaffold(
-      title: 'Devices',
+      title: 'Autonomous devices',
       subtitle: 'Connect directly to your Autonomous device.',
       child: SingleChildScrollView(
         child: Column(
