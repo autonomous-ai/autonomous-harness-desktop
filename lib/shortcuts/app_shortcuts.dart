@@ -50,6 +50,8 @@ enum ShortcutAction {
   previousAgent,
   focusPreviousPane,
   focusNextPane,
+  focusPaneAbove,
+  focusPaneBelow,
   movePaneBackward,
   movePaneForward,
 
@@ -135,6 +137,38 @@ const List<AppShortcut> kAppShortcuts = [
     action: ShortcutAction.focusNextPane,
     activator: SingleActivator(LogicalKeyboardKey.bracketRight, meta: true),
     label: 'Focus the next pane',
+    group: ShortcutGroup.panes,
+  ),
+  // ⌘← / ⌘→ — the grid is laid out left to right, so the keys that mean left
+  // and right should walk it. Safe despite the arrow rule this file's tests
+  // enforce: that rule is about BARE arrows, which the terminal owns for the
+  // cursor and for shell history. A ⌘ chord is the app's — the terminal passes
+  // everything but ⌘V straight through (terminal_panel._onTerminalKey).
+  AppShortcut(
+    action: ShortcutAction.focusPreviousPane,
+    activator: SingleActivator(LogicalKeyboardKey.arrowLeft, meta: true),
+    label: 'Focus the previous pane',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusNextPane,
+    activator: SingleActivator(LogicalKeyboardKey.arrowRight, meta: true),
+    label: 'Focus the next pane',
+    group: ShortcutGroup.panes,
+  ),
+  // Up and down are SPATIAL, unlike left and right, which walk the tiles in
+  // order. Down from the top-left of a 2×2 is the tile under it — the arrow is
+  // pointing at it — and there is no order in which that tile is "next".
+  AppShortcut(
+    action: ShortcutAction.focusPaneAbove,
+    activator: SingleActivator(LogicalKeyboardKey.arrowUp, meta: true),
+    label: 'Focus the pane above',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneBelow,
+    activator: SingleActivator(LogicalKeyboardKey.arrowDown, meta: true),
+    label: 'Focus the pane below',
     group: ShortcutGroup.panes,
   ),
   // ⌃⇥ / ⇧⌃⇥ — the same pair every tabbed app uses, and the one people reach
@@ -255,7 +289,12 @@ List<AppShortcut> appShortcuts() => [
   if (kDebugSurfaceEnabled) kDebugShortcut,
 ];
 
-/// `⌘1`…`⌘9` jump to the nth agent in the sidebar.
+/// `⌘1`…`⌘9` jump to the nth TILE on the grid.
+///
+/// Tiles, not sidebar rows: the number is the one printed on the tile and the
+/// one the dial walks, so "the third one" means the same thing wherever it is
+/// said. Addressing the sidebar instead made ⌘3 open something that was not on
+/// screen and replace a tile to do it.
 ///
 /// Not in [kAppShortcuts] because nine near-identical rows would bury the sheet;
 /// the sheet prints them as one line instead.
@@ -327,16 +366,18 @@ List<ShortcutRow> shortcutRows() {
   // The digits are not in [kAppShortcuts] — nine near-identical rows would bury
   // everything around them — so they join here, at the end of their group.
   final digits = ShortcutRow(
-    label: 'Jump to the 1st–9th agent',
+    label: 'Focus the 1st–9th pane',
     chords: const [
       ['⌘', '1 – $kAgentDigitCount'],
     ],
-    group: ShortcutGroup.navigate,
+    // Panes, not Navigate: the digits address tiles on the grid now, and a row
+    // reads under the heading that matches what it does.
+    group: ShortcutGroup.panes,
   );
-  final lastNavigate = rows.lastIndexWhere(
-    (row) => row.group == ShortcutGroup.navigate,
+  final lastPane = rows.lastIndexWhere(
+    (row) => row.group == ShortcutGroup.panes,
   );
-  rows.insert(lastNavigate + 1, digits);
+  rows.insert(lastPane + 1, digits);
   return rows;
 }
 
@@ -371,17 +412,17 @@ const List<TerminalKey> kTerminalOwnedKeys = [
 /// terminal underneath could have had it.
 Map<ShortcutActivator, VoidCallback> buildShortcutBindings({
   required Map<ShortcutAction, VoidCallback> handlers,
-  void Function(int index)? onSelectAgentIndex,
+  void Function(int index)? onSelectPaneIndex,
 }) {
   final bindings = <ShortcutActivator, VoidCallback>{};
   for (final shortcut in appShortcuts()) {
     final handler = handlers[shortcut.action];
     if (handler != null) bindings[shortcut.activator] = handler;
   }
-  if (onSelectAgentIndex != null) {
+  if (onSelectPaneIndex != null) {
     final digits = agentDigitActivators();
     for (var i = 0; i < digits.length; i++) {
-      bindings[digits[i]] = () => onSelectAgentIndex(i);
+      bindings[digits[i]] = () => onSelectPaneIndex(i);
     }
   }
   return bindings;

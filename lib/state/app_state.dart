@@ -2688,6 +2688,79 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How many columns the grid last laid out.
+  ///
+  /// Only `auto` needs telling: it measures the window, so it is the one shape
+  /// whose columns are not in its own description. Reported by the grid as it
+  /// builds; null until then, and then the shape's own guess stands.
+  int? gridColumns;
+
+  /// Focus the tile above or below the focused one — ⌘↑ / ⌘↓.
+  ///
+  /// SPATIAL, unlike the left/right pair, which walks the tiles in order. Down
+  /// from the top-left of a 2×2 is the tile under it, not the next one along,
+  /// because that is what the arrow is pointing at. The shapes are read from
+  /// [PanePreset.tilesFor] — the same rectangles the layout is built from and
+  /// the picker draws — so this cannot describe a grid the app does not build.
+  ///
+  /// Nothing above or below (a single row, or the edge) leaves the focus where
+  /// it is: an arrow that wraps to the far side of the screen reads as a jump,
+  /// not as a step.
+  void focusPaneVertically(int delta) {
+    final count = panes.length;
+    if (count < 2) return;
+    final shape = presetFor(count)?.tilesFor(count, columns: gridColumns);
+    if (shape == null || shape.length != count) return;
+    final at = panes.indexWhere((pane) => pane.id == focusedPaneId);
+    if (at < 0) return;
+
+    final from = shape[at];
+    int? best;
+    double bestGap = double.infinity;
+    for (var i = 0; i < count; i++) {
+      if (i == at) continue;
+      final to = shape[i];
+      // Below means below: its top edge is at or past ours, and the two overlap
+      // horizontally, so a tile in the next COLUMN is never "down".
+      final vertical = delta > 0
+          ? to.top - from.top
+          : from.top - to.top;
+      if (vertical <= 0.001) continue;
+      final overlap =
+          (from.right < to.left + 0.001) || (to.right < from.left + 0.001);
+      if (overlap) continue;
+      if (vertical < bestGap) {
+        bestGap = vertical;
+        best = i;
+      }
+    }
+    if (best != null) focusPane(panes[best].id);
+  }
+
+  /// Focus the nth tile on the grid — ⌘1…⌘9.
+  ///
+  /// The number is the tile's position on screen, which is also the number the
+  /// dial walks, so "the third one" means one thing wherever it is said. A digit
+  /// past the last tile does NOTHING: it used to address the sidebar instead,
+  /// where ⌘3 opened an agent that was not on the grid and replaced a tile to
+  /// show it — a key meant only to look, rearranging the desk.
+  void focusPaneByIndex(int index) {
+    if (index < 0 || index >= panes.length) return;
+    focusPane(panes[index].id);
+  }
+
+  /// Walk the focus one tile — ⌘← / ⌘→, and ⌘[ / ⌘].
+  ///
+  /// Wraps, because the grid is what the eye reads as a loop of tiles; stopping
+  /// dead at the last one reads as a broken key. Moves focus ONLY — nothing on
+  /// the grid changes, which is what separates it from [movePaneBy].
+  void focusPaneBy(int delta) {
+    if (panes.length < 2) return;
+    final at = panes.indexWhere((pane) => pane.id == focusedPaneId);
+    final next = at < 0 ? 0 : (at + delta + panes.length) % panes.length;
+    focusPane(panes[next].id);
+  }
+
   /// Move the focused pane one slot, for the keyboard twin of the drag.
   ///
   /// Stops at the ends rather than wrapping: the grid is a shape, not a ring,
