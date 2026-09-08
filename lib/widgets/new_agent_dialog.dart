@@ -4,6 +4,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../analytics/analytics.dart';
 import '../core/engine_availability.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_api_client.dart';
@@ -29,15 +30,26 @@ const Map<String, String> kEngineBypassPermissionFlag = {
   'opencode': '--auto',
 };
 
+/// Opens the New agent dialog for [machineId].
+///
+/// [source] names the door it was opened by — `machine_row`, `rail_empty`,
+/// `pane_empty` or `shortcut` — and is required rather than defaulted, so a
+/// fifth entry point has to say which one it is instead of quietly filing
+/// itself under an existing name.
 Future<void> showNewAgentDialog(
   BuildContext context,
   AppNotifier notifier,
   String machineId, {
+  required String source,
   // Injectable only so a test can drive a real Create click without a network call — the same seam
   // GridNetworksController/GridModelsController already expose. Production never passes one, so
   // _submit's resolveGridAgentOverride falls back to its own default (real) client.
   @visibleForTesting GridApiClient? gridApiClient,
 }) {
+  // Reported here rather than at each call site: the doors are four and
+  // growing, and one that forgets to track is a hole in the funnel that only
+  // shows up as a number quietly being too small.
+  analytics.newAgentOpened(source: source);
   return showDialog<void>(
     context: context,
     builder: (context) => _NewAgentDialog(
@@ -266,6 +278,17 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       });
       return;
     }
+    // Tracked here, not in `createAgent`: this is the only place that can tell
+    // Auto from the engine's own login. Both reach the notifier as a null
+    // override, and `onGrid` is what separates them downstream.
+    analytics.agentCreated(
+      engine: _engine,
+      onGrid: gridOverride != null,
+      bypassPermission:
+          _bypassPermission && kEngineBypassPermissionFlag.containsKey(_engine),
+      model: gridOverride?.model,
+      networkId: gridOverride?.networkId,
+    );
     Navigator.of(context).pop();
   }
 

@@ -302,12 +302,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   stream the website and Grid already feed, so one person's path across the three products is one
   funnel; `AnalyticsConfig.category` (`harness-desktop`) is what keeps them apart inside it. Not to
   be confused with the CLI's `harness analytics`, which is a different product entirely — aggregate
-  usage metering uploaded to the Harness backend. **It ships muted**: `_defaultWriteKey` is empty
-  until this app gets its own key (TODO(BE)), and Grid's is deliberately not borrowed;
-  `--dart-define=HARNESS_ANALYTICS_KEY=…` turns the stream on for a dev build. Muted also means a
-  test run and an opt-out (`{"enabled": false}` in `~/.harness/desktop-app/analytics.json`), each of
-  which hands out a `NoopAnalytics` rather than queueing into a void — checked in that order so
-  `flutter test` never reads a real Harness home. The sink is a **singleton** (`analytics`), like
+  usage metering uploaded to the Harness backend. ⚠️ **It reports under GRID's write key**, not one
+  of its own: `_defaultWriteKey` is the same constant `autonomous-grid-app` ships, so both apps
+  append into one analytics project and are separable **only by `category`**, not at the source —
+  a quota, a retention rule or a rotated key set on that project lands on both at once
+  (**TODO(BE)**: a Harness Desktop key is a one-constant change here). `--dart-define=HARNESS_ANALYTICS_KEY=…`
+  overrides it for a dev build. It still mutes for three other reasons — `HARNESS_ANALYTICS_DISABLED`,
+  a test run, and an opt-out (`{"enabled": false}` in `~/.harness/desktop-app/analytics.json`) —
+  checked in that order so `flutter test` never reads a real Harness home. The sink is a **singleton** (`analytics`), like
   `themeModeStore`: the call sites are `main`, `AppNotifier`, a settings pane and a menu inside a
   pane header, and most were handed a notifier rather than a `Ref`. Every event name is written down
   **once**, in `analytics_events.dart` — two call sites naming one action differently is what makes
@@ -316,9 +318,38 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   events are deliberately not where you would look for them: `app_opened` is sent by `AppNotifier`
   when bootstrap resolves (a first-frame event would report every launch as signed out) and
   `grid_networks_loaded` by `GridNetworksController` on its first answer (both doors read that one
-  shared controller, so a per-surface event would count one account twice). `app_closed` hooks only
+  shared controller, so a per-surface event would count one account twice). **The agent funnel is
+  three events, one per step, because the interesting numbers are the DROPS between them**:
+  `new_agent_opened` is sent by `showNewAgentDialog` itself rather than by its four callers, so a
+  fifth door cannot forget to report (its `source` is `required`, not defaulted); `agent_created`
+  is sent by the **dialog**, not `createAgent`, because only the dialog can tell Auto (`on_grid`
+  true, no model) from the engine's own login (`on_grid` false) — both reach the notifier as one
+  null override — and it covers EVERY agent, unlike `grid_agent_launched`, which counts only the
+  ones pointed at a grid (so a grid agent fires both; `agent_created where on_grid` is the same set
+  and is the one to build on); `agent_first_message` rides the CLI's `turn_started` rather than the
+  composer, so a message typed straight into the terminal counts, and it fires once, only for
+  agents this app made this launch (`_agentsAwaitingFirstTurn`) — calling an adopted session's next
+  turn a first message would be a straight lie. `app_closed` hooks only
   `didRequestAppExit` — intercepting the window's close button needs `setPreventClose(true)`, and a
   bug on that path leaves a window nobody can close.
+  **Settings ▸ Tracking is where that stream is read back** (`analytics/analytics_log.dart`,
+  `settings/sections/tracking_*.dart`, ported from Grid's Tracking tab), and it answers the
+  question analytics always raises and normally cannot: *did that event actually leave, and what
+  was in it?* — an event never sent, sent with a missing field, or refused by the server looks
+  exactly like one that landed, because the app is silent either way by design. `QueuedAnalytics`
+  reports each row's life to an `AnalyticsLog` (`queued → attempted → settled`), so a retry is
+  **one row with two attempts** rather than two rows, and the dialog shows the payload *as sent*
+  beside the params the call site passed — the gap between those two is the bug it exists to find.
+  Gated by `kDebugSurfaceEnabled` like Settings ▸ Debug, which now hides two rail rows rather than
+  one (`_kDeveloperSections` in `settings_section.dart` names both, once). **The muted case is the
+  one that matters**: a build can send nothing for four separate reasons, and a Tracking screen that
+  were blank for any of them would be the exact trap it exists to spring — hence `MutedAnalytics`,
+  which records every event as `dropped` with the reason, and a header card
+  that says `Off` and why in a sentence. A release build has no such screen and gets `NoopAnalytics`
+  and a `NoopAnalyticsLog`, so nothing is retained for a surface that is not there. The buffer is
+  in memory and never written to disk — a stream that measures the app must not become a second
+  thing the app writes on every click — which is also why recording is right even for a user who
+  opted out: their choice is about what we *send*, and this sends nothing.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `settingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

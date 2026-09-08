@@ -92,8 +92,12 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () =>
-                  showNewAgentDialog(context, notifier, 'machine-1'),
+              onPressed: () => showNewAgentDialog(
+                context,
+                notifier,
+                'machine-1',
+                source: 'machine_row',
+              ),
               child: const Text('open'),
             ),
           ),
@@ -406,6 +410,7 @@ void main() {
                 context,
                 notifier,
                 'machine-1',
+                source: 'machine_row',
                 // A fake client, so the relay key this default (Auto) path still mints goes
                 // nowhere near the network — see resolveGridAgentOverride and FakeGridApi.
                 gridApiClient: FakeGridApi(),
@@ -466,6 +471,7 @@ void main() {
                   context,
                   notifier,
                   'machine-1',
+                  source: 'machine_row',
                   gridApiClient: FakeGridApi(),
                 ),
                 child: const Text('open'),

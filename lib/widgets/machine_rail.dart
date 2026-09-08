@@ -758,6 +758,7 @@ class _MachineNodeState extends State<_MachineNode> {
                           context,
                           notifier,
                           machine.machineId,
+                          source: 'machine_row',
                         ),
                         menu: MenuAnchor(
                           controller: _machineMenu,
@@ -1627,8 +1628,12 @@ class _EmptyAgents extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
           child: _EmptyNewAgentButton(
-            onPressed: () =>
-                showNewAgentDialog(context, notifier, state.machine.machineId),
+            onPressed: () => showNewAgentDialog(
+              context,
+              notifier,
+              state.machine.machineId,
+              source: 'rail_empty',
+            ),
           ),
         ),
       ],

@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 
-/// Whether this build shows its developer surfaces: Settings ▸ Debug, its ⌘D
-/// shortcut, and the in-memory mirror of the log that feeds them.
+/// Whether this build shows its developer surfaces: Settings ▸ Debug and its
+/// ⌘D shortcut, Settings ▸ Tracking, and the two in-memory buffers that feed
+/// them (`logStream`, `analyticsLog`).
 ///
 /// A debug build has it; a release build does not. The log *files* are written
 /// either way — a shipped app that has no stderr anyone reads is exactly the

@@ -10,18 +10,24 @@ import 'package:flutter/foundation.dart';
 /// is one funnel, not three datasets that can never be joined. [category] is
 /// what keeps them apart within it.
 ///
-/// TODO(BE): this app has **no write key of its own yet**, so it ships muted —
-/// [resolve] reports `offReason` and `analyticsSink` hands out a
-/// [NoopAnalytics]. Everything else is wired and tested; the whole fix is a
-/// Harness Desktop key from the analytics owner, dropped into
-/// [_defaultWriteKey] (or passed as `--dart-define=HARNESS_ANALYTICS_KEY=…`).
-/// Grid's key is deliberately NOT borrowed: it would file this app's events
-/// inside Grid's project under someone else's name, and the two streams are
-/// meant to be separable at the source, not only by [category].
+/// ⚠️ **This app reports under GRID's write key, not one of its own.** The
+/// constant below is the same one `autonomous-grid-app` ships, so both desktop
+/// apps append into the same analytics project. That is a deliberate stopgap —
+/// a muted stream measures nothing, and this app has been waiting on a key of
+/// its own since the port — but the cost is real and worth stating: the two
+/// apps are then separable **only by [category]** (`harness-desktop` against
+/// Grid's `grid-app`, stamped on every event), not at the source. Anyone
+/// reading the Grid project sees this app's events inside it, and anything set
+/// per project — a quota, a retention rule, a rotated or revoked key — lands on
+/// both apps at once.
 ///
-/// The key, when it exists, is a *write* key rather than a secret. The website
-/// ships the same kind of key in its public JS bundle, a desktop binary can be
-/// unpacked either way, and it only lets the holder append events.
+/// TODO(BE): swap in a Harness Desktop key from the analytics owner. It is a
+/// one-constant change here, and it is the only thing that separates the two
+/// streams properly.
+///
+/// The key is a *write* key rather than a secret. The website ships the same
+/// kind of key in its public JS bundle, a desktop binary can be unpacked either
+/// way, and it only lets the holder append events.
 class AnalyticsConfig {
   const AnalyticsConfig({
     required this.endpoint,
@@ -71,8 +77,11 @@ class AnalyticsConfig {
       'https://autonomous-analytics-qffztaoryq-uc.a.run.app/api/v1';
   static const String _path = 'event_tracking';
 
-  /// Empty until this app has its own key — see the class TODO(BE).
-  static const String _defaultWriteKey = '';
+  /// Borrowed from Grid until this app has its own — see the class TODO(BE).
+  /// Keep it byte-for-byte equal to `autonomous-grid-app`'s
+  /// `AnalyticsConfig._defaultWriteKey`; a copy that drifts sends this app's
+  /// events to a project nobody is reading.
+  static const String _defaultWriteKey = 'tBCs0oLwgFgf1borYn54cjHz4fvWahyV';
 
   /// The live configuration, from the environment alone.
   static AnalyticsConfig resolve() {

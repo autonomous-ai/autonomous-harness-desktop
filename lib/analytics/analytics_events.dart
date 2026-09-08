@@ -129,6 +129,77 @@ extension AnalyticsEvents on Analytics {
     params: {'engine': engine, 'model': model, 'network_id': networkId},
   );
 
+  // --- Agents -------------------------------------------------------------
+  //
+  // The funnel [gridAgentLaunched] could not answer, because it fires only for
+  // an agent that was pointed at a grid: how many people open the New agent
+  // dialog, how many of those finish it, and how many of THOSE ever send the
+  // agent a message. Each step is a separate event carrying the same device and
+  // user id, so the funnel is built by counting distinct people per step.
+
+  /// The New agent dialog was opened. [source] is which door was used —
+  /// `machine_row` (the `+` on a machine's row), `rail_empty` (the button the
+  /// empty rail shows), `pane_empty` (the button in the empty centre pane) or
+  /// `shortcut` (⌘N and the app menu).
+  ///
+  /// Sent by `showNewAgentDialog` itself rather than by its callers, so a door
+  /// added later cannot forget to report itself.
+  void newAgentOpened({required String source}) =>
+      track('new_agent_opened', params: {'source': source});
+
+  /// An agent was created — **every** agent, unlike [gridAgentLaunched], which
+  /// counts only the ones pointed at a grid.
+  ///
+  /// [model] is the model chosen for it, and is null in two different cases
+  /// that [onGrid] tells apart: `onGrid: true` with no model is Auto (the grid
+  /// picks), and `onGrid: false` is the engine's own login, where there is no
+  /// model for us to name.
+  ///
+  /// The working folder is deliberately absent: it is an absolute path, which
+  /// this stream never carries.
+  void agentCreated({
+    required String engine,
+    required bool onGrid,
+    required bool bypassPermission,
+    String? model,
+    String? networkId,
+  }) => track(
+    'agent_created',
+    params: {
+      'engine': engine,
+      'model': model,
+      'on_grid': onGrid,
+      'network_id': networkId,
+      'bypass_permission': bypassPermission,
+    },
+  );
+
+  /// The first turn of an agent this app created — the moment somebody actually
+  /// *used* it, as opposed to making it and walking away.
+  ///
+  /// Driven by the CLI's `turn_started`, not by the composer, so a message
+  /// typed straight into the terminal counts the same as one sent from the box
+  /// underneath it — which is how most people drive these engines.
+  ///
+  /// ⚠️ **No message text, ever.** [secondsSinceCreated] is the whole point:
+  /// who it was and when are already on every event (`user_email`,
+  /// `event_timestamp`), so what this adds is the gap between making an agent
+  /// and speaking to it.
+  void agentFirstMessage({
+    required String engine,
+    required bool onGrid,
+    required int secondsSinceCreated,
+    String? model,
+  }) => track(
+    'agent_first_message',
+    params: {
+      'engine': engine,
+      'model': model,
+      'on_grid': onGrid,
+      'seconds_since_created': secondsSinceCreated,
+    },
+  );
+
   /// A RUNNING agent was moved onto a grid, or onto a different model.
   /// [outcome] = `ok` or the CLI's own refusal code (`UNSUPPORTED`, …) — which
   /// is how "the feature does not work" and "this machine's CLI is too old"

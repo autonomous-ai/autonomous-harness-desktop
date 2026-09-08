@@ -15,6 +15,7 @@ enum SettingsSection {
   terminal(LucideIcons.terminal300, 'Terminal'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
   debug(LucideIcons.bug300, 'Debug'),
+  tracking(LucideIcons.activity300, 'Tracking'),
   about(LucideIcons.info300, 'About');
 
   const SettingsSection(this.icon, this.label);
@@ -40,12 +41,12 @@ class SettingsGroup {
 
 /// What Settings lists, in order.
 ///
-/// A getter rather than a `const`, for the one row that is not always there:
-/// [SettingsSection.debug] is developer furniture and ships only where
-/// [kDebugSurfaceEnabled] says so. Everything that draws or searches the rail
-/// reads this, so a hidden section cannot be reached by a stale copy of the
-/// list — while the enum value itself always exists, so the screen behind it
-/// needs no gate of its own.
+/// A getter rather than a `const`, for the rows that are not always there:
+/// [SettingsSection.debug] and [SettingsSection.tracking] are developer
+/// furniture and ship only where [kDebugSurfaceEnabled] says so. Everything
+/// that draws or searches the rail reads this, so a hidden section cannot be
+/// reached by a stale copy of the list — while the enum values themselves
+/// always exist, so the screens behind them need no gate of their own.
 List<SettingsGroup> get settingsGroups => [
   for (final group in _kSettingsGroups)
     if (group.sections.any(_isVisible))
@@ -55,8 +56,13 @@ List<SettingsGroup> get settingsGroups => [
       ]),
 ];
 
+/// The two developer sections, named once. Both read the same in-memory
+/// buffers, both are worth nothing in a build that cannot open them, and a
+/// second list of "which ones are hidden" is how the two would drift apart.
+const _kDeveloperSections = {SettingsSection.debug, SettingsSection.tracking};
+
 bool _isVisible(SettingsSection section) =>
-    section != SettingsSection.debug || kDebugSurfaceEnabled;
+    !_kDeveloperSections.contains(section) || kDebugSurfaceEnabled;
 
 const _kSettingsGroups = [
   // The two directions of the same relationship, and the only run here about
@@ -70,11 +76,14 @@ const _kSettingsGroups = [
     SettingsSection.appearance,
     SettingsSection.terminal,
   ]),
-  // Debug sits between the two things it is most often reached from: the keys
-  // that open it, and the version a report has to name.
+  // Debug and Tracking sit between the two things they are most often reached
+  // from: the keys that open them, and the version a report has to name. The
+  // two are adjacent because they answer the same question from opposite ends
+  // — what this app asked for, and what it reported about being asked.
   SettingsGroup('Help', [
     SettingsSection.shortcuts,
     SettingsSection.debug,
+    SettingsSection.tracking,
     SettingsSection.about,
   ]),
 ];

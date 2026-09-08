@@ -1010,8 +1010,12 @@ class _EmptyGrid extends StatelessWidget {
                   key: const ValueKey('empty-grid-new-agent'),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('New agent'),
-                  onPressed: () =>
-                      showNewAgentDialog(context, notifier, machineId),
+                  onPressed: () => showNewAgentDialog(
+                    context,
+                    notifier,
+                    machineId,
+                    source: 'pane_empty',
+                  ),
                 ),
               ],
               const SizedBox(height: 8),

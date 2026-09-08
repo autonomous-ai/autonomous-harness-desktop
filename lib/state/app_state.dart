@@ -162,6 +162,19 @@ class AppNotifier extends ChangeNotifier {
   final EnvironmentProvisioner? environmentProvisioner;
   final DesktopUpdater? desktopUpdater;
   final Map<String, Timer> _turnActivityWatchdogs = {};
+
+  /// Agents THIS app created that have not taken a turn yet, keyed the way the
+  /// watchdogs are, with what they were created as.
+  ///
+  /// Only agents created here, and only this launch: an agent adopted from a
+  /// session that has been running for days would otherwise report a "first
+  /// message" that is nothing of the kind. Emptied by the first `turn_started`
+  /// for each — see `analytics.agentFirstMessage`. An agent that is made and
+  /// never spoken to simply stays here until the app quits, which is exactly
+  /// the population this event exists to measure the absence of.
+  final Map<String, ({String engine, String? model, bool onGrid, DateTime at})>
+  _agentsAwaitingFirstTurn = {};
+
   final Map<String, Timer> _offlineRetryTimers = {};
   // Periodic retry for a machine the relay reported NO_PEER_LINK for — a `harness link connect` run
   // in a terminal (or another app instance) has no way to notify this one, so this is what makes the
@@ -1857,12 +1870,56 @@ class AppNotifier extends ChangeNotifier {
     return session is String && session.isNotEmpty ? session : null;
   }
 
+  /// Records that this app just made [agentId], so its first turn can be
+  /// reported. One body, called by [createAgent] and by the test seam below —
+  /// a second place building this record is a second place to get it wrong.
+  void _armAgentFirstMessage(
+    String machineId,
+    String agentId, {
+    required String engine,
+    required bool onGrid,
+    String? model,
+  }) => _agentsAwaitingFirstTurn[_turnActivityKey(machineId, agentId)] = (
+    engine: engine,
+    model: model,
+    onGrid: onGrid,
+    at: DateTime.now(),
+  );
+
+  /// [_armAgentFirstMessage], for a test: `createAgent` needs a live socket,
+  /// and what is worth pinning is what the turn AFTER it does.
+  @visibleForTesting
+  void armAgentFirstMessageForTest(
+    String machineId,
+    String agentId, {
+    required String engine,
+    bool onGrid = false,
+    String? model,
+  }) => _armAgentFirstMessage(
+    machineId,
+    agentId,
+    engine: engine,
+    onGrid: onGrid,
+    model: model,
+  );
+
   String _turnActivityKey(String machineId, String agentId) =>
       '$machineId\u0000$agentId';
 
   void _markAgentProcessing(MachineState machine, String agentId) {
     machine.processingAgentIds.add(agentId);
     final key = _turnActivityKey(machine.machine.machineId, agentId);
+    // The first turn of an agent we made is the moment somebody actually used
+    // it. Driven by the CLI's turn events rather than by the composer, so a
+    // message typed straight into the terminal counts the same.
+    if (_agentsAwaitingFirstTurn.remove(key) case final created?) {
+      analytics.agentFirstMessage(
+        engine: created.engine,
+        model: created.model,
+        onGrid: created.onGrid,
+        secondsSinceCreated: DateTime.now().difference(created.at).inSeconds,
+      );
+    }
     _turnActivityWatchdogs.remove(key)?.cancel();
     _turnActivityWatchdogs[key] = Timer(turnActivityTimeout, () {
       _turnActivityWatchdogs.remove(key);
@@ -1999,6 +2056,15 @@ class AppNotifier extends ChangeNotifier {
     // Idempotent on agent.id — safe even if the CLI's own agent_synced push for this session
     // arrives separately (it's fire-and-forget on the CLI side and unordered relative to this reply).
     _upsertAgent(machine, agent);
+    // Armed here rather than in the dialog, which never learns the agent's id:
+    // the reply is the first moment this agent can be named at all.
+    _armAgentFirstMessage(
+      machineId,
+      agent.id,
+      engine: engine,
+      model: grid?.model,
+      onGrid: grid != null,
+    );
     // Only when a grid was actually picked: an agent on the engine's own login
     // is the old behaviour, and counting it here would make the grid funnel
     // report every agent this app has ever created.

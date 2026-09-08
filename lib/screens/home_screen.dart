@@ -147,7 +147,14 @@ class _HomeScreenState extends State<HomeScreen> {
         widget.notifier.focusedPane?.machineId ??
         widget.notifier.selectedMachineId;
     if (machineId == null) return;
-    unawaited(showNewAgentDialog(context, widget.notifier, machineId));
+    unawaited(
+      showNewAgentDialog(
+        context,
+        widget.notifier,
+        machineId,
+        source: 'shortcut',
+      ),
+    );
   }
 
   @override
