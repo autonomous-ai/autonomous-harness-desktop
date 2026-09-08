@@ -67,6 +67,7 @@ class TerminalSession extends ChangeNotifier {
   late Terminal terminal;
   TerminalSessionStatus status = TerminalSessionStatus.closed;
   String? streamId;
+
   /// 'p2p' or 'relay' — how this pane's terminal bytes are currently reaching it. Only ever set for a
   /// `harness link connect`-linked remote machine (the CLI never sends this frame for a local machine's
   /// own terminal, which has no such distinction), and reset alongside [streamId] so a stale mode can
@@ -106,6 +107,7 @@ class TerminalSession extends ChangeNotifier {
   int? _pendingCols;
   int? _pendingRows;
   TerminalViewport? _viewport;
+  ({int cols, int rows})? _measuredViewport;
   final Completer<({int cols, int rows})> _viewportSize = Completer();
   Future<void> _renderTail = Future<void>.value();
   Future<void> _inputSendTail = Future<void>.value();
@@ -373,6 +375,14 @@ class TerminalSession extends ChangeNotifier {
             status = TerminalSessionStatus.controlling;
             _markForAck(bytes.length);
             notifyListeners();
+            final measured = _measuredViewport;
+            if (measured != null) {
+              _pendingCols = measured.cols;
+              _pendingRows = measured.rows;
+            }
+            if (_pendingCols != null && _pendingRows != null) {
+              unawaited(_flushResize());
+            }
             return;
           }
           if (frame.kind == TerminalBinaryKind.sync) {
@@ -451,8 +461,10 @@ class TerminalSession extends ChangeNotifier {
   /// a terminal at the conservative 80x24 fallback also fires onResize and
   /// must not be mistaken for a measured viewport.
   void reportViewport(int width, int height) {
+    final measured = (cols: _clampCols(width), rows: _clampRows(height));
+    _measuredViewport = measured;
     if (_viewportSize.isCompleted) return;
-    _viewportSize.complete((cols: _clampCols(width), rows: _clampRows(height)));
+    _viewportSize.complete(measured);
   }
 
   void detachViewport(TerminalViewport viewport) {

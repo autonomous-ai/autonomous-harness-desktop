@@ -126,6 +126,9 @@ class Agent {
   final String? engineIconHint;
   final String? parentAgentId;
   final String status;
+  final String launchState;
+  final String? launchError;
+  final String? launchDetail;
   final bool terminalAvailable;
   final String? terminalUnavailableReason;
 
@@ -142,6 +145,9 @@ class Agent {
     this.engineIconHint,
     this.parentAgentId,
     this.status = 'active',
+    this.launchState = 'ready',
+    this.launchError,
+    this.launchDetail,
     this.terminalAvailable = false,
     this.terminalUnavailableReason,
     this.grid,
@@ -162,6 +168,15 @@ class Agent {
     final terminalAvailable = advertisedAvailable is bool
         ? advertisedAvailable
         : hasTmux;
+    final launchRaw = j['launch'];
+    final launch = launchRaw is Map
+        ? Map<String, dynamic>.from(launchRaw)
+        : const <String, dynamic>{};
+    final launchState = switch (launch['state']) {
+      'starting' => 'starting',
+      'failed' => 'failed',
+      _ => 'ready',
+    };
     return Agent(
       id: j['id'] as String,
       sessionId: _safeLabel(j['sessionId']),
@@ -171,6 +186,11 @@ class Agent {
       engineIconHint: _safeLabel(j['engineIconHint']),
       parentAgentId: _safeLabel(j['parentAgentId'] ?? j['parentId']),
       status: (j['status'] as String?) ?? 'active',
+      launchState: launchState,
+      launchError: launchState == 'failed' ? _safeLabel(launch['error']) : null,
+      launchDetail: launchState == 'failed'
+          ? _safeDetail(launch['detail'])
+          : null,
       terminalAvailable: terminalAvailable,
       terminalUnavailableReason: terminalAvailable
           ? null
@@ -189,6 +209,9 @@ class Agent {
     engineIconHint: engineIconHint,
     parentAgentId: parentAgentId,
     status: status,
+    launchState: launchState,
+    launchError: launchError,
+    launchDetail: launchDetail,
     terminalAvailable: terminalAvailable,
     terminalUnavailableReason: terminalUnavailableReason,
     grid: grid,
@@ -202,5 +225,12 @@ class Agent {
   static String? _safeLabel(Object? raw) {
     if (raw is! String || raw.isEmpty) return null;
     return raw.length <= 80 ? raw : raw.substring(0, 80);
+  }
+
+  static String? _safeDetail(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    final clean = raw.replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), ' ').trim();
+    if (clean.isEmpty) return null;
+    return clean.length <= 500 ? clean : clean.substring(0, 500);
   }
 }

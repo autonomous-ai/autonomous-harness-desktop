@@ -474,12 +474,12 @@ class _PaneContent extends StatelessWidget {
       );
     }
 
-    final agentName = wantedAgentId == null
+    final agent = wantedAgentId == null
         ? null
         : machine.agents
               .where((agent) => agent.id == wantedAgentId)
-              .map((agent) => agent.name)
               .firstOrNull;
+    final agentName = agent?.name;
 
     // Deliberately NOT gated on isLinkPromptDismissed: dismissing only suppresses the popup (see
     // showLinkMachineScreenDialog / HomeScreen._maybeShowLinkDialog) — the tile's own status stays
@@ -554,27 +554,71 @@ class _PaneContent extends StatelessWidget {
     // only be called from paint callbacks or interaction event handlers", and
     // it does not warn, it throws, so every pane became a red error box.
     return LayoutBuilder(
-      builder: (context, constraints) => TerminalPanel(
-        notifier: notifier,
-        session: session,
-        focused: notifier.isPaneFocused(pane.id),
-        composerVisible: pane.composerVisible,
-        onToggleComposer: () => notifier.toggleComposer(pane.id),
-        onClose: single ? null : close,
-        // A single tile has no slot to hold, so the pin has nothing to say.
-        pinned: pane.isPinned,
-        onTogglePin: single ? null : () => notifier.togglePinPane(pane.id),
-        onRendererFocus: () => notifier.focusPane(pane.id),
-        // Nothing to trade places with while it is the only tile.
-        paneDrag: single
-            ? null
-            : PaneDragHandle(
-                ref: PaneDragRef(paneId: pane.id),
-                size: constraints.biggest,
-              ),
-      ),
+      builder: (context, constraints) {
+        final launchFailed = agent?.launchState == 'failed';
+        final terminal = TerminalPanel(
+          notifier: notifier,
+          session: session,
+          focused: notifier.isPaneFocused(pane.id),
+          composerVisible: !launchFailed && pane.composerVisible,
+          readOnly: launchFailed,
+          onToggleComposer: launchFailed
+              ? null
+              : () => notifier.toggleComposer(pane.id),
+          onClose: single ? null : close,
+          pinned: pane.isPinned,
+          onTogglePin: single ? null : () => notifier.togglePinPane(pane.id),
+          onRendererFocus: () => notifier.focusPane(pane.id),
+          paneDrag: single
+              ? null
+              : PaneDragHandle(
+                  ref: PaneDragRef(paneId: pane.id),
+                  size: constraints.biggest,
+                ),
+        );
+        if (agent?.launchState != 'failed') return terminal;
+        return Column(
+          children: [
+            _LaunchFailureBanner(
+              message: agent?.launchDetail ?? 'The engine failed to start. Terminal output is preserved below.',
+            ),
+            Expanded(child: terminal),
+          ],
+        );
+      },
     );
   }
+}
+
+class _LaunchFailureBanner extends StatelessWidget {
+  const _LaunchFailureBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: Theme.of(context).colorScheme.errorContainer,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: Row(
+      children: [
+        Icon(
+          Icons.error_outline,
+          size: 16,
+          color: Theme.of(context).colorScheme.onErrorContainer,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onErrorContainer,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Where a dragged pane may be dropped to trade places with this one.

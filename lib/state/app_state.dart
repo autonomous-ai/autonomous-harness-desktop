@@ -1778,6 +1778,7 @@ class AppNotifier extends ChangeNotifier {
 
   void _upsertAgent(MachineState machine, Agent agent) {
     final index = machine.agents.indexWhere((item) => item.id == agent.id);
+    final previous = index == -1 ? null : machine.agents[index];
     if (index == -1) {
       machine.agents = [...machine.agents, agent];
     } else {
@@ -1793,6 +1794,9 @@ class AppNotifier extends ChangeNotifier {
     }
     machine.agentLoadStatus = AgentLoadStatus.loaded;
     machine.agentsLoadError = null;
+    if (agent.launchState == 'failed' && previous?.launchState != 'failed') {
+      _lastError = agent.launchDetail ?? 'Failed to start ${agent.name}';
+    }
   }
 
   void _renameAgent(MachineState machine, String agentId, String name) {
@@ -2546,7 +2550,9 @@ class AppNotifier extends ChangeNotifier {
     pane.session = terminal;
     terminal.addListener(notifyListeners);
     notifyListeners();
-    await terminal.open(waitForViewportSize: true);
+    // First paint is more valuable than a perfectly-sized first snapshot. Open at 80x24 now; the
+    // renderer's measured viewport is coalesced into a resize as soon as the stream is controlling.
+    await terminal.open();
   }
 
   Future<void> _detachSession(
