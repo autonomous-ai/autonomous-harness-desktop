@@ -348,6 +348,7 @@ class _DevicesSectionState extends State<DevicesSection> {
               ],
               SettingRow(
                 title: 'Pair a device',
+                alignTop: true,
                 detail: _discovered.isEmpty
                     ? 'No Autonomous devices found. Keep your device on the same network, then refresh.'
                     : 'Select your device and enter its six-character code. Separators are allowed, for example ABC-123.',
@@ -423,6 +424,15 @@ class _DevicesSectionState extends State<DevicesSection> {
                       ),
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Harness CLI keeps the connection running when you close Desktop.',
+                style: TextStyle(
+                  fontFamily: grid.AppFont.sans,
+                  fontSize: 12,
+                  color: grid.AppPalette.textSecondary,
                 ),
               ),
               const SizedBox(height: 10),

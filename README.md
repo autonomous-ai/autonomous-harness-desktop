@@ -61,7 +61,8 @@ manually entered IP address. The device needs no backend credentials; Harness’
 existing Mac login/start requirements remain unchanged.
 
 The pairing form is one shared settings row: device picker with an adjacent refresh
-icon, code field and Pair button.
+icon, code field and Pair button. The form aligns with the title at the top; a
+visible note explains that closing Desktop leaves the connection running.
 
 Desktop uses `harness autonomous-device discover --json` to populate the picker.
 The CLI resolves the selected discovery ID to its host and port. Pairing runs

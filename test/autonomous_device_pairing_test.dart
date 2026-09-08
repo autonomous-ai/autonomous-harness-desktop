@@ -111,6 +111,24 @@ void main() {
       expect(find.text('Cancel pairing'), findsNothing);
     },
   );
+  testWidgets('pairing controls align with the title and explain persistence', (
+    tester,
+  ) async {
+    await open(tester, FakeAutonomousDeviceCli());
+    final title = find.text('Pair a device');
+    final selection = find.byKey(const Key('autonomous-device-selection'));
+    expect(
+      tester.getTopLeft(selection).dy,
+      closeTo(tester.getTopLeft(title).dy, 1),
+    );
+    expect(
+      find.text(
+        'Harness CLI keeps the connection running when you close Desktop.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('single discovered device still requires explicit selection', (
     tester,
   ) async {
