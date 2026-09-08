@@ -80,6 +80,21 @@ class PaneGrid extends StatelessWidget {
     // stated by the preset or measured from the width. The hand-tuned shapes
     // below stay as they are — three tiles are two over one with the bottom one
     // SPANNING, and no uniform grid can say that.
+    if (cells.length == 5 && preset == PanePreset.middleMain) {
+      // The one five-tile shape that is not a lattice: a full-height column down
+      // the middle, two stacked either side. Read in TILE order — 1 and 4 to the
+      // left, 2 in the middle, 3 and 5 to the right — which is how a person
+      // numbers them, and it is the same order `PanePreset.tilesFor` describes,
+      // so the picker's drawing and this cannot disagree.
+      return _Axis(
+        axis: Axis.horizontal,
+        children: [
+          _Axis(axis: Axis.vertical, children: [cells[0], cells[3]]),
+          cells[1],
+          _Axis(axis: Axis.vertical, children: [cells[2], cells[4]]),
+        ],
+      );
+    }
     if (cells.length > 4) {
       return _Lattice(
         cells: cells,

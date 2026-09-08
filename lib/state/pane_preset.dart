@@ -47,6 +47,14 @@ enum PanePreset {
   cols4,
   cols5,
 
+  /// Five tiles: one tall down the MIDDLE, two stacked either side of it.
+  ///
+  /// The only five-tile shape that is not a lattice, and the reason to have it:
+  /// a lattice of five leaves the odd tile alone on a short row, while this
+  /// gives the work in hand a full-height column and keeps four others in
+  /// sight beside it.
+  middleMain,
+
   /// Four tiles in a square.
   quad,
 
@@ -68,6 +76,7 @@ enum PanePreset {
     PanePreset.cols3 => '3 columns',
     PanePreset.cols4 => '4 columns',
     PanePreset.cols5 => '5 columns',
+    PanePreset.middleMain => 'Middle + sides',
   };
 
   /// The column count this shape states, or null for [auto] and for the shapes
@@ -131,6 +140,16 @@ enum PanePreset {
       Rect.fromLTRB(.5, 1 / 3, 1, 2 / 3),
       Rect.fromLTRB(.5, 2 / 3, 1, 1),
     ],
+    // Tile order reads across the top and then across the bottom: 1 and 4 on the
+    // left, 2 down the middle, 3 and 5 on the right — which is the order a
+    // person numbers them, not the order a column would fill.
+    PanePreset.middleMain => const [
+      Rect.fromLTRB(0, 0, 1 / 3, 1 / 2),
+      Rect.fromLTRB(1 / 3, 0, 2 / 3, 1),
+      Rect.fromLTRB(2 / 3, 0, 1, 1 / 2),
+      Rect.fromLTRB(0, 1 / 2, 1 / 3, 1),
+      Rect.fromLTRB(2 / 3, 1 / 2, 1, 1),
+    ],
     PanePreset.auto => _lattice(count, columns ?? _autoColumnsForDrawing(count)),
     _ => _lattice(count, statedColumns!.clamp(1, count)),
   };
@@ -192,6 +211,18 @@ enum PanePreset {
     // more columns than tiles is the same grid with empty air in it, so the
     // list stops there. Five is the practical end: six 40-column terminals need
     // a window almost nobody has, and the floor would clamp it back anyway.
+    // Five has a shape of its own to offer, beside the column counts.
+    5 => [
+      PanePreset.auto,
+      PanePreset.middleMain,
+      for (final preset in const [
+        PanePreset.cols2,
+        PanePreset.cols3,
+        PanePreset.cols4,
+        PanePreset.cols5,
+      ])
+        preset,
+    ],
     _ => [
       PanePreset.auto,
       for (final preset in const [
