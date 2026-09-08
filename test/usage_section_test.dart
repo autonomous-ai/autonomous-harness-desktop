@@ -71,6 +71,11 @@ final _lensField = find.byWidgetPredicate(
   (widget) => widget.runtimeType.toString() == 'AppSelectField<LedgerProvider?>',
 );
 
+/// The overview's range picker, found the same way as the lens.
+final _rangeField = find.byWidgetPredicate(
+  (widget) => widget.runtimeType.toString() == 'AppSelectField<UsageRange>',
+);
+
 /// Open the lens picker and choose [label].
 Future<void> _pickLens(WidgetTester tester, String label) async {
   await tester.tap(_lensField);
@@ -202,6 +207,107 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Agents spawned'), findsOneWidget);
+    });
+  });
+
+  group('overview range', () {
+    testWidgets('opens on the last 30 days, and says which window it is', (
+      tester,
+    ) async {
+      final controller = controllerWith({
+        LedgerProvider.claude: LedgerScanResult(
+          sources: [
+            ScannedSource(
+              path: 'a.jsonl',
+              mtimeMs: 1,
+              size: 1,
+              entries: [_entry(provider: LedgerProvider.claude)],
+            ),
+          ],
+        ),
+      });
+      await controller.load();
+      await controller.storeFor(LedgerProvider.claude).setEnabled(true);
+      await pumpUsage(tester, controller);
+
+      expect(find.textContaining('Last 30 days · updated'), findsOneWidget);
+    });
+
+    testWidgets('a session older than the window is left out of the figures', (
+      tester,
+    ) async {
+      final old = DateTime.now().subtract(const Duration(days: 60));
+      final controller = controllerWith({
+        LedgerProvider.claude: LedgerScanResult(
+          sources: [
+            ScannedSource(
+              path: 'a.jsonl',
+              mtimeMs: 1,
+              size: 1,
+              entries: [
+                _entry(provider: LedgerProvider.claude, sessionId: 'recent'),
+                LedgerEntry(
+                  provider: LedgerProvider.claude,
+                  sessionId: 'ancient',
+                  timestamp: old,
+                  totals: const UsageTotals(freshInput: 500000),
+                  model: 'claude-opus-5',
+                  dedupeKey: 'ancient',
+                ),
+              ],
+            ),
+          ],
+        ),
+      });
+      await controller.load();
+      await controller.storeFor(LedgerProvider.claude).setEnabled(true);
+      await pumpUsage(tester, controller);
+
+      // Only the recent entry's 9,500 — the 60-day-old half-million is outside
+      // the default window and must not be added in.
+      expect(find.text('9.5k'), findsOneWidget);
+      expect(find.text('509.5k'), findsNothing);
+    });
+
+    testWidgets('all time brings the older session back', (tester) async {
+      final old = DateTime.now().subtract(const Duration(days: 60));
+      final controller = controllerWith({
+        LedgerProvider.claude: LedgerScanResult(
+          sources: [
+            ScannedSource(
+              path: 'a.jsonl',
+              mtimeMs: 1,
+              size: 1,
+              entries: [
+                _entry(provider: LedgerProvider.claude, sessionId: 'recent'),
+                LedgerEntry(
+                  provider: LedgerProvider.claude,
+                  sessionId: 'ancient',
+                  timestamp: old,
+                  totals: const UsageTotals(freshInput: 500000),
+                  model: 'claude-opus-5',
+                  dedupeKey: 'ancient',
+                ),
+              ],
+            ),
+          ],
+        ),
+      });
+      await controller.load();
+      await controller.storeFor(LedgerProvider.claude).setEnabled(true);
+      await pumpUsage(tester, controller);
+
+      await tester.tap(_rangeField);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AppMenuItem),
+          matching: find.text('All time'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('509.5k'), findsOneWidget);
     });
   });
 

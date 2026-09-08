@@ -33,13 +33,28 @@ import '../../stats/harness_stats.dart';
 import '../../usage/ledger/ledger_types.dart';
 import '../../usage/ledger/usage_ledger_controller.dart';
 import '../../usage/ledger/usage_overview.dart';
+import '../../usage/ledger/usage_report.dart';
 import 'usage_panels.dart';
 import 'usage_provider_pane.dart';
 
-/// How many days the overview's intensity grid shows — six weeks, so a
-/// fortnight's holiday is still visible as a gap rather than falling off the
-/// edge.
-const _kRecentDayCount = 42;
+/// What the overview opens on — the last 30 days, which is what Orca's default
+/// range shows and therefore what a figure here can be compared against.
+///
+/// ⚠️ **Not all-time, and that is a considered default rather than a limitation.**
+/// "Active days 33" over an unbounded history and "20" over the last month are
+/// both true and answer different questions, and the one somebody opening this
+/// screen means is almost always the recent one. All time is still a click away.
+const _kDefaultOverviewRange = UsageRange.d30;
+
+/// How many days the intensity grid draws when the range is unbounded.
+///
+/// Six weeks, so a fortnight's holiday is still visible as a gap rather than
+/// falling off the edge. A bounded range draws exactly its own days instead —
+/// see [_gridDayCount], since a grid showing more days than the figures cover
+/// would invite reading a cell that is not in the total beside it.
+const _kAllTimeGridDays = 42;
+
+int _gridDayCount(UsageRange range) => range.days ?? _kAllTimeGridDays;
 
 /// Which lens the Usage analytics half is showing.
 ///
@@ -73,6 +88,10 @@ class _UsageSectionState extends State<UsageSection> {
   HarnessStats get _stats => widget.stats ?? harnessStats;
 
   _Lens _lens;
+
+  /// The window the overview is read over. Held per screen, like the range on a
+  /// provider's pane: it is what you are looking at now, not a setting.
+  UsageRange _range = _kDefaultOverviewRange;
 
   @override
   void initState() {
@@ -109,7 +128,7 @@ class _UsageSectionState extends State<UsageSection> {
   }
 
   Widget _body(BuildContext context) {
-    final overview = _controller.overview;
+    final overview = _controller.overviewFor(_range);
     final states = {
       for (final state in _controller.scanStates) state.provider: state,
     };
@@ -136,7 +155,9 @@ class _UsageSectionState extends State<UsageSection> {
               children: [
                 _OverviewHeader(
                   overview: overview,
+                  range: _range,
                   isScanning: _controller.isScanning,
+                  onRangeChanged: (range) => setState(() => _range = range),
                   onRefresh: overview.enabledCount == 0
                       ? null
                       : () => unawaited(_controller.refresh(force: true)),
@@ -150,7 +171,7 @@ class _UsageSectionState extends State<UsageSection> {
                     const SizedBox(height: 12),
                     _PanelPair(
                       intensity: DailyIntensityGrid(
-                        days: recentDays(overview.days, _kRecentDayCount),
+                        days: recentDays(overview.days, _gridDayCount(_range)),
                         busiest: overview.bestDay,
                       ),
                       mix: TokenMixBar(totals: overview.totals),
@@ -332,11 +353,15 @@ class _AnalyticsHeader extends StatelessWidget {
 class _OverviewHeader extends StatelessWidget {
   const _OverviewHeader({
     required this.overview,
+    required this.range,
     required this.isScanning,
+    required this.onRangeChanged,
     required this.onRefresh,
   });
 
   final UsageOverview overview;
+  final UsageRange range;
+  final ValueChanged<UsageRange> onRangeChanged;
   final bool isScanning;
 
   /// Null when no provider is on — a refresh with nothing to read is a control
@@ -369,6 +394,20 @@ class _OverviewHeader extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(width: 12),
+        // The same control a provider's pane carries, so the two ranges are
+        // plainly the same kind of thing rather than one screen having a window
+        // and the other a hidden constant.
+        AppSelectField<UsageRange>(
+          value: range,
+          width: 150,
+          options: [
+            for (final option in UsageRange.values)
+              SelectOption(value: option, label: option.label),
+          ],
+          onChanged: onRangeChanged,
+        ),
+        const SizedBox(width: 4),
         IconButton(
           onPressed: isScanning ? null : onRefresh,
           iconSize: 15,
@@ -390,7 +429,7 @@ class _OverviewHeader extends StatelessWidget {
     if (isScanning) return 'Reading local logs…';
     final at = overview.lastScanAt;
     if (at == null) return 'Not scanned yet.';
-    return 'Updated ${_stamp(at)}'
+    return '${range.label} · updated ${_stamp(at)}'
         '${overview.hasUnpricedModel ? ' — some model prices are unavailable' : ''}';
   }
 

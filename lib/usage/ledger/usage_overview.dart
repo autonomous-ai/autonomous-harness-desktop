@@ -31,7 +31,19 @@ ProviderLedger buildProviderLedger(
     }
   }
   entries.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+  return ledgerFromEntries(provider, entries);
+}
 
+/// The same totalling over entries that are already deduplicated and sorted.
+///
+/// Split out of [buildProviderLedger] so a date-range view can reuse the exact
+/// arithmetic rather than growing a second copy of it — a clipped ledger that
+/// summed its cost differently from the full one would be a bug nobody could
+/// see, since both figures look plausible on their own.
+ProviderLedger ledgerFromEntries(
+  LedgerProvider provider,
+  List<LedgerEntry> entries,
+) {
   var totals = const UsageTotals();
   final sessions = <String>{};
   double? cost;

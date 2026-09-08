@@ -20,6 +20,7 @@ library;
 
 import 'ledger_types.dart';
 import 'model_pricing.dart';
+import 'usage_overview.dart';
 
 /// How far back a detail pane looks.
 enum UsageRange {
@@ -60,6 +61,23 @@ List<LedgerEntry> entriesInRange(
     for (final entry in ledger.entries)
       if (!entry.timestamp.isBefore(cutoff)) entry,
   ];
+}
+
+/// [ledger] cut down to [range], with every figure recomputed.
+///
+/// Not a filtered view but a real ledger: the totals, the cost and the session
+/// count all have to be re-derived, because none of them can be scaled down from
+/// the full-history figure.
+ProviderLedger clipLedger(
+  ProviderLedger ledger,
+  UsageRange range, {
+  DateTime? now,
+}) {
+  if (range.days == null) return ledger;
+  return ledgerFromEntries(
+    ledger.provider,
+    entriesInRange(ledger, range, now: now),
+  );
 }
 
 /// The eight figures across the top of a provider's pane.

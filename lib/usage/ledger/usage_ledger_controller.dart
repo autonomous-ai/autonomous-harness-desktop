@@ -24,6 +24,7 @@ import 'ledger_types.dart';
 import 'opencode_ledger_scanner.dart';
 import 'usage_ledger_store.dart';
 import 'usage_overview.dart';
+import 'usage_report.dart';
 
 class UsageLedgerController extends ChangeNotifier {
   UsageLedgerController({List<UsageLedgerStore>? stores, LocalKeyValueStore? settings})
@@ -84,9 +85,15 @@ class UsageLedgerController extends ChangeNotifier {
     for (final store in stores) store.state,
   ];
 
-  /// Every provider folded into the figures the panel prints.
-  UsageOverview get overview => buildOverview(
-    ledgers: [for (final store in stores) store.ledger],
+  /// Every provider folded into the figures the panel prints, over [range].
+  ///
+  /// The range is applied here rather than at scan time, so changing it redraws
+  /// from what is already in memory instead of re-walking the disk — the scan is
+  /// the expensive half and it does not depend on the window being looked at.
+  UsageOverview overviewFor(UsageRange range, {DateTime? now}) => buildOverview(
+    ledgers: [
+      for (final store in stores) clipLedger(store.ledger, range, now: now),
+    ],
     enabledCount: stores.where((store) => store.state.enabled).length,
     lastScanAt: _lastScanAt,
   );

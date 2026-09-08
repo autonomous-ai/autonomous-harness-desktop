@@ -400,11 +400,28 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   spacing bug. The lens picker at the top of Settings ▸ Usage switches between the overview and one
   provider, and `_Lens` is a nullable `LedgerProvider` so the per-provider cases stay exactly the
   providers that exist.
+  **The overview opens on the last 30 days**, the window Orca's default range shows, so a figure here
+  can be compared against one there — `_kDefaultOverviewRange`. All-time is a click away in the same
+  picker the provider panes carry. Measured on one machine: 30 days reads 3.2B tokens / 20 active days
+  / 80 sessions, where all-time reads 3.8B / 33 / 92 — both true, answering different questions. The
+  intensity grid draws exactly the range's days (42 when it is unbounded), because a grid showing more
+  days than the figures cover invites reading a cell that is not in the total beside it. Clipping
+  happens in `clipLedger` at draw time, not at scan time: the scan is the expensive half and does not
+  depend on the window being looked at, and `ledgerFromEntries` is shared with `buildProviderLedger` so
+  a clipped ledger cannot sum its cost differently from the full one.
   ⚠️ **There is a RANGE filter and deliberately no SCOPE filter.** Orca offers "Orca worktrees only"
   against "all local usage" because it owns the worktrees its agents run in. This app owns no such
   boundary — agents launched through Harness run on OTHER machines and write their transcripts there
   — so a "Harness only" lens over this computer's logs would filter on a distinction that does not
   exist here and would answer nearly zero. Everything local is counted and the pane says so.
+  ⚠️ **OpenCode's `tokens_cache_read` is a PEER of `tokens_input`, not a subset — Orca gets this
+  wrong and this app must not copy it.** `opencode-usage-row-parsing.ts` clamps it with
+  `Math.min(cache.read, input)` on the assumption it is contained, the way Codex's cached input is.
+  Measured against a live database, three of nine sessions read more from cache than they had input at
+  all (7,680 cached against 72 input), which no subset can do; the clamp threw away 30.2k of 51.0k real
+  cache reads and dropped them from the total besides. OpenCode's schema keeps `tokens_input`,
+  `tokens_cache_read` and `tokens_cache_write` as three columns, the Anthropic shape rather than the
+  OpenAI one. Codex remains the only provider whose input needs the subtraction.
   ⚠️ **`UsageSessionsTable` states its width instead of stretching.** Inside a horizontal
   `SingleChildScrollView` the incoming width is unbounded, so `CrossAxisAlignment.stretch` asks for
   an infinite row and the layout throws; `_sessionTableWidth` sums the columns, which is the only
