@@ -1,13 +1,10 @@
-.PHONY: upload-desktop upload-desktop-linux upload-node-runtime terminal-local-manual terminal-local-e2e terminal-prod-e2e
+.PHONY: release upload-node-runtime terminal-local-manual terminal-local-e2e terminal-prod-e2e
 
-## upload-desktop: build, sign, notarize, and publish a macOS desktop release.
-upload-desktop:
-	bash scripts/upload-desktop.sh $(ARGS)
-
-## upload-desktop-linux: build/publish Linux ARM64 or x64 (amd64 is an x64 alias).
-# Defaults to the current host. Examples: ARCH=arm64, ARCH=x64, ARCH=amd64.
-upload-desktop-linux:
-	TARGET_ARCH="$(ARCH)" bash scripts/upload-desktop-linux.sh $(ARGS)
+## release: tag this commit and push the tag — CI builds macOS + Linux, publishes to GCS, and cuts
+## the GitHub Release. The version is bumped from max(last git tag, live metadata.json), because
+## publishing by hand used to move the manifest without ever tagging. ARGS="--dry-run" to preview.
+release:
+	bash scripts/release-desktop.sh $(ARGS)
 
 ## upload-node-runtime: publish checksum-verified managed Node runtimes for desktop bootstrap.
 upload-node-runtime:
