@@ -32,15 +32,34 @@ Dio _dioAnswering(Object? body, {int status = 200}) {
   return dio;
 }
 
-/// Credentials that hand back a token without touching a keychain or a home
-/// directory — `home` is pointed at a directory that cannot exist, and the
-/// keychain read is stubbed to fail, so nothing here depends on the machine
-/// running the test.
-UsageCredentials _creds({String? claudeJson, String? home}) => UsageCredentials(
-  home: home ?? '/nonexistent-harness-test-home',
-  runProcess: (_, _) async =>
-      ProcessResult(0, claudeJson == null ? 1 : 0, claudeJson ?? '', ''),
-);
+/// Credentials backed by a throwaway home directory, read the same way on
+/// every platform this app ships to.
+///
+/// The token goes in the FILE, never through the stubbed keychain. An earlier
+/// version supplied it as fake `security` output, which passed here and failed
+/// on the Linux CI: `UsageCredentials` reads the Keychain only on macOS, so on
+/// Linux the stub was never called and every one of these tests saw an account
+/// with no session. Linux is a released target, not a second-class one, and a
+/// helper that only works on the author's laptop hides exactly this.
+///
+/// The keychain stub stays, and always fails, for the opposite reason: without
+/// it a macOS run would shell out to the real `security` and read whoever is
+/// signed in on the machine.
+UsageCredentials _creds({String? claudeJson, String? codexJson}) {
+  final dir = Directory.systemTemp.createTempSync('harness-usage-test');
+  addTearDown(() => dir.deleteSync(recursive: true));
+  void write(String folder, String file, String body) {
+    Directory('${dir.path}/$folder').createSync();
+    File('${dir.path}/$folder/$file').writeAsStringSync(body);
+  }
+
+  if (claudeJson != null) write('.claude', '.credentials.json', claudeJson);
+  if (codexJson != null) write('.codex', 'auth.json', codexJson);
+  return UsageCredentials(
+    home: dir.path,
+    runProcess: (_, _) async => ProcessResult(0, 1, '', ''),
+  );
+}
 
 void main() {
   group('reset timestamps', () {
@@ -197,18 +216,6 @@ void main() {
   });
 
   group('Codex source', () {
-    /// A home directory holding a real `.codex/auth.json`, so the source is
-    /// exercised through the file it actually reads rather than around it.
-    Directory signedInHome(String accountId) {
-      final dir = Directory.systemTemp.createTempSync('harness-usage-test');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      Directory('${dir.path}/.codex').createSync();
-      File('${dir.path}/.codex/auth.json').writeAsStringSync(
-        '{"tokens":{"access_token":"t","account_id":"$accountId"}}',
-      );
-      return dir;
-    }
-
     test('names each window by how long it actually is', () async {
       final source = CodexUsageSource(
         dio: _dioAnswering({
@@ -223,7 +230,9 @@ void main() {
             },
           },
         }),
-        credentials: UsageCredentials(home: signedInHome('acct').path),
+        credentials: _creds(
+          codexJson: '{"tokens":{"access_token":"t","account_id":"acct"}}',
+        ),
       );
       final reading = await source.read();
 
@@ -241,7 +250,9 @@ void main() {
             'primary_window': {'used_percent': 9},
           },
         }),
-        credentials: UsageCredentials(home: signedInHome('acct').path),
+        credentials: _creds(
+          codexJson: '{"tokens":{"access_token":"t","account_id":"acct"}}',
+        ),
       ).read();
 
       // A confident "5h" beside a real percentage would be read as measured.
@@ -251,7 +262,7 @@ void main() {
     test('no auth.json is a sign-in, not a failure', () async {
       final reading = await CodexUsageSource(
         dio: _dioAnswering(const {}),
-        credentials: UsageCredentials(home: '/nonexistent-harness-test-home'),
+        credentials: _creds(),
       ).read();
       expect(reading.status, UsageStatus.signedOut);
     });
