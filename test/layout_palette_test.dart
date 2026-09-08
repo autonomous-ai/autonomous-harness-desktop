@@ -14,6 +14,7 @@ import 'package:harness/state/app_state.dart';
 import 'package:harness/state/pane_preset.dart';
 import 'package:harness/state/terminal_pane.dart';
 import 'package:harness/widgets/layout_palette.dart';
+import 'package:harness/widgets/pane_grid.dart';
 
 AppNotifier _withPanes(int n) {
   final notifier = AppNotifier(
@@ -50,6 +51,49 @@ Future<AppNotifier> _open(
 }
 
 void main() {
+  testWidgets('picking a shape re-lays the grid there and then', (tester) async {
+    // The end-to-end the other tests here do NOT cover: they set the shape
+    // before the grid is built, which proves the arithmetic and nothing about
+    // the app. This one taps the picker with a grid on screen and measures what
+    // the tap did to it.
+    final notifier = _withPanes(6);
+    await tester.binding.setSurfaceSize(const Size(1512, 900));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListenableBuilder(
+          listenable: notifier,
+          builder: (context, _) => Column(
+            children: [
+              TextButton(
+                onPressed: () => showLayoutPalette(context, notifier),
+                child: const Text('open'),
+              ),
+              Expanded(child: PaneGrid(notifier: notifier)),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    double columnsOnScreen() {
+      final grid = tester.getRect(find.byType(PaneGrid));
+      final tile = tester.getRect(find.byKey(notifier.panes[0].cellKey));
+      return (grid.width / tile.width).roundToDouble();
+    }
+
+    // Explicit pumps, not pumpAndSettle: a tile that has not attached yet spins
+    // forever, so "settle" never arrives and the wait says nothing about the
+    // layout.
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('3 columns'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(notifier.presetFor(6), PanePreset.cols3);
+    expect(columnsOnScreen(), 3, reason: 'the grid followed the pick');
+  });
+
   testWidgets('an arrow moves the cursor and changes nothing yet', (
     tester,
   ) async {

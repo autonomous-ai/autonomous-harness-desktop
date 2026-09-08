@@ -2424,6 +2424,35 @@ class AppNotifier extends ChangeNotifier {
   /// deliberate act (drag a row onto an empty slot); a click is navigation, and
   /// a click that silently grew the grid would make four terminals out of four
   /// glances at the rail.
+  /// Bring up an agent the DIAL turned to.
+  ///
+  /// The rule the dial's carousel is built around: the tiles come first, in tile order, and past either
+  /// end of them the ring continues into agents that have no tile. Landing on one of those is what puts
+  /// it on the desk — it replaces the tile at the end it was reached from, so the grid stays the size the
+  /// user chose and the tile that changes is the one they walked off.
+  ///
+  /// Which end is the daemon's answer, not a guess made here: it owns the flat list of every agent on
+  /// every machine, so it is the only side that can say whether an agent sits before the first tile or
+  /// after the last. With no tiles at all there is no end to replace, and the agent opens a new one.
+  Future<void> selectAgentFromDial(
+    String machineId,
+    String agentId, {
+    DeskEdge? edge,
+  }) async {
+    // Already on the desk, or the daemon said nothing about an edge: ordinary selection.
+    if (edge == null || paneOfAgent(machineId, agentId) != null) {
+      await selectAgent(machineId, agentId);
+      return;
+    }
+    if (panes.isEmpty) {
+      // Nothing to replace. Opening a tile is the only thing "look at this" can mean.
+      await assignAgentToPane(null, machineId, agentId);
+      return;
+    }
+    final target = edge == DeskEdge.head ? panes.first : panes.last;
+    await assignAgentToPane(target.id, machineId, agentId);
+  }
+
   Future<void> selectAgent(String machineId, String agentId) async {
     final existing = paneOfAgent(machineId, agentId);
     if (existing != null) {
@@ -2929,14 +2958,27 @@ class AppNotifier extends ChangeNotifier {
         );
         break;
       case 'dial_focus':
-        // Turning the dial to an agent brings that agent's terminal up here. selectAgent is the ordinary
-        // selection path — the same one a click on the rail takes — so an agent with no terminal, an
-        // offline machine and a missing id all fail exactly the way they already do.
+        // Turning the dial to an agent brings that agent's terminal up here.
+        //
+        // `edge` is sent only for an agent that has no tile, and names which end of the desk the daemon's
+        // carousel put it past — so the dial never has to report which way the thumb moved. Without one,
+        // this is the ordinary selection path: the same one a click on the rail takes, failing the same
+        // way for a missing terminal, an offline machine or an unknown id.
         final agentId = payload['agentId'];
         if (agentId is String && agentId.isNotEmpty) {
           final targetMachineId = _dialFocusMachine(payload, agentId);
           if (targetMachineId != null) {
-            unawaited(selectAgent(targetMachineId, agentId));
+            unawaited(
+              selectAgentFromDial(
+                targetMachineId,
+                agentId,
+                edge: switch (payload['edge']) {
+                  'head' => DeskEdge.head,
+                  'tail' => DeskEdge.tail,
+                  _ => null,
+                },
+              ),
+            );
           }
         }
         break;
