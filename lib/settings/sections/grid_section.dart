@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../analytics/analytics.dart';
+import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
@@ -12,6 +13,8 @@ import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/section_scaffold.dart';
 import '../../shared/widgets/skeleton.dart';
+import 'create_grid_dialog.dart';
+import 'rename_grid_dialog.dart';
 import 'grid_network_table.dart';
 import 'grid_target_strip.dart';
 
@@ -34,6 +37,7 @@ class GridSection extends StatefulWidget {
     this.selection,
     this.session,
     this.harnessEmail,
+    this.mutations,
   });
 
   final GridNetworksController controller;
@@ -51,6 +55,11 @@ class GridSection extends StatefulWidget {
   /// else makes — see [_AccountMismatch]. Null before the profile lands.
   final String? harnessEmail;
 
+  /// Creating and deleting, injected by tests. The app builds one per visit to
+  /// this pane: unlike [GridNetworksController] it caches nothing worth sharing
+  /// — it holds only what is in flight right now.
+  final GridMutationsController? mutations;
+
   @override
   State<GridSection> createState() => _GridSectionState();
 }
@@ -58,8 +67,28 @@ class GridSection extends StatefulWidget {
 class _GridSectionState extends State<GridSection> {
   String _query = '';
   _GridFilter _filter = _GridFilter.all;
+  late final GridMutationsController _mutations;
+
+  /// Only an injected one is left alone — a controller this pane made is this
+  /// pane's to dispose, and one it was handed belongs to whoever passed it.
+  bool _ownsMutations = false;
 
   GridSelectionStore get _selection => widget.selection ?? gridSelectionStore;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsMutations = widget.mutations == null;
+    _mutations =
+        widget.mutations ??
+        GridMutationsController(networks: widget.controller);
+  }
+
+  @override
+  void dispose() {
+    if (_ownsMutations) _mutations.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,8 +98,12 @@ class _GridSectionState extends State<GridSection> {
     // The whole pane, heading included, hangs off the controller: the count
     // beside the title is part of the load, so a scaffold built outside this
     // builder would keep saying nothing after the grids arrived.
+    // BOTH controllers, not just the list: the table reads `isDeleting` off
+    // the mutations controller to spin one row, and a builder listening only
+    // to the list would leave that row saying "Delete grid" for the whole
+    // call — the click would look like it did nothing.
     return ListenableBuilder(
-      listenable: widget.controller,
+      listenable: Listenable.merge([widget.controller, _mutations]),
       builder: (context, _) {
         final state = widget.controller.state;
         final total = state is GridNetworksReady
@@ -117,7 +150,7 @@ class _GridSectionState extends State<GridSection> {
               message: message,
               onRetry: () => unawaited(widget.controller.refresh()),
             ),
-            GridNetworksReady(:final me) => _body(me.user.email, me.networks),
+            GridNetworksReady(:final me) => _body(me.user, me.networks),
           },
         );
       },
@@ -141,7 +174,8 @@ class _GridSectionState extends State<GridSection> {
   /// The pane's one layout, with or without its answer. [email] and
   /// [networks] are null while the grids load, and every part that depends
   /// on them is then drawn at its final size and left blank.
-  Widget _body(String? email, List<GridNetwork>? networks) {
+  Widget _body(GridUser? user, List<GridNetwork>? networks) {
+    final email = user?.email;
     final visible = email == null || networks == null
         ? null
         : _visible(email, networks);
@@ -168,6 +202,7 @@ class _GridSectionState extends State<GridSection> {
             onQuery: (value) => setState(() => _query = value),
             onFilter: (value) => setState(() => _filter = value),
             onReload: () => unawaited(widget.controller.refresh()),
+            onCreate: user == null ? null : () => unawaited(_create(user)),
           ),
           const SizedBox(height: 10),
           Expanded(
@@ -181,6 +216,9 @@ class _GridSectionState extends State<GridSection> {
                     signedInEmail: email!,
                     selectedId: chosen.networkId,
                     filtered: visible.length != networks!.length,
+                    onDelete: _confirmDelete,
+                    onRename: _rename,
+                    isDeleting: _mutations.isDeleting,
                     onUse: (network) {
                       analytics.gridPicked(
                         source: 'settings',
@@ -205,6 +243,57 @@ class _GridSectionState extends State<GridSection> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Open the create form, and say what happened afterwards.
+  ///
+  /// The result is announced HERE rather than inside the dialog: the dialog is
+  /// gone by the time there is anything to say, and a line that flashes for one
+  /// frame on the way out is no better than one never printed. A warning means
+  /// the grid was made but this computer's own list did not catch up — worth
+  /// saying, and not an error.
+  Future<void> _create(GridUser user) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final name = await showCreateGridDialog(
+      context,
+      controller: _mutations,
+      gatedDomain: user.gatedDomain,
+    );
+    if (name == null) return;
+    final state = _mutations.createState;
+    final warning = state is CreateGridDone ? state.warning : null;
+    messenger.showSnackBar(
+      SnackBar(content: Text(warning ?? 'Grid “$name” created.')),
+    );
+  }
+
+  /// Open the rename form, and name the result afterwards.
+  ///
+  /// Said here rather than inside the dialog, for the reason [_create] gives:
+  /// the dialog is gone by the time there is anything to say.
+  Future<void> _rename(GridNetwork network) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final name = await showRenameGridDialog(
+      context,
+      controller: _mutations,
+      network: network,
+    );
+    if (name == null) return;
+    messenger.showSnackBar(SnackBar(content: Text('Renamed to "$name".')));
+  }
+
+  /// Delete a grid, then say what happened.
+  ///
+  /// The message comes back from the controller rather than being read off its
+  /// state afterwards: the row that started this is gone by then, and reading
+  /// state through a disposed widget is a crash rather than a blank line.
+  Future<void> _confirmDelete(GridNetwork network) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final name = network.displayName;
+    final error = await _mutations.delete(network.networkId);
+    messenger.showSnackBar(
+      SnackBar(content: Text(error ?? 'Deleted "$name".')),
     );
   }
 
@@ -264,6 +353,7 @@ class _FilterBar extends StatelessWidget {
     required this.onQuery,
     required this.onFilter,
     required this.onReload,
+    required this.onCreate,
   });
 
   final String query;
@@ -277,6 +367,13 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<String> onQuery;
   final ValueChanged<_GridFilter> onFilter;
   final VoidCallback onReload;
+
+  /// Null until the grid list has loaded. Creating needs the names already
+  /// taken (to reject a duplicate before the round-trip) and the account's own
+  /// domain (to know whether the domain rule may even be offered) — both come
+  /// from the same fetch, and offering the button before it lands would open a
+  /// form that cannot answer its own questions.
+  final VoidCallback? onCreate;
 
   @override
   Widget build(BuildContext context) {
@@ -357,6 +454,14 @@ class _FilterBar extends StatelessWidget {
                 size: 16,
                 tooltip: 'Reload grids',
                 onPressed: onReload,
+              ),
+              const SizedBox(width: 2),
+              AppIconButton(
+                key: const Key('grid-create-button'),
+                icon: LucideIcons.plus300,
+                size: 16,
+                tooltip: 'New grid',
+                onPressed: onCreate,
               ),
             ],
           ),

@@ -12,12 +12,23 @@ class SelectOption<T> {
     required this.value,
     required this.label,
     this.note,
+    this.detail,
     this.leading,
     this.trailing,
   });
 
   final T value;
   final String label;
+
+  /// A sentence UNDER the label, for a list whose labels alone do not say what
+  /// picking one does — the three access rules on a grid, where the whole
+  /// choice is what each admits.
+  ///
+  /// Distinct from [note], which sits beside the label and qualifies the same
+  /// noun. A sentence cannot go there: the closed field is only as wide as the
+  /// control, so it would arrive clipped mid-clause. Shown in the OPEN menu
+  /// only, which is where it is needed — while choosing, not after.
+  final String? detail;
 
   /// A mark shown before the label, in the row AND in the closed control — an
   /// engine's logo, a colour swatch. Built fresh per use rather than shared, so
@@ -91,7 +102,19 @@ class _AppSelectFieldState<T> extends State<AppSelectField<T>> {
   /// The ceiling is still real: past it a long list scrolls instead of running
   /// off the window.
   double get _panelHeight => math.min(
-    widget.options.length * AppMenuRowMetrics.roomy.extent +
+    // A row with a detail line is TALLER, and the difference has to be counted
+    // per row rather than assumed for all of them: a list where only some
+    // options carry a sentence would otherwise be measured wrong in whichever
+    // direction the guess went, and a panel that disagrees with its layout by a
+    // few pixels wears a scrollbar it does not need.
+    widget.options.fold<double>(
+          0,
+          (total, option) =>
+              total +
+              (option.detail == null
+                  ? AppMenuRowMetrics.roomy.extent
+                  : AppMenuRowMetrics.roomy.detailExtent),
+        ) +
         AppMenu.panelPadding.vertical,
     _maxPanelHeight,
   );
@@ -157,6 +180,7 @@ class _AppSelectFieldState<T> extends State<AppSelectField<T>> {
               selected: option.value == widget.value,
               label: option.label,
               note: option.note,
+              detail: option.detail,
               leading: option.leading?.call(),
               trailing: option.trailing?.call(),
               onPressed: () {
