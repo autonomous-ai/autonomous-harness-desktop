@@ -258,9 +258,16 @@ void main() {
   });
 
   group('the bar', () {
-    /// Pumps one window's row and hands back the fill that was actually
-    /// painted — its measured width, and the colour it was drawn in.
-    Future<({double width, Color color})> fill(
+    /// Pumps one window's row and hands back the fill as it was actually
+    /// LAID OUT — [WidgetTester.getSize], not the `width` property of the
+    /// widget that asked for it.
+    ///
+    /// The difference is the whole point. An earlier version of these tests
+    /// read the properties, and passed against a bar whose fill was laid out
+    /// zero pixels tall and therefore never appeared on screen: the tree said
+    /// coral, the window drew nothing. A property is a request; only the size
+    /// is an outcome.
+    Future<({Size size, Color color})> fill(
       WidgetTester tester,
       double percent,
     ) async {
@@ -287,11 +294,10 @@ void main() {
         ),
       );
       final finder = find.byKey(const Key('usage-bar-fill'));
-      final box = tester.widget<SizedBox>(finder);
       final painted = tester.widget<ColoredBox>(
         find.descendant(of: finder, matching: find.byType(ColoredBox)),
       );
-      return (width: box.width ?? 0, color: painted.color);
+      return (size: tester.getSize(finder), color: painted.color);
     }
 
     testWidgets('a single-digit window still shows a band of colour', (
@@ -301,13 +307,16 @@ void main() {
       // of their life, a strictly proportional fill is a couple of pixels and
       // reads as nothing at all.
       final small = await fill(tester, 2);
-      expect(small.width, greaterThanOrEqualTo(4));
+      expect(small.size.width, greaterThanOrEqualTo(4));
+      // And it has to be tall enough to see, which is the half that silently
+      // went missing: a fill laid out flat is present, correct and invisible.
+      expect(small.size.height, 6);
     });
 
     testWidgets('an untouched window draws no fill at all', (tester) async {
       // Zero is the one case that must NOT be over-represented: a bar claiming
       // usage nobody spent is worse than a bar that is hard to see.
-      expect((await fill(tester, 0)).width, 0);
+      expect((await fill(tester, 0)).size.width, 0);
     });
 
     testWidgets('the fill wears the account colour, and never a grey', (
@@ -334,7 +343,9 @@ void main() {
       // The bar spans the panel, so a spent window's fill is the panel's own
       // width — and the clamp that widens small fills must not widen this one
       // past the track it sits in.
-      expect((await fill(tester, 100)).width, 248);
+      final full = await fill(tester, 100);
+      expect(full.size.width, 248);
+      expect(full.size.height, 6);
     });
   });
 

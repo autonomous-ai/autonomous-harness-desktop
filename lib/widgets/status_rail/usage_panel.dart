@@ -215,16 +215,26 @@ class UsageBar extends StatelessWidget {
             final width = measured <= 0
                 ? 0.0
                 : measured.clamp(_minFill, full).toDouble();
+            // BOTH children are positioned, deliberately. A Stack takes its
+            // size from its non-positioned children, so an unpositioned fill
+            // made the Stack as narrow as the fill itself — dragging the track
+            // in with it — while the fill's own ColoredBox, left with loose
+            // height, collapsed to nothing. The result drew the *track* at the
+            // fill's width: the right length in the wrong colour, which is
+            // exactly the bug this bar was rewritten to fix.
             return Stack(
               children: [
                 Positioned.fill(
                   child: ColoredBox(color: grid.AppSurface.recess),
                 ),
-                SizedBox(
+                Positioned(
                   // Keyed so a test can measure what was actually painted:
                   // this bar's whole failure mode is being present in the
                   // widget tree and invisible on screen.
                   key: const Key('usage-bar-fill'),
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
                   width: width,
                   child: ColoredBox(color: fill),
                 ),
