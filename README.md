@@ -60,6 +60,9 @@ The Mac connects directly to the selected device without backend routing or a
 manually entered IP address. The device needs no backend credentials; Harness’s
 existing Mac login/start requirements remain unchanged.
 
+The pairing form is one shared settings row: device picker with an adjacent refresh
+icon, code field and Pair button.
+
 Desktop uses `harness autonomous-device discover --json` to populate the picker.
 The CLI resolves the selected discovery ID to its host and port. Pairing runs
 `harness autonomous-device pair --code-stdin --device <discoveryId> --json` through

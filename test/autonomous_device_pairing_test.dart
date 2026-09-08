@@ -6,6 +6,7 @@ import 'package:harness/autonomous_device/autonomous_device_cli.dart';
 import 'package:harness/shared/widgets/app_icon_button.dart';
 import 'package:harness/shared/widgets/app_select_field.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
+import 'package:harness/shared/widgets/setting_row.dart';
 import 'package:harness/settings/sections/devices_section.dart';
 
 class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
@@ -102,6 +103,10 @@ void main() {
         find.byKey(const Key('autonomous-device-selection')),
         findsOneWidget,
       );
+      expect(find.byType(SettingRow), findsOneWidget);
+      expect(find.text('Pair'), findsOneWidget);
+      expect(find.text('Refresh'), findsNothing);
+      expect(find.text('Pair an Autonomous device'), findsNothing);
       expect(find.text('Computer address'), findsNothing);
       expect(find.text('Cancel pairing'), findsNothing);
     },

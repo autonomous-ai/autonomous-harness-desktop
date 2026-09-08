@@ -298,9 +298,20 @@ class _DevicesSectionState extends State<DevicesSection> {
               SettingRow(
                 title: 'Update Harness CLI to use Autonomous devices.',
                 detail: 'Run this command in Terminal, then refresh this page.',
-                control: const SizedBox(
+                control: SizedBox(
                   width: SettingRow.controlWidth,
-                  child: SelectableText('harness update'),
+                  child: Row(
+                    children: [
+                      const Expanded(child: SelectableText('harness update')),
+                      AppIconButton(
+                        icon: Icons.refresh_rounded,
+                        tooltip: 'Refresh Autonomous device status',
+                        onPressed: disabled
+                            ? null
+                            : () => unawaited(_refresh()),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             if ((_actionError != null || _error != null) && !_unsupported)
@@ -336,73 +347,82 @@ class _DevicesSectionState extends State<DevicesSection> {
                 const SizedBox(height: 10),
               ],
               SettingRow(
-                title: 'Autonomous device',
+                title: 'Pair a device',
                 detail: _discovered.isEmpty
-                    ? 'No Autonomous devices found. Keep your device powered on and on the same network, then refresh.'
-                    : 'Choose the Autonomous device showing your pairing code.',
+                    ? 'No Autonomous devices found. Keep your device on the same network, then refresh.'
+                    : 'Select your device and enter its six-character code. Separators are allowed, for example ABC-123.',
                 control: SizedBox(
                   width: SettingRow.controlWidth,
-                  child: IgnorePointer(
-                    ignoring: disabled,
-                    child: AppSelectField<String?>(
-                      key: const Key('autonomous-device-selection'),
-                      value: _selectedDevice,
-                      options: [
-                        const SelectOption<String?>(
-                          value: null,
-                          label: 'Select a device',
-                        ),
-                        for (final device in _discovered)
-                          SelectOption<String?>(
-                            value: device['id'] as String,
-                            label:
-                                device['name']?.toString() ??
-                                'Autonomous device',
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: IgnorePointer(
+                              ignoring: disabled,
+                              child: AppSelectField<String?>(
+                                key: const Key('autonomous-device-selection'),
+                                value: _selectedDevice,
+                                options: [
+                                  const SelectOption<String?>(
+                                    value: null,
+                                    label: 'Select a device',
+                                  ),
+                                  for (final device in _discovered)
+                                    SelectOption<String?>(
+                                      value: device['id'] as String,
+                                      label:
+                                          device['name']?.toString() ??
+                                          'Autonomous device',
+                                    ),
+                                ],
+                                onChanged: (value) => setState(() {
+                                  _selectedDevice = value;
+                                  _code.clear();
+                                  _actionError = null;
+                                }),
+                              ),
+                            ),
                           ),
-                      ],
-                      onChanged: (value) => setState(() {
-                        _selectedDevice = value;
-                        _code.clear();
-                        _actionError = null;
-                      }),
-                    ),
+                          const SizedBox(width: 8),
+                          AppIconButton(
+                            icon: Icons.refresh_rounded,
+                            tooltip: 'Refresh Autonomous device status',
+                            onPressed: disabled
+                                ? null
+                                : () => unawaited(_refresh()),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('autonomous-device-code'),
+                        controller: _code,
+                        enabled: !disabled,
+                        maxLength: 32,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        style: TextStyle(
+                          fontFamily: grid.AppFont.sans,
+                          fontSize: 13,
+                          color: grid.AppPalette.textPrimary,
+                        ),
+                        decoration: labeledFieldDecoration(
+                          'Six-character code',
+                          fill: grid.AppCard.inset,
+                        ).copyWith(counterText: ''),
+                        onSubmitted: (_) => unawaited(_submitCode()),
+                      ),
+                      const SizedBox(height: 10),
+                      action(
+                        _busy ? 'Pairing…' : 'Pair',
+                        disabled ? null : () => unawaited(_submitCode()),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SettingRow(
-                title: 'Code from Autonomous device',
-                detail: 'Enter the six-character code from your Autonomous device. Separators are allowed, for example ABC-123.',
-                control: SizedBox(
-                  width: SettingRow.controlWidth,
-                  child: TextField(
-                    key: const Key('autonomous-device-code'),
-                    controller: _code,
-                    enabled: !disabled,
-                    maxLength: 32,
-                    obscureText: true,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    style: TextStyle(
-                      fontFamily: grid.AppFont.sans,
-                      fontSize: 13,
-                      color: grid.AppPalette.textPrimary,
-                    ),
-                    decoration: labeledFieldDecoration(
-                      'Six-character code',
-                      fill: grid.AppCard.inset,
-                    ).copyWith(counterText: ''),
-                    onSubmitted: (_) => unawaited(_submitCode()),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SettingRow(
-                title: _busy ? 'Pairing…' : 'Pair an Autonomous device',
-                detail: 'The Mac connects directly to your selected Autonomous device.',
-                control: action(
-                  'Connect Autonomous device',
-                  disabled ? null : () => unawaited(_submitCode()),
                 ),
               ),
               const SizedBox(height: 10),
@@ -414,15 +434,6 @@ class _DevicesSectionState extends State<DevicesSection> {
                 const SizedBox(height: 10),
               ],
             ],
-            SettingRow(
-              title: 'Refresh',
-              detail: 'Harness CLI keeps the connection running when you close Desktop.',
-              control: AppIconButton(
-                icon: Icons.refresh_rounded,
-                tooltip: 'Refresh Autonomous device status',
-                onPressed: disabled ? null : () => unawaited(_refresh()),
-              ),
-            ),
             const SizedBox(height: 8),
           ],
         ),
