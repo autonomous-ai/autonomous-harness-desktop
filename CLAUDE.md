@@ -404,8 +404,9 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   can be compared against one there — `_kDefaultOverviewRange`. All-time is a click away in the same
   picker the provider panes carry. Measured on one machine: 30 days reads 3.2B tokens / 20 active days
   / 80 sessions, where all-time reads 3.8B / 33 / 92 — both true, answering different questions. The
-  intensity grid draws exactly the range's days (42 when it is unbounded), because a grid showing more
-  days than the figures cover invites reading a cell that is not in the total beside it. Clipping
+  intensity grid draws a fixed six weeks whatever the range is, as Orca's does: `overview.days` is
+  already clipped, so the days before the window fill in as EMPTY cells rather than as stray data, and
+  shrinking the strip to the range only costs it the context a heatmap exists for. Clipping
   happens in `clipLedger` at draw time, not at scan time: the scan is the expensive half and does not
   depend on the window being looked at, and `ledgerFromEntries` is shared with `buildProviderLedger` so
   a clipped ledger cannot sum its cost differently from the full one.

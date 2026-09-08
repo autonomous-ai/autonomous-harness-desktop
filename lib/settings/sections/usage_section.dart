@@ -46,15 +46,20 @@ import 'usage_provider_pane.dart';
 /// screen means is almost always the recent one. All time is still a click away.
 const _kDefaultOverviewRange = UsageRange.d30;
 
-/// How many days the intensity grid draws when the range is unbounded.
+/// How many days the intensity grid draws — six weeks, whatever the range is.
 ///
-/// Six weeks, so a fortnight's holiday is still visible as a gap rather than
-/// falling off the edge. A bounded range draws exactly its own days instead —
-/// see [_gridDayCount], since a grid showing more days than the figures cover
-/// would invite reading a cell that is not in the total beside it.
-const _kAllTimeGridDays = 42;
-
-int _gridDayCount(UsageRange range) => range.days ?? _kAllTimeGridDays;
+/// Fixed rather than following the range, which is what Orca does and what the
+/// strip is for: it is a *recent activity* band, and six weeks is enough to see
+/// a rhythm — a fortnight off still reads as a gap instead of falling off the
+/// edge.
+///
+/// ⚠️ **The days outside a narrower range are not stray data — they are EMPTY by
+/// construction.** `overview.days` is already clipped to the chosen window, so
+/// `recentDays` fills everything before it with blank cells. An earlier version
+/// shrank the grid to the range on the theory that a cell might be read as part
+/// of a total it was not in; there is no such cell, and shrinking only cost the
+/// strip the context that makes a heatmap worth drawing.
+const _kGridDayCount = 42;
 
 /// Which lens the Usage analytics half is showing.
 ///
@@ -171,7 +176,7 @@ class _UsageSectionState extends State<UsageSection> {
                     const SizedBox(height: 12),
                     _PanelPair(
                       intensity: DailyIntensityGrid(
-                        days: recentDays(overview.days, _gridDayCount(_range)),
+                        days: recentDays(overview.days, _kGridDayCount),
                         busiest: overview.bestDay,
                       ),
                       mix: TokenMixBar(totals: overview.totals),

@@ -312,6 +312,48 @@ void main() {
   });
 
   group('overview panels', () {
+    testWidgets('the heatmap keeps its six weeks even on a narrower range', (
+      tester,
+    ) async {
+      final old = DateTime.now().subtract(const Duration(days: 60));
+      final controller = controllerWith({
+        LedgerProvider.claude: LedgerScanResult(
+          sources: [
+            ScannedSource(
+              path: 'a.jsonl',
+              mtimeMs: 1,
+              size: 1,
+              entries: [
+                _entry(provider: LedgerProvider.claude, sessionId: 'recent'),
+                LedgerEntry(
+                  provider: LedgerProvider.claude,
+                  sessionId: 'ancient',
+                  timestamp: old,
+                  totals: const UsageTotals(freshInput: 500000),
+                  model: 'claude-opus-5',
+                  dedupeKey: 'ancient',
+                ),
+              ],
+            ),
+          ],
+        ),
+      });
+      await controller.load();
+      await controller.storeFor(LedgerProvider.claude).setEnabled(true);
+      await pumpUsage(tester, controller);
+
+      final grid = tester.widget<DailyIntensityGrid>(
+        find.byType(DailyIntensityGrid),
+      );
+      // Six weeks of cells on the default 30-day range: the twelve days before
+      // the window are drawn EMPTY rather than dropped, which is what keeps the
+      // strip readable as a rhythm.
+      expect(grid.days, hasLength(42));
+      expect(grid.days.where((d) => d.totals.total > 0), hasLength(1));
+      // And the 60-day-old entry is still outside the figures.
+      expect(find.text('9.5k'), findsOneWidget);
+    });
+
     testWidgets('the heatmap names its best day and carries a scale', (
       tester,
     ) async {
