@@ -53,32 +53,33 @@ commit evidence before it sends terminal traffic to production.
 
 ## Autonomous device pairing
 
-Open **Settings → Devices**, select **Pair an Autonomous device**, then enter the displayed
-computer address and pairing code on the Autonomous device. The CLI owns the pairing deadline;
-Desktop refreshes every two seconds during pairing and every sixty seconds
-otherwise. **Refresh** also reads the current state manually.
+Open **Settings → Devices → Pair an Autonomous device**. Desktop runs
+`harness autonomous-device listen --json` to open a 60-second listening window
+and shows this computer's address. On the Autonomous device, enter that address
+and start pairing: **the Autonomous device generates and displays the code**.
+Once its intent reaches Harness, Desktop shows a code input. Enter the code
+from the Autonomous device to confirm the matching request.
 
-**Replace Autonomous device** requires confirmation. The current Autonomous device keeps access until the
-replacement completes an authenticated connection. Cancelling the pending pairing
-keeps the current Autonomous device. **Revoke Autonomous device** removes the selected Autonomous device's access immediately
-and requires confirmation. Closing Desktop does not stop the CLI daemon or revoke
-pairing. The Autonomous device can interact only with agents on the paired computer.
+Desktop passes the code only through the stdin pipe of
+`harness autonomous-device pair --code-stdin --pair-id <id> --json`.
+It never puts the code in command arguments, logs, URLs or persisted settings.
+Status responses contain no code. Typed codes are cleared on submit, cancellation,
+expiry, a changed intent, or leaving the page; stale intents are never submitted.
 
-The CLI contract is implemented in `autonomous-harness`:
-`cli/src/lib/autonomous-device/transport.ts` — `pairStart` opens the pairing window without
-revoking the current Autonomous device; `receive` confirms the replacement only after encrypted
-`autonomous_device_finished` proves possession of the session key and signed welcome challenge.
-`cli/src/lib/autonomous-device/store.ts` — `confirm` persists the new active identity.
+**Replace Autonomous device** requires confirmation before opening the listener.
+Both listen and pair carry `--replace`. The current Autonomous device keeps access
+until its replacement finishes an authenticated connection; cancelling or expiry
+preserves the incumbent. **Revoke Autonomous device** requires separate confirmation.
+Closing Desktop does not stop Harness CLI or revoke an existing pairing.
 
-An older CLI shows the `harness update` instruction. Desktop uses
-`HarnessCliRunner.start` for `harness autonomous-device ... --json` so pairing codes are not
-written to the process-output transcript. Codes remain in widget memory. Commands
-that time out are not automatically retried. A polling response that omits the code
-retains it only when `expiresAt` matches the same active pairing window; a terminal
-state or a different window clears it. `lib/autonomous_device/autonomous_device_cli.dart` wraps the CLI,
-and `test/autonomous_device_pairing_test.dart` covers this lifetime and the pairing UI.
-Widget tests inject a fake `AutonomousDeviceCli`;
-`kUnderTest` disables background polling and real CLI process execution.
+Desktop polls `pair-status` every two seconds in `listening`, `waiting`, or `running`,
+and every sixty seconds otherwise. The CLI implements the protocol in
+`cli/src/lib/autonomous-device/transport.ts`; encrypted `autonomous_device_finished`
+confirms the new identity before replacement. An older CLI shows `harness update`.
+`lib/autonomous_device/autonomous_device_cli.dart` uses `HarnessCliRunner.start`
+(lifecycle logging only); tests inject a fake and disable real CLI execution and
+background polling. `test/autonomous_device_pairing_test.dart` covers device-owned
+codes, stdin-only command construction, intent changes and replacement confirmation.
 
 ## Releases
 

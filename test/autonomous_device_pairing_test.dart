@@ -15,6 +15,10 @@ class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
   Completer<void>? statusWait;
   bool unsupported = false;
   final replacements = <bool>[];
+  final submissions = <Map<String, dynamic>>[];
+  int expiry = DateTime.now()
+      .add(const Duration(seconds: 60))
+      .millisecondsSinceEpoch;
   final revoked = <String>[];
   @override
   Future<Map<String, dynamic>> status() async {
@@ -41,15 +45,28 @@ class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
   @override
   Future<Map<String, dynamic>> pairStatus() async => pairState;
   @override
-  Future<Map<String, dynamic>> pair({bool replace = false}) async {
+  Future<Map<String, dynamic>> listen({bool replace = false}) async {
     replacements.add(replace);
     return {
-      'code': 'ABC234',
+      'state': 'listening',
       'address': '192.168.1.10:18474',
-      'expiresAt': DateTime.now().add(window).millisecondsSinceEpoch,
+      'expiresAt': expiry = DateTime.now().add(window).millisecondsSinceEpoch,
       'machineName': 'My computer',
     };
   }
+
+  @override
+  Future<Map<String, dynamic>> pair({
+    required String code,
+    required String pairId,
+    bool replace = false,
+  }) async {
+    submissions.add({'code': code, 'pairId': pairId, 'replace': replace});
+    return {'state': 'running'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> cancel() async => {'cancelled': true};
 
   @override
   Future<Map<String, dynamic>> revoke(String id) async {
@@ -60,56 +77,6 @@ class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
 }
 
 void main() {
-  group('pair-status code lifetime', () {
-    final previous = <String, dynamic>{
-      'state': 'waiting',
-      'expiresAt': 1234,
-      'code': 'ABC234',
-    };
-    test('omitted code survives only the same active expiry', () {
-      expect(
-        mergeAutonomousDevicePairStatus(previous, {
-          'state': 'running',
-          'expiresAt': 1234,
-        })['code'],
-        'ABC234',
-      );
-      expect(
-        mergeAutonomousDevicePairStatus(previous, {
-          'state': 'waiting',
-          'expiresAt': 5678,
-        })['code'],
-        isNull,
-      );
-      expect(
-        mergeAutonomousDevicePairStatus(previous, {'state': 'waiting'})['code'],
-        isNull,
-      );
-    });
-    for (final state in ['paired', 'failed', 'idle']) {
-      test('$state erases even an echoed code', () {
-        expect(
-          mergeAutonomousDevicePairStatus(previous, {
-            'state': state,
-            'expiresAt': 1234,
-            'code': 'ABC234',
-          }).containsKey('code'),
-          isFalse,
-        );
-      });
-    }
-    test('a new active window uses only its newly supplied code', () {
-      expect(
-        mergeAutonomousDevicePairStatus(previous, {
-          'state': 'waiting',
-          'expiresAt': 5678,
-          'code': 'XYZ789',
-        })['code'],
-        'XYZ789',
-      );
-    });
-  });
-
   Future<void> open(WidgetTester tester, FakeAutonomousDeviceCli cli) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -119,7 +86,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('pairing displays CLI code and reachable address', (
+  testWidgets('listen shows address and asks the device to generate its code', (
     tester,
   ) async {
     final cli = FakeAutonomousDeviceCli();
@@ -127,7 +94,7 @@ void main() {
     await tester.tap(find.text('Pair an Autonomous device'));
     await tester.pumpAndSettle();
     expect(cli.replacements, [false]);
-    expect(find.text('ABC234'), findsOneWidget);
+    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
     expect(find.text('192.168.1.10:18474'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
@@ -214,30 +181,138 @@ void main() {
     expect(find.text('No Autonomous device paired'), findsOneWidget);
   });
 
-  testWidgets('CLI deadline and nullable status metadata are preserved', (
+  testWidgets('device intent reveals code input and submits the exact intent', (
     tester,
   ) async {
-    final cli = FakeAutonomousDeviceCli()..window = const Duration(minutes: 3);
+    final cli = FakeAutonomousDeviceCli();
     await open(tester, cli);
     await tester.tap(find.text('Pair an Autonomous device'));
     await tester.pumpAndSettle();
-    final expiry = find.textContaining(
-      RegExp(r'Expires in 1[67-8][0-9] seconds'),
-    );
-    expect(expiry, findsOneWidget);
     cli.pairState = {
       'state': 'waiting',
-      'address': null,
-      'machineName': null,
-      'code': 'ABC234',
-      'expiresAt': DateTime.now()
-          .add(const Duration(minutes: 3))
-          .millisecondsSinceEpoch,
+      'pairId': 'intent-1',
+      'deviceLabel': 'My Autonomous device',
+      'expiresAt': cli.expiry,
     };
     await tester.ensureVisible(find.byType(AppIconButton));
     await tester.tap(find.byType(AppIconButton));
     await tester.pumpAndSettle();
-    expect(find.text('192.168.1.10:18474'), findsOneWidget);
-    expect(find.text('My computer'), findsOneWidget);
+    final field = find.byKey(const Key('autonomous-device-code'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, 'abc234');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(cli.submissions, [
+      {'code': 'ABC234', 'pairId': 'intent-1', 'replace': false},
+    ]);
+    expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('stale intent refuses submission without sending a code', (
+    tester,
+  ) async {
+    final cli = FakeAutonomousDeviceCli();
+    cli.pairState = {
+      'state': 'waiting',
+      'pairId': 'old',
+      'expiresAt': cli.expiry,
+    };
+    await open(tester, cli);
+    final field = find.byKey(const Key('autonomous-device-code'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, 'ABC234');
+    cli.pairState = {
+      'state': 'waiting',
+      'pairId': 'new',
+      'expiresAt': cli.expiry,
+    };
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(cli.submissions, isEmpty);
+    expect(find.textContaining('The pairing request changed.'), findsOneWidget);
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('polling a different intent clears typed code', (tester) async {
+    final cli = FakeAutonomousDeviceCli();
+    cli.pairState = {
+      'state': 'waiting',
+      'pairId': 'old',
+      'expiresAt': cli.expiry,
+    };
+    await open(tester, cli);
+    final field = find.byKey(const Key('autonomous-device-code'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, 'ABC234');
+    cli.pairState = {
+      'state': 'waiting',
+      'pairId': 'new',
+      'expiresAt': cli.expiry,
+    };
+    await tester.ensureVisible(find.byType(AppIconButton));
+    await tester.tap(find.byType(AppIconButton));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'terminal status clears entered code and never displays a returned code',
+    (tester) async {
+      final cli = FakeAutonomousDeviceCli();
+      cli.pairState = {
+        'state': 'waiting',
+        'pairId': 'intent-1',
+        'expiresAt': cli.expiry,
+        'code': 'WRONG1',
+      };
+      await open(tester, cli);
+      final field = find.byKey(const Key('autonomous-device-code'));
+      final controller = tester.widget<TextField>(field).controller!;
+      expect(controller.text, isEmpty);
+      expect(find.text('WRONG1'), findsNothing);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, 'ABC234');
+      cli.pairState = {'state': 'paired', 'deviceFingerprint': '1234'};
+      await tester.ensureVisible(find.byType(AppIconButton));
+      await tester.tap(find.byType(AppIconButton));
+      await tester.pumpAndSettle();
+      expect(controller.text, isEmpty);
+      expect(find.byKey(const Key('autonomous-device-code')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  test('code is passed exclusively as stdin, never CLI arguments', () async {
+    final cli = RecordingAutonomousDeviceCli();
+    await cli.pair(code: 'ABC234', pairId: 'intent-1', replace: true);
+    expect(cli.operation, 'pair');
+    expect(cli.arguments, [
+      '--code-stdin',
+      '--pair-id',
+      'intent-1',
+      '--replace',
+    ]);
+    expect(cli.arguments.join(' '), isNot(contains('ABC234')));
+    expect(cli.secret, 'ABC234');
+  });
+}
+
+class RecordingAutonomousDeviceCli extends AutonomousDeviceCli {
+  String? operation;
+  List<String> arguments = [];
+  String? secret;
+  @override
+  Future<Map<String, dynamic>> command(
+    String operation, {
+    List<String> arguments = const [],
+    String? secretStdin,
+  }) async {
+    this.operation = operation;
+    this.arguments = arguments;
+    secret = secretStdin;
+    return {'state': 'running'};
+  }
 }

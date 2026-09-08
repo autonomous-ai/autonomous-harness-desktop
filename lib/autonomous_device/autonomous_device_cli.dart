@@ -4,31 +4,6 @@ import 'dart:convert';
 import '../core/harness_cli_runner.dart';
 import '../core/test_run.dart';
 
-/// Polling may omit a code already returned by pair. Keep it only for the exact
-/// same active window, and discard it as soon as that window ends or changes.
-Map<String, dynamic> mergeAutonomousDevicePairStatus(
-  Map<String, dynamic> previous,
-  Map<String, dynamic> incoming,
-) {
-  final merged = <String, dynamic>{...incoming};
-  for (final key in ['address', 'machineName']) {
-    if (merged[key] == null && previous[key] != null) {
-      merged[key] = previous[key];
-    }
-  }
-  final active = const {'waiting', 'running'}.contains(incoming['state']);
-  final sameWindow =
-      incoming['expiresAt'] != null &&
-      incoming['expiresAt'] == previous['expiresAt'] &&
-      const {'waiting', 'running'}.contains(previous['state']);
-  if (!active) {
-    merged.remove('code');
-  } else if (sameWindow && merged['code'] == null && previous['code'] != null) {
-    merged['code'] = previous['code'];
-  }
-  return merged;
-}
-
 class AutonomousDeviceCliException implements Exception {
   const AutonomousDeviceCliException(this.code, this.message);
   final String code;
@@ -48,8 +23,31 @@ class AutonomousDeviceCli {
   Future<Map<String, dynamic>> status() => command('status');
   Future<Map<String, dynamic>> list() => command('list');
   Future<Map<String, dynamic>> pairStatus() => command('pair-status');
-  Future<Map<String, dynamic>> pair({bool replace = false}) =>
-      command('pair', arguments: [if (replace) '--replace']);
+  Future<Map<String, dynamic>> listen({bool replace = false}) =>
+      command('listen', arguments: [if (replace) '--replace']);
+  Future<Map<String, dynamic>> pair({
+    required String code,
+    required String pairId,
+    bool replace = false,
+  }) async {
+    if (!RegExp(r'^[A-Z0-9]{6}$').hasMatch(code) || pairId.isEmpty) {
+      throw const AutonomousDeviceCliException(
+        'BAD_REQUEST',
+        'Enter the six-character code shown on your Autonomous device.',
+      );
+    }
+    return command(
+      'pair',
+      arguments: [
+        '--code-stdin',
+        '--pair-id',
+        pairId,
+        if (replace) '--replace',
+      ],
+      secretStdin: code,
+    );
+  }
+
   Future<Map<String, dynamic>> cancel() => command('cancel');
   Future<Map<String, dynamic>> revoke(String id) =>
       command('revoke', arguments: [id]);
@@ -57,6 +55,7 @@ class AutonomousDeviceCli {
   Future<Map<String, dynamic>> command(
     String operation, {
     List<String> arguments = const [],
+    String? secretStdin,
   }) async {
     if (kUnderTest) {
       throw const AutonomousDeviceCliException(
@@ -73,6 +72,8 @@ class AutonomousDeviceCli {
     ]);
     final stdout = process.stdout.transform(utf8.decoder).join();
     final stderr = process.stderr.transform(utf8.decoder).join();
+    if (secretStdin != null) process.stdin.writeln(secretStdin);
+    await process.stdin.close();
     final int exitCode;
     try {
       exitCode = await process.exitCode.timeout(const Duration(seconds: 35));
