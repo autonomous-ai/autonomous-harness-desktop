@@ -662,6 +662,43 @@ void main() {
   );
 
   test(
+    'terminal_link_mode accepts turn, the third transport, alongside the other two',
+    () async {
+      await ready();
+
+      // 'turn' is additive: 'relay' keeps meaning the backend WebSocket, so a build that predates TURN
+      // can never read a Cloudflare-relayed session as a WS-relayed one.
+      for (final mode in ['p2p', 'turn', 'relay']) {
+        await session.handleFrame('terminal_link_mode', {
+          'streamId': streamId,
+          'mode': mode,
+        });
+        expect(session.linkMode, mode);
+      }
+    },
+  );
+
+  test(
+    'a mode this build cannot draw leaves the last known one alone',
+    () async {
+      await ready();
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': 'turn',
+      });
+      expect(session.linkMode, 'turn');
+
+      // A newer CLI inventing a fourth value must not blank the badge or set a value the header has no
+      // icon for — the allow-list is what keeps linkMode drawable.
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': 'quic',
+      });
+      expect(session.linkMode, 'turn');
+    },
+  );
+
+  test(
     'linkMode resets whenever streamId resets (reopen/close/error)',
     () async {
       await ready();

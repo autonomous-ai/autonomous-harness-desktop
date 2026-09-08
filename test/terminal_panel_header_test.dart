@@ -146,4 +146,64 @@ void main() {
     final menu = tester.getRect(find.byType(AgentModelMenu));
     expect(menu.width, lessThanOrEqualTo((220 - headerPadding * 2) / 2 + 0.5));
   });
+
+  // The transport badge. Three states the CLI can report, plus the local case where it reports none —
+  // and the wire words are not the words a person reads, so assert the mapping, not the mode string.
+  testWidgets('the transport badge draws one icon per link mode', (
+    tester,
+  ) async {
+    const marks = {
+      'p2p': Icons.bolt,
+      'turn': Icons.alt_route,
+      'relay': Icons.cloud_outlined,
+    };
+
+    for (final entry in marks.entries) {
+      final session = sessionNamed('a');
+      addTearDown(session.dispose);
+      session.linkMode = entry.key;
+      await pump(tester, session);
+
+      expect(
+        find.byIcon(entry.value),
+        findsOneWidget,
+        reason: 'link mode ${entry.key} should draw ${entry.value}',
+      );
+      // Exactly one of the three, never two at once.
+      for (final other in marks.values.where((i) => i != entry.value)) {
+        expect(find.byIcon(other), findsNothing);
+      }
+    }
+  });
+
+  testWidgets('a terminal with no link mode gets no badge at all', (
+    tester,
+  ) async {
+    // This is the local-machine case: the CLI never sends terminal_link_mode for a terminal on this
+    // same computer, because there is no transport choice to report.
+    final session = sessionNamed('a');
+    addTearDown(session.dispose);
+    expect(session.linkMode, isNull);
+    await pump(tester, session);
+
+    for (final icon in [Icons.bolt, Icons.alt_route, Icons.cloud_outlined]) {
+      expect(find.byIcon(icon), findsNothing);
+    }
+  });
+
+  testWidgets('the badge does not push the model control off the right edge', (
+    tester,
+  ) async {
+    // The badge sits in the trailing run, so a wider icon would eat into the name's Expanded rather
+    // than move the controls — this pins that the geometry above still holds with a badge present.
+    final session = sessionNamed('a');
+    addTearDown(session.dispose);
+    session.linkMode = 'turn';
+    await pump(tester, session);
+
+    final menu = tester.getRect(find.byType(AgentModelMenu));
+    final badge = tester.getRect(find.byIcon(Icons.alt_route));
+    expect(menu.right, lessThanOrEqualTo(badge.left + 1));
+    expect(badge.right, lessThanOrEqualTo(paneWidth - headerPadding + 1));
+  });
 }

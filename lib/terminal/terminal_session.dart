@@ -68,10 +68,15 @@ class TerminalSession extends ChangeNotifier {
   TerminalSessionStatus status = TerminalSessionStatus.closed;
   String? streamId;
 
-  /// 'p2p' or 'relay' — how this pane's terminal bytes are currently reaching it. Only ever set for a
-  /// `harness link connect`-linked remote machine (the CLI never sends this frame for a local machine's
-  /// own terminal, which has no such distinction), and reset alongside [streamId] so a stale mode can
-  /// never survive into the next stream.
+  /// How this pane's terminal bytes are currently reaching it — one of:
+  ///
+  ///   'p2p'   direct WebRTC, ICE nominated a direct candidate pair.
+  ///   'turn'  WebRTC too, but ICE could only manage a relay pair, so Cloudflare TURN carries it.
+  ///   'relay' no data channel at all; the bytes ride the backend WebSocket.
+  ///
+  /// Only ever set for a `harness link connect`-linked remote machine (the CLI never sends this frame
+  /// for a local machine's own terminal, which has no such distinction), and reset alongside [streamId]
+  /// so a stale mode can never survive into the next stream.
   String? linkMode;
   String? errorCode;
   String? errorMessage;
@@ -296,7 +301,10 @@ class TerminalSession extends ChangeNotifier {
       case 'terminal_link_mode':
         if (!_matchesStream(payload)) return true;
         final mode = payload['mode']?.toString();
-        if (mode == 'p2p' || mode == 'relay') {
+        // Allow-list, not a blind assign: an older CLI knows only 'p2p'/'relay', a newer one may learn
+        // values this build cannot draw, and either way linkMode must stay something the header has an
+        // icon for. An unknown value leaves the previous state alone rather than blanking it.
+        if (mode == 'p2p' || mode == 'turn' || mode == 'relay') {
           linkMode = mode;
           notifyListeners();
         }

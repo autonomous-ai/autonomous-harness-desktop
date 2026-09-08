@@ -709,23 +709,17 @@ class _TerminalHeader extends StatelessWidget {
                     child: statusMark,
                   ),
                 ),
-              if (session.linkMode != null)
+              // Which of the three paths carries this pane's bytes. Absent for a local machine's own
+              // terminal, which has no such distinction and so gets no badge.
+              //
+              // The wire word and the word a person reads differ for the middle state, deliberately:
+              // the CLI sends 'turn' (it is a TURN allocation) but both middle and last are relays to
+              // a reader, so they read as "relay" and "ws". 'relay' on the wire kept its original
+              // meaning — the backend WebSocket — so an older CLI is never mislabelled.
+              if (session.linkMode case final mode?)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Tooltip(
-                    message: session.linkMode == 'p2p'
-                        ? 'Direct peer-to-peer connection'
-                        : 'Relayed through Harness',
-                    child: Icon(
-                      session.linkMode == 'p2p'
-                          ? Icons.bolt
-                          : Icons.cloud_outlined,
-                      size: 13,
-                      color: session.linkMode == 'p2p'
-                          ? AppColors.success
-                          : AppColors.mutedStrong,
-                    ),
-                  ),
+                  child: _LinkModeMark(mode: mode),
                 ),
               // Before the close button: pinning is the rarer act, and a control
               // that appears to the LEFT of the one people aim for by muscle
@@ -755,6 +749,40 @@ class _TerminalHeader extends StatelessWidget {
       // _PaneCell, so what dims is the thing that is moving rather than one
       // strip of it.
       child: strip,
+    );
+  }
+}
+
+/// The pane header's transport badge: which of the three paths a terminal's bytes take.
+///
+/// Only the middle state is new. `bolt`/green has always meant "the best path" and `cloud_outlined`
+/// /grey has always meant "relayed through Harness", so neither is repurposed here — people who
+/// already read this header do not have to relearn it. TURN slots between them: still WebRTC, still
+/// E2EE, but every byte detours through Cloudflare and is billed per GB, which is worth more than the
+/// grey of a plain fallback.
+class _LinkModeMark extends StatelessWidget {
+  final String mode;
+
+  const _LinkModeMark({required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, message) = switch (mode) {
+      'p2p' => (Icons.bolt, AppColors.success, 'Direct peer-to-peer connection'),
+      'turn' => (
+        Icons.alt_route,
+        AppColors.warning,
+        'Relayed through Cloudflare TURN',
+      ),
+      _ => (
+        Icons.cloud_outlined,
+        AppColors.mutedStrong,
+        'Relayed through Harness',
+      ),
+    };
+    return Tooltip(
+      message: message,
+      child: Icon(icon, size: 13, color: color),
     );
   }
 }
