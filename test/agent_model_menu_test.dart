@@ -32,6 +32,66 @@ void main() {
     );
   });
 
+  testWidgets('the header shows no model control when no grid is picked', (
+    tester,
+  ) async {
+    // The pill can only move an agent onto the grid the sidebar has picked, so with none picked it
+    // was a dimmed box naming a feature the reader had opted out of — a word to decode in the pane
+    // header with nothing behind it. It leaves entirely instead. The agent below is even ON a grid,
+    // which is the case that used to draw a model id nobody could change.
+    final before = gridSelectionStore.value;
+    addTearDown(() => gridSelectionStore.value = before);
+    gridSelectionStore.value = GridSelection.none;
+
+    final notifier = AppNotifier(
+      config: AppConfig.dev,
+      authSession: AuthSession(),
+      configStore: null,
+    );
+    addTearDown(notifier.dispose);
+    notifier.machineStates['m1'] =
+        MachineState(
+            const Machine(
+              machineId: 'm1',
+              apiKey: '',
+              authMode: MachineAuthMode.remote,
+              name: 'm1',
+              status: 'online',
+            ),
+          )
+          ..agents = [
+            const Agent(
+              id: 'a1',
+              name: 'a1',
+              engine: 'claude',
+              status: 'active',
+              grid: AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
+            ),
+          ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AgentModelMenu(
+            notifier: notifier,
+            machineId: 'm1',
+            agentId: 'a1',
+            engine: 'claude',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ToolbarPill), findsNothing);
+    expect(find.text('Pinned-Model'), findsNothing);
+    expect(
+      tester.getSize(find.byType(AgentModelMenu)),
+      Size.zero,
+      reason: 'nothing left behind for the header to space around',
+    );
+  });
+
   group('the option list', () {
     // The menu offers its own "Auto" (value: null — leave ANTHROPIC_MODEL unset), and the relay
     // advertises a virtual `auto` router of its own in /models. Passing that list through raw put

@@ -175,6 +175,12 @@ class AgentModelMenuState extends State<AgentModelMenu> {
     return ValueListenableBuilder<GridSelection>(
       valueListenable: gridSelectionStore,
       builder: (context, selection, _) {
+        // No grid picked, no control. Everything this pill can do needs a grid to move the agent
+        // onto, so with none chosen it could only ever be a dimmed box naming a feature the user
+        // has opted out of — one more thing in the header to work out the meaning of, and nothing
+        // to be done about it once worked out. The sidebar's grid picker is where that state is
+        // decided, and it says so there in words.
+        if (!selection.hasGrid) return const SizedBox.shrink();
         final capable = kGridCapableEngines.contains(widget.engine);
         // Listens to the NOTIFIER, not just the models controller: `busy` below is turn state, and
         // nothing else in this subtree rebuilds when a turn starts or ends (the pane header holds no
@@ -183,26 +189,22 @@ class AgentModelMenuState extends State<AgentModelMenu> {
         return ListenableBuilder(
           listenable: widget.notifier,
           builder: (context, _) {
-            // Qualified by the two standing conditions, not raw turn state: `busy` is what earns
-            // the forbidden cursor and the sentence that promises the control comes back, and
-            // neither is true of an agent that is also mid-turn on an engine with no grid to move
-            // to. Those do not clear when the turn ends, so they are named first and this stays
-            // false.
+            // Qualified by the standing condition, not raw turn state: `busy` is what earns the
+            // forbidden cursor and the sentence that promises the control comes back, and neither
+            // is true of an agent that is also mid-turn on an engine with no grid to move to. That
+            // one does not clear when the turn ends, so it is named first and this stays false.
             final busy =
                 capable &&
-                selection.hasGrid &&
                 widget.notifier.agentIsProcessing(
                   widget.machineId,
                   widget.agentId,
                 );
-            final enabled = capable && selection.hasGrid && !_pending && !busy;
-            // Ordered by what the user can do about it: the two standing conditions first, then
-            // the one that clears on its own. Busy sits last because it outranks nothing — an
-            // engine that cannot use a grid says so whether or not it is mid-turn.
+            final enabled = capable && !_pending && !busy;
+            // Ordered by what the user can do about it: the standing condition first, then the one
+            // that clears on its own. Busy sits last because it outranks nothing — an engine that
+            // cannot use a grid says so whether or not it is mid-turn.
             final tooltip = !capable
                 ? '${widget.engine} cannot use a grid'
-                : !selection.hasGrid
-                ? 'Pick a grid to change this agent\'s model'
                 : busy
                 ? 'Agent is running a turn — changing the model would restart it '
                       'and lose the turn. This unlocks when the turn finishes.'
@@ -273,9 +275,10 @@ class AgentModelMenuState extends State<AgentModelMenu> {
               // to read as pressable; dropping it for the moment the model is changing would
               // blink the one box on the strip. A rim on an engine that can NEVER open the
               // menu would draw a box around something inert, so that case keeps none.
-              rimmed: capable && selection.hasGrid,
-              // Only for busy. The other two disabled states drop the rim as well, so there is
-              // nothing left that claims to be pressable and `basic` is already honest; a mid-turn
+              rimmed: capable,
+              // Only for busy. The other disabled state — an engine that can never use a grid —
+              // drops the rim as well, so nothing there claims to be pressable and `basic` is
+              // already honest; a mid-turn
               // pill keeps its rim and its ink, and the pointer is what says the refusal is real.
               disabledCursor: busy ? SystemMouseCursors.forbidden : null,
               onTap: enabled
