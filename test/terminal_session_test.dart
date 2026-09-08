@@ -104,6 +104,24 @@ void main() {
     },
   );
 
+  test('CSI erase-left at column zero renders without a resync', () async {
+    await ready();
+
+    await session.handleBinary(
+      output(
+        0,
+        utf8.encode('abc\x1b[1G\x1b[1K'),
+        keyframe: true,
+        cols: 80,
+        rows: 24,
+      ),
+    );
+
+    expect(session.status, TerminalSessionStatus.controlling);
+    expect(session.terminal.buffer.getText(), startsWith('bc'));
+    expect(sent.where((frame) => frame.type == 'terminal_resync'), isEmpty);
+  });
+
   test(
     'uses measured viewport geometry for the initial terminal_open',
     () async {

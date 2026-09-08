@@ -36,3 +36,10 @@ it if one is dropped.
    on Linux; while this was gated on macOS/iOS a focused terminal answered
    Super+key itself and no app shortcut worked with a pane open. Regression:
    `test/terminal_view_interaction_test.dart`.
+
+4. **Erase-left accepts a cursor in the first column**
+   (`lib/src/core/buffer/line.dart`, `lib/src/core/buffer/buffer.dart`). `CSI 1 K`
+   at column zero previously passed an empty range to `BufferLine.eraseRange`,
+   which read cell `-1` while checking a wide-character boundary. The range
+   guard now accepts an empty range, and erase-left includes the cursor cell as
+   required by its terminal contract. Regression: `test/terminal_session_test.dart`.
