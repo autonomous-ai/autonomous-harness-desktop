@@ -64,9 +64,9 @@ extension AnalyticsEvents on Analytics {
 
   /// The user chose which grid new agents run against. [source] = `pill` (the
   /// sidebar) or `settings` (Settings ▸ Grid) — the two doors, kept apart so
-  /// the funnel sees which one people take. [networkId] is null for "each
-  /// engine's own login", which is a choice like any other and the one a
-  /// funnel most needs to be able to count.
+  /// the funnel sees which one people take. [networkId] is null for "No
+  /// grid", which is a choice like any other and the one a funnel most needs
+  /// to be able to count.
   void gridPicked({required String source, String? networkId}) => track(
     'grid_picked',
     params: {

@@ -1,5 +1,6 @@
 import 'grid_api_client.dart';
 import 'grid_selection_store.dart';
+import 'grid_web_mcp.dart';
 
 /// Engines the harness CLI can point at a grid, mirroring `GRID_ENGINE_CONTRACTS` in
 /// `autonomous-harness/cli/src/lib/gridLaunch.ts`.
@@ -45,6 +46,7 @@ class GridAgentOverride {
     required this.baseUrl,
     required this.apiKey,
     this.model,
+    this.mcpUrl,
   });
 
   final String networkId;
@@ -59,12 +61,29 @@ class GridAgentOverride {
   /// Null means "let the grid choose", which is the relay's own default.
   final String? model;
 
+  /// The grid's web tools, as an MCP server the engine is pointed at — see
+  /// [gridWebMcpUrl].
+  ///
+  /// A grid already pays for web search and already meters it; grid ADR 0041
+  /// put it behind MCP so a coding agent could reach it, but only for someone
+  /// who pastes a config in by hand. An agent launched from here has nobody to
+  /// do that, so its launch carries the address and the CLI wires it in.
+  ///
+  /// Deliberately NOT derived from [baseUrl] on the far side: that is the
+  /// relay, and this is the control plane. The CLI cannot work it out either —
+  /// the machine running the agent may have no Grid session at all.
+  ///
+  /// Null is a real state, not an oversight: an app pointed at a control plane
+  /// without the mount would otherwise hand every agent a URL that 404s.
+  final String? mcpUrl;
+
   Map<String, dynamic> toJson() => {
     'networkId': networkId,
     'networkName': networkName,
     'baseUrl': baseUrl,
     'apiKey': apiKey,
     if (model != null) 'model': model,
+    if (mcpUrl != null) 'mcpUrl': mcpUrl,
   };
 }
 
@@ -89,6 +108,11 @@ Future<GridAgentOverride?> resolveGridAgentOverride({
     networkName: chosen.label,
     baseUrl: credentials.baseUrl,
     apiKey: credentials.apiKey,
+    // The same key reaches the web tools. ADR 0041 D-b asks for the per-grid
+    // access token and requires no scope of it — "every role including
+    // `consumer` may make one" — which is exactly what the endpoint above
+    // mints, so there is nothing further to fetch.
+    mcpUrl: gridWebMcpUrl(),
     // The caller's, because the store no longer holds one: a model is chosen for an agent, and this
     // function is called once per agent.
     model: model,

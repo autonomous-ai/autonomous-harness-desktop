@@ -108,6 +108,9 @@ void main() {
         'baseUrl': 'https://grid.example/grid-1/relay/v1',
         'apiKey': 'relay-key-for-grid-1',
         'model': 'GLM-4.7-Flash',
+        // The web tools ride along on the same frame — no session signed in
+        // here, so this is the default control plane. See grid_web_mcp_test.
+        'mcpUrl': 'https://api-grid.autonomous.ai/v1/grid/web-mcp/',
       });
     });
 

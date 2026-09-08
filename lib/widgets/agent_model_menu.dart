@@ -36,7 +36,7 @@ import '../state/app_state.dart';
 
 /// The three states an agent can be in, as the header prints them.
 String agentModelLabel(AgentGrid? grid) {
-  if (grid == null) return 'Own login';
+  if (grid == null) return 'No grid';
   return grid.model ?? 'Auto';
 }
 
@@ -52,10 +52,10 @@ AgentGrid? agentGridOf(AppNotifier notifier, String machineId, String agentId) {
   return null;
 }
 
-/// The menu's value for "the engine's own login" — distinct from `null`, which means "Auto" (the
-/// grid decides). Exported alongside [agentModelMenuOptions] so a caller that reuses the list can
-/// recognise this same sentinel rather than invent its own.
-const String kOwnLoginModelOption = '__own_login__';
+/// The menu's value for "not on a grid at all — the engine's own account" — distinct from `null`,
+/// which means "Auto" (the grid decides). Exported alongside [agentModelMenuOptions] so a caller
+/// that reuses the list can recognise this same sentinel rather than invent its own.
+const String kNoGridModelOption = '__no_grid__';
 
 /// One row an agent-model menu can show: a real choice, or — while the grid's models are loading or
 /// failed to load — a disabled placeholder that exists to be read, not picked.
@@ -68,14 +68,14 @@ class AgentModelOption {
 
   final String label;
 
-  /// `null` = Auto, [kOwnLoginModelOption] = the engine's own login, anything else = a model id.
+  /// `null` = Auto, [kNoGridModelOption] = no grid at all, anything else = a model id.
   /// Meaningless when [enabled] is false.
   final String? value;
 
   final bool enabled;
 }
 
-/// The ordered rows an agent-model menu offers for [state]: own login, auto, then the grid's
+/// The ordered rows an agent-model menu offers for [state]: no grid, auto, then the grid's
 /// models — or one disabled note in their place while the list is loading or failed.
 ///
 /// Exported because the New agent dialog's own model picker (a later task) shows this exact same
@@ -84,7 +84,7 @@ class AgentModelOption {
 /// gained an entry.
 List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
   final options = <AgentModelOption>[
-    const AgentModelOption(label: 'Own login', value: kOwnLoginModelOption),
+    const AgentModelOption(label: 'No grid', value: kNoGridModelOption),
     const AgentModelOption(label: 'Auto', value: null),
   ];
   switch (state) {
@@ -121,12 +121,12 @@ List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
 ///
 /// Built on [MenuAnchor], not a `PopupMenuButton`: a `PopupMenuButton`'s `itemBuilder` is a
 /// one-shot snapshot handed to `showMenu()` before `onOpened` even fires, so a menu opened on a
-/// network not yet loaded this session showed only "Own login"/"Auto" until closed and reopened —
+/// network not yet loaded this session showed only "No grid"/"Auto" until closed and reopened —
 /// and right after switching grids could show the PREVIOUS grid's models under the new grid's name,
 /// since `gridModelsController` is a single global keyed by one network id. Wrapping the anchor in a
 /// `ListenableBuilder` on [gridModelsController] instead means the open panel's rows recompute on
 /// every `Idle → Loading → Ready/Failed` step. This control calls `AppNotifier.moveAgentToGrid` for
-/// one already-running agent and offers own login as a peer of Auto and every model — built on the
+/// one already-running agent and offers "No grid" as a peer of Auto and every model — built on the
 /// app's own row primitives ([AppMenuItem], [AppMenuDivider]) rather than a bespoke shape.
 class AgentModelMenu extends StatefulWidget {
   const AgentModelMenu({
@@ -184,9 +184,10 @@ class AgentModelMenuState extends State<AgentModelMenu> {
           listenable: widget.notifier,
           builder: (context, _) {
             // Qualified by the two standing conditions, not raw turn state: `busy` is what earns
-            // the hourglass and the sentence that promises the control comes back, and neither is
-            // true of an agent that is also mid-turn on an engine with no grid to move to. Those
-            // do not clear when the turn ends, so they are named first and this stays false.
+            // the forbidden cursor and the sentence that promises the control comes back, and
+            // neither is true of an agent that is also mid-turn on an engine with no grid to move
+            // to. Those do not clear when the turn ends, so they are named first and this stays
+            // false.
             final busy =
                 capable &&
                 selection.hasGrid &&
@@ -241,7 +242,7 @@ class AgentModelMenuState extends State<AgentModelMenu> {
         );
         final label = agentModelLabel(currentGrid);
         final currentValue = currentGrid == null
-            ? kOwnLoginModelOption
+            ? kNoGridModelOption
             : currentGrid.model;
         return Tooltip(
           message: tooltip,
@@ -307,22 +308,18 @@ class AgentModelMenuState extends State<AgentModelMenu> {
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Leads the label rather than trailing it: this says the AGENT is working,
-                        // which is a fact about the pane the pill sits in, while the chevron on the
-                        // other end is about the menu. Putting both on the right made one slot mean
-                        // two different things. Same indicator the rail draws in its badge slot for
-                        // the same agent (`machine_rail.dart`) — one turn, one glyph, two places.
-                        if (busy) ...[
-                          SizedBox(
-                            width: grid.AppControl.iconSizeChip - 2,
-                            height: grid.AppControl.iconSizeChip - 2,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.6,
-                              color: grid.AppPalette.online,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                        ],
+                        // NO turn indicator here, deliberately. A spinner in this slot said "the
+                        // agent is working"; the skeleton a few lines up says "the model you picked
+                        // is being applied" — two meanings, one control, both drawn as motion, and
+                        // they were read as the same thing. The one that belongs to this pill is
+                        // the one about this pill, so the other left.
+                        //
+                        // Nothing is lost. The turn is already on screen twice over: the pane this
+                        // header sits on is the turn, running, in full; and the rail draws the
+                        // spinner beside the agent's row (`machine_rail.dart`), where it earns its
+                        // place because the pane may not be open. What the pill owes the reader is
+                        // why it will not open — and that is carried by the dimmed label, the
+                        // forbidden cursor and the tooltip, which say it in words.
                         // Flexible, not bare: the pill hugs its label, but a long grid model id
                         // in a narrow pane has to ellipsize inside it rather than overflow it.
                         Flexible(
@@ -418,7 +415,7 @@ class AgentModelMenuState extends State<AgentModelMenu> {
     setState(() => _pending = true);
 
     GridAgentOverride? override;
-    if (value != kOwnLoginModelOption) {
+    if (value != kNoGridModelOption) {
       try {
         override = await resolveGridAgentOverride(model: value);
       } catch (error) {

@@ -41,7 +41,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('gridTargetMenuOptions', () {
-    test('own login is always first, and needs no fetch to be offered', () {
+    test('"No grid" is always first, and needs no fetch to be offered', () {
       for (final state in [
         const GridNetworksIdle(),
         const GridNetworksLoading(),
@@ -49,7 +49,7 @@ void main() {
         _ready(),
       ]) {
         final first = gridTargetMenuOptions(state).first;
-        expect(first.label, kOwnLoginTargetLabel);
+        expect(first.label, kNoGridTargetLabel);
         expect(first.networkId, isNull);
         expect(first.enabled, isTrue);
       }
@@ -58,7 +58,7 @@ void main() {
     test('every grid on the account is a pick', () {
       final options = gridTargetMenuOptions(_ready());
       expect(options.map((o) => o.label), [
-        kOwnLoginTargetLabel,
+        kNoGridTargetLabel,
         'hp-1-1',
         'Water Grid',
       ]);
@@ -67,20 +67,25 @@ void main() {
 
     // Loading, failed and empty must not render as the same row — a menu that says nothing while it
     // waits is indistinguishable from one that has answered with nothing.
-    test('waiting, failing and having none each say so, and none is a pick', () {
-      for (final (state, text) in [
-        (const GridNetworksLoading(), 'Loading grids…'),
-        (const GridNetworksFailed('token expired'), 'token expired'),
-        (
-          GridNetworksReady(GridMe.fromJson(const {'user': {}, 'networks': []})),
-          'This account is on no grids',
-        ),
-      ]) {
-        final rest = gridTargetMenuOptions(state).skip(1).toList();
-        expect(rest.single.label, text);
-        expect(rest.single.enabled, isFalse);
-      }
-    });
+    test(
+      'waiting, failing and having none each say so, and none is a pick',
+      () {
+        for (final (state, text) in [
+          (const GridNetworksLoading(), 'Loading grids…'),
+          (const GridNetworksFailed('token expired'), 'token expired'),
+          (
+            GridNetworksReady(
+              GridMe.fromJson(const {'user': {}, 'networks': []}),
+            ),
+            'This account is on no grids',
+          ),
+        ]) {
+          final rest = gridTargetMenuOptions(state).skip(1).toList();
+          expect(rest.single.label, text);
+          expect(rest.single.enabled, isFalse);
+        }
+      },
+    );
   });
 
   group('GridTargetPill', () {
@@ -131,7 +136,7 @@ void main() {
     ) async {
       await pump(tester);
       expect(find.text('NEW AGENTS USE'), findsOneWidget);
-      expect(find.text(kOwnLoginTargetLabel), findsOneWidget);
+      expect(find.text(kNoGridTargetLabel), findsOneWidget);
 
       await selection.selectNetwork(
         networkId: 'grid-aaf6a46ced4f42f9',
@@ -139,7 +144,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('hp-1-1'), findsOneWidget);
-      expect(find.text(kOwnLoginTargetLabel), findsNothing);
+      expect(find.text(kNoGridTargetLabel), findsNothing);
     });
 
     testWidgets('picking a grid in the menu is the whole trip', (tester) async {
@@ -158,7 +163,7 @@ void main() {
       expect(find.text('Water Grid'), findsOneWidget);
     });
 
-    testWidgets('own login is reachable again once a grid is picked', (
+    testWidgets('"No grid" is reachable again once a grid is picked', (
       tester,
     ) async {
       await selection.selectNetwork(
@@ -169,7 +174,7 @@ void main() {
       await tester.tap(find.byKey(const Key('rail-grid-target-button')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text(kOwnLoginTargetLabel).last);
+      await tester.tap(find.text(kNoGridTargetLabel).last);
       await tester.pumpAndSettle();
       expect(selection.value.hasGrid, isFalse);
     });

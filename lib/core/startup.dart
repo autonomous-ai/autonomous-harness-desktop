@@ -26,7 +26,7 @@ Future<void> loadPersistedSettings({
   await (themeMode ?? themeModeStore).load();
   await (terminalFont ?? terminalFontStore).load();
   // The sidebar names the chosen grid in its first frame; loading this later
-  // would show "each engine's own login" and then snap to the real choice.
+  // would show "No grid" and then snap to the real choice.
   await (gridSelection ?? gridSelectionStore).load();
   // Before the first frame for the same reason as the selection above: the Grid
   // pane and the status rail both ask "are we signed in" as they build, and a

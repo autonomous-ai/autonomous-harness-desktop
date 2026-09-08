@@ -201,7 +201,7 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   (`widgets/grid_target_pill.dart`, above the account footer — one menu, where the answer is already
   on screen) and Settings ▸ Grid, which keeps the table because that is where a grid is *compared*
   rather than merely picked. Both list `gridNetworksController`, the shared singleton, so neither
-  holds a half-stale copy. The label for "no grid" is `kOwnLoginTargetLabel` beside the store — four
+  holds a half-stale copy. The label for "no grid" is `kNoGridTargetLabel` beside the store — four
   places print it. The model is chosen per agent, not globally: the
   agent view's header menu (`widgets/agent_model_menu.dart`) picks it for an already-running agent,
   and the New agent dialog has its own model field for a new one. At create time the New agent
@@ -218,6 +218,26 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   of testing this feature. Every CLI refusal reaches Dart as a thrown `WsRequestFailure` (never as an
   `error` key on a returned map); `AppNotifier.retargetMessage` turns its `code` into the sentence
   the user sees.
+- **A grid launch also hands the agent the grid's WEB TOOLS.** The same `payload.grid` carries
+  `mcpUrl` — `grid_web_mcp.dart`, the control plane's `/v1/grid/web-mcp/` — and the CLI's
+  `lib/gridWebMcp.ts` wires it into claude, codex, opencode and hermes as an MCP server named
+  `grid-web`.
+  **The control plane, not the relay** (grid ADR 0041 D-a: a relay is per-grid, can be asleep, and
+  may be a LAN address), built from the *session's* `apiBaseUrl` so a `grid` signed into staging does
+  not send agents at production. The address is sent rather than derived because the machine running
+  the agent may have no Grid session at all. **No second credential**: ADR 0041 D-b takes the
+  per-grid access token and requires no scope of it, `consumer` included, which is exactly what
+  `/networks/{id}/credentials` mints. The three engines are the three `grid mcp config` prints for —
+  the ones whose header handling was measured on the wire. ⚠️ The key still travels only in the
+  pane's environment: Claude Code expands `${GRID_API_KEY}` inside `--mcp-config` (the JSON-string
+  form, so no file), Codex reads `env_http_headers` off `-c`, opencode expands `{env:…}` in the
+  config the launch already writes, and hermes interpolates `${…}` Cursor-style in a **managed-scope
+  overlay** (`HERMES_MANAGED_DIR`, deep-merged over the user's `config.yaml` — not `HERMES_HOME`,
+  which would move auth, sessions and memory too). That is the OPPOSITE of ADR 0041 D-d, which is
+  right about a person pasting into their own dotfile and wrong here, where the daemon owns both
+  ends. ⚠️ Hermes' overlay REPLACES `/etc/hermes` rather than adding to it, so `cli.ts` drops it on a
+  machine that has one and the agent starts without web tools instead of losing an administrator's
+  policy. An absent `mcpUrl` wires nothing, so an older desktop launches exactly as it did.
 - **Share Intelligence is the one place this app drives a SECOND CLI.** `lib/share/` runs the *Grid*
   CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
   `harness` cannot serve inference: the models live in `~/.grid/models`, the engine is

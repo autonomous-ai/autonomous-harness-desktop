@@ -7,10 +7,15 @@ import '../core/local_key_value_store.dart';
 
 /// What "no grid at all" is called on screen.
 ///
+/// Named after the state itself rather than after its consequence: "Each
+/// engine's own login" made a reader work out whose login was meant, in a
+/// picker whose every other row is a grid. The consequence is still spelled
+/// out — under this row in Settings, and in the pill's tooltip.
+///
 /// Stated once because four places print it — the sidebar pill, its menu row,
 /// Settings ▸ Grid's strip and that pane's table — and two of them wording the
 /// same state differently is how a user comes to believe they are two states.
-const String kOwnLoginTargetLabel = "Each engine's own login";
+const String kNoGridTargetLabel = 'No grid';
 
 /// The grid new agents are launched against, if any.
 ///
@@ -35,9 +40,9 @@ class GridSelection {
       : (networkId ?? '');
 
   /// What to print for this selection WHATEVER it is — a grid's name, or the
-  /// sentence that stands for having picked none. [label] answers only half of
+  /// label that stands for having picked none. [label] answers only half of
   /// that, and every caller was completing it with the same ternary.
-  String get targetLabel => hasGrid ? label : kOwnLoginTargetLabel;
+  String get targetLabel => hasGrid ? label : kNoGridTargetLabel;
 
   @override
   bool operator ==(Object other) =>

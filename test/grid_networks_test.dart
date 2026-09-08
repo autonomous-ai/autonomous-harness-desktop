@@ -212,11 +212,9 @@ void main() {
       expect(find.byKey(const Key('grid-refresh-button')), findsOneWidget);
     });
 
-    testWidgets('opens on "each engine\'s own login" and can come back to it', (
-      tester,
-    ) async {
+    testWidgets('opens on "No grid" and can come back to it', (tester) async {
       await ready(tester);
-      expect(find.text("Each engine's own login"), findsWidgets);
+      expect(find.text(kNoGridTargetLabel), findsWidgets);
 
       await tester.tap(find.text('hp-1-1'));
       await tester.pumpAndSettle();
@@ -224,7 +222,7 @@ void main() {
       expect(selection.value.networkName, 'hp-1-1');
 
       // The way out of a grid is on this screen now, not only in the sidebar.
-      await tester.tap(find.text("Each engine's own login").first);
+      await tester.tap(find.text(kNoGridTargetLabel).first);
       await tester.pumpAndSettle();
       expect(selection.value.hasGrid, isFalse);
     });
@@ -290,7 +288,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('No grid matches that filter.'), findsOneWidget);
       // Never filtered away: the way back out has to stay reachable.
-      expect(find.text("Each engine's own login"), findsWidgets);
+      expect(find.text(kNoGridTargetLabel), findsWidgets);
     });
 
     testWidgets('a narrow pane drops columns instead of squeezing them', (

@@ -17,8 +17,8 @@ const kRelay = 'https://grid.autonomous.ai/grid-abc/relay';
 const kNetworkId = 'grid-live';
 
 void main() {
-  test('an agent with no grid is on its own login', () {
-    expect(agentModelLabel(null), 'Own login');
+  test('an agent with no grid says so', () {
+    expect(agentModelLabel(null), 'No grid');
   });
 
   test('a grid with no model left the choice to the grid', () {
@@ -75,19 +75,16 @@ void main() {
         const GridModelsReady(['auto', 'GLM-4.7-Flash']),
       );
 
-      expect(options.map((o) => o.label), [
-        'Own login',
-        'Auto',
-        'GLM-4.7-Flash',
-      ]);
+      expect(options.map((o) => o.label), ['No grid', 'Auto', 'GLM-4.7-Flash']);
       expect(options.last.value, 'GLM-4.7-Flash');
-      expect(options.first.value, kOwnLoginModelOption);
+      expect(options.first.value, kNoGridModelOption);
     });
 
     test('a grid serving only auto offers no model rows at all', () {
       expect(
-        agentModelMenuOptions(const GridModelsReady(['auto'])).map((o) => o.label),
-        ['Own login', 'Auto'],
+        agentModelMenuOptions(const GridModelsReady(['auto']))
+            .map((o) => o.label),
+        ['No grid', 'Auto'],
       );
     });
   });
@@ -95,7 +92,7 @@ void main() {
   group('an already-open menu', () {
     // Fix-round regression: a PopupMenuButton's itemBuilder is a one-shot snapshot handed to
     // showMenu() before the tap that triggers a load even finishes — so a menu opened on an
-    // unloaded network showed only "Own login"/"Auto" until closed and reopened, and could show a
+    // unloaded network showed only "No grid"/"Auto" until closed and reopened, and could show a
     // PREVIOUSLY-selected grid's models under the new grid's name. AgentModelMenu is now built on
     // MenuAnchor + a ListenableBuilder on gridModelsController specifically so the OPEN panel
     // updates live as the controller moves Loading -> Ready — this test drives that same
@@ -604,9 +601,7 @@ void main() {
       await endTurn(tester, notifier);
     });
 
-    testWidgets('leads the label with a spinner, keeping its rim', (
-      tester,
-    ) async {
+    testWidgets('shows no spinner mid-turn, and keeps its rim', (tester) async {
       final notifier = await pumpBusyMenu(tester);
       expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -618,30 +613,25 @@ void main() {
         findsNothing,
         reason: 'a chevron on a control that cannot open is a lie',
       );
+      // The pill drew the rail's running-agent spinner here, and it was read as this control
+      // loading — which is what the skeleton beside it actually means. The turn is on screen
+      // twice already (the pane itself, and the rail's badge); the pill only owes the reader
+      // why it will not open, and it says that in words.
       expect(
         find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: 'one control, one meaning: motion here is this pill working',
+      );
+      expect(
+        find.text('Pinned-Model'),
         findsOneWidget,
-        reason: 'the same mark the rail draws for a running agent',
+        reason: 'the model is still the answer this pill exists to give',
       );
       expect(
         tester.widget<ToolbarPill>(find.byType(ToolbarPill)).rimmed,
         isTrue,
         reason:
             'dropping the rim mid-turn would blink the one box on the strip',
-      );
-
-      await endTurn(tester, notifier);
-    });
-
-    testWidgets('puts the spinner ahead of the model name', (tester) async {
-      // Left of the label, not right: the spinner is about the AGENT, the chevron about the menu,
-      // and one slot carrying both was what made the busy pill hard to read.
-      final notifier = await pumpBusyMenu(tester);
-      await startTurn(tester, notifier);
-
-      expect(
-        tester.getCenter(find.byType(CircularProgressIndicator)).dx,
-        lessThan(tester.getCenter(find.text('Pinned-Model')).dx),
       );
 
       await endTurn(tester, notifier);
