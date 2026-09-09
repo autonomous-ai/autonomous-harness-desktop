@@ -6,7 +6,7 @@ import '../state/app_state.dart';
 import '../state/pane_preset.dart';
 import '../theme/app_theme.dart';
 
-/// ⌘L — pick the shape of the grid.
+/// ⌘S — pick the shape of the grid.
 ///
 /// Shapes are DRAWN, not listed. "Two over one" and "one over two" are the same
 /// four words in a different order, and nobody reads a layout name twice; the
@@ -280,7 +280,7 @@ class _ShapeButton extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '⌘L then $index',
+              '⌘S then $index',
               style: TextStyle(
                 fontFamily: grid.AppFont.mono,
                 fontSize: 9.5,
