@@ -28,7 +28,8 @@
 #
 # Prereqs: `gsutil` authenticated with WRITE access; the bucket/objects must be public-read;
 # `flutter` on PATH; must run on an actual Linux (Ubuntu) build host — `flutter build linux` cannot
-# cross-compile a Linux bundle from macOS or Windows.
+# cross-compile a Linux bundle from macOS or Windows. APPIMAGETOOL must point at an executable
+# `appimagetool-<x86_64|aarch64>.AppImage` — see release.yml for how CI fetches one.
 set -euo pipefail
 set +x
 
@@ -114,8 +115,9 @@ fi
 command -v gsutil  >/dev/null 2>&1 || { echo "error: gsutil not found — install/authenticate the gcloud SDK" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 1; }
 command -v flutter >/dev/null 2>&1 || { echo "error: flutter not found" >&2; exit 1; }
-command -v tar      >/dev/null 2>&1 || { echo "error: tar not found" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "error: sha256sum not found" >&2; exit 1; }
+: "${APPIMAGETOOL:?set APPIMAGETOOL to a path to an appimagetool-<x86_64|aarch64>.AppImage binary}"
+[ -x "$APPIMAGETOOL" ] || { echo "error: APPIMAGETOOL ($APPIMAGETOOL) is not executable" >&2; exit 1; }
 
 cleanup() { rm -f "${SRC:-}" "${DST:-}"; rm -rf "${STAGE_ROOT:-}"; }
 trap cleanup EXIT
@@ -165,25 +167,47 @@ echo "$VER" > "$BUNDLE_DIR/version.txt"
 STAMPED="$(cat "$BUNDLE_DIR/version.txt")"
 [ "$STAMPED" = "$VER" ] || { echo "error: version.txt is '$STAMPED', expected '$VER'" >&2; exit 1; }
 
-# --- Step 3: package ---
-# The archive's top-level directory name (Harness/) is part of the contract: downloadAndStage() in
-# lib/update/desktop_updater.dart expects the unpacked bundle at "$stagingDir/Harness".
+# --- Step 3: package as a single-file AppImage ---
+# AppDir layout: usr/bin/ holds the Flutter bundle verbatim (the `harness` executable, version.txt,
+# lib/, data/, and harness.png — the icon CMake already installs at the bundle root, see
+# linux/CMakeLists.txt). AppRun is a symlink to the executable rather than a wrapper script: the
+# Flutter runner locates its own lib/data next to /proc/self/exe, which resolves to the real binary
+# after exec regardless of the symlink used to launch it.
 STAGE_ROOT="$(mktemp -d)"
-cp -a "$BUNDLE_DIR" "$STAGE_ROOT/Harness"
-TARBALL="$APP_DIR/build/Harness-linux-${RELEASE_ARCH}-$VER.tar.gz"
-rm -f "$TARBALL"
-echo ">> packaging $TARBALL"
-( cd "$STAGE_ROOT" && tar -czf "$TARBALL" Harness )
+APPDIR="$STAGE_ROOT/AppDir"
+[ -f "$BUNDLE_DIR/harness.png" ] || { echo "error: no harness.png in $BUNDLE_DIR (expected via the CMake install rule)" >&2; exit 1; }
+mkdir -p "$APPDIR/usr/bin"
+cp -a "$BUNDLE_DIR/." "$APPDIR/usr/bin/"
+ln -s usr/bin/harness "$APPDIR/AppRun"
+cp "$BUNDLE_DIR/harness.png" "$APPDIR/harness.png"
+cat > "$APPDIR/harness.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Harness
+Comment=Attach terminals to the agents running on your Harness machines
+Exec=harness
+Icon=harness
+Categories=Development;
+Terminal=false
+EOF
+
+APPIMAGE_ARCH="$([ "$RELEASE_ARCH" = "arm64" ] && echo aarch64 || echo x86_64)"
+OUTPUT="$APP_DIR/build/Harness-linux-${RELEASE_ARCH}-$VER.AppImage"
+rm -f "$OUTPUT"
+echo ">> packaging $OUTPUT"
+ARCH="$APPIMAGE_ARCH" "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUTPUT" \
+  || { echo "error: appimagetool failed" >&2; exit 1; }
+chmod +x "$OUTPUT"
 
 # --- Step 4: upload the artifact + merge the manifest ---
-GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-linux-${RELEASE_ARCH}.tar.gz}"
+GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-linux-${RELEASE_ARCH}.AppImage}"
 URL="${GCS_PUBLIC_BASE_URL%/}/${GCS_PATH#/}"
-SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
-SIZE="$(wc -c < "$TARBALL" | tr -d ' ')"
+SHA="$(sha256sum "$OUTPUT" | awk '{print $1}')"
+SIZE="$(wc -c < "$OUTPUT" | tr -d ' ')"
 
 echo ">> uploading release $VER ($SIZE bytes, sha256=$SHA)"
 echo "   dest: gs://${GCS_BUCKET}/${GCS_PATH}"
-gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$TARBALL" "gs://${GCS_BUCKET}/${GCS_PATH}"
+gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$OUTPUT" "gs://${GCS_BUCKET}/${GCS_PATH}"
 
 echo ">> merging manifest: gs://${GCS_BUCKET}/${METADATA_PATH}  (${OTA_KEY})"
 SRC="$(mktemp)"; DST="$(mktemp)"   # removed by cleanup() on EXIT

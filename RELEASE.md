@@ -108,8 +108,8 @@ Expect **two notarization submissions** per release. They cannot be collapsed: s
 ticket to the exact artifact submitted, so the zip's ticket does not cover the image. The second pass is
 usually quick because Apple has already seen that app's cdhash.
 
-Publishing also refreshes the public download link with no web deploy: `harness.autonomous.ai/desktop/download`
-(in `autonomous-code`, `apps/web/src/app/desktop/download/`) resolves `desktop-macos-dmg` from this same
+Publishing also refreshes the public download link with no web deploy: `harness.autonomous.ai/desktop/download-macos`
+(in `autonomous-code`, `apps/web/src/app/desktop/download-macos/`) resolves `desktop-macos-dmg` from this same
 manifest on every request, so the new version is live the moment step 8 lands.
 
 ## GCS layout
@@ -222,44 +222,53 @@ four `desktop-*` keys only stay on one version when the release goes through CI.
 
 With no `ARCH`, the command detects the host architecture. A build must run on a matching
 Ubuntu/Linux host because Flutter Linux desktop builds use the host architecture. `--no-build` can
-package and upload an already-built bundle for the selected architecture.
+package and upload an already-built bundle for the selected architecture. `APPIMAGETOOL` must point
+at an executable `appimagetool-<x86_64|aarch64>.AppImage` — `release.yml` downloads a pinned one per
+matrix job; running by hand, fetch one yourself from the
+[AppImage/appimagetool releases](https://github.com/AppImage/appimagetool/releases).
 
 **No signing/notarization step** — there is no Linux equivalent of Apple's Developer ID/notarization,
 and none is needed: the trust boundary is the same sha256-verified manifest entry `DesktopUpdater`
 already checks on every platform.
 
+**Packaged as a single-file AppImage**, not a tarball. The script stages an AppDir
+(`usr/bin/` = the Flutter `bundle/` verbatim, plus a hand-written `harness.desktop` and the
+`harness.png` icon CMake already installs at the bundle root) and hands it to `appimagetool` with
+`--appimage-extract-and-run`, so packaging needs no FUSE on the build host. `AppRun` is a plain
+symlink to `usr/bin/harness` — the Flutter runner locates its own `lib/`/`data/` next to
+`/proc/self/exe`, which resolves to the real binary after exec regardless of the symlink used to
+launch it.
+
 **No Info.plist-style version stamp.** `flutter build linux` has nowhere to stamp a version the way
 Xcode does into `Info.plist`, so the release script writes a plain `version.txt` into the built
-bundle (`build/linux/<arm64|x64>/release/bundle/version.txt`) and asserts it before packaging. Both
-`lib/core/app_version.dart` (what Settings ▸ About shows) and `lib/update/desktop_updater.dart`'s
-`downloadAndStage()` (verifying a downloaded update) read this file back on Linux, falling through to
-`PackageInfo.fromPlatform()` (which would otherwise just return `pubspec.yaml`'s never-bumped
-placeholder) everywhere else.
+bundle (`build/linux/<arm64|x64>/release/bundle/version.txt`, which ends up at `usr/bin/version.txt`
+inside the AppDir) and asserts it before packaging. `lib/core/app_version.dart` (what Settings ▸
+About shows) reads this file back on Linux, falling through to `PackageInfo.fromPlatform()` (which
+would otherwise just return `pubspec.yaml`'s never-bumped placeholder) everywhere else — this still
+works unchanged for a *running* AppImage, since the AppImage runtime mounts the whole AppDir at a
+temporary path and the app resolves `version.txt` relative to its own (mounted) executable exactly
+as it did inside the old tarball. `lib/update/desktop_updater.dart`'s `downloadAndStage()` does
+**not** re-verify this against the manifest for Linux — sha256 already authenticates the entire
+single-file download, so there's nothing left inside it to disagree with the hash.
 
 ### GCS layout
 
 ```
 gs://s3-autonomous-upgrade-3/harness/desktop/metadata.json          (shared with macOS, different key)
-gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-x64.tar.gz
-gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-arm64.tar.gz
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-x64.AppImage
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-arm64.AppImage
 ```
 
 ```json
 {
   "desktop-linux-x64": {
     "version": "1.2.4",
-    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-linux-x64.tar.gz",
+    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-linux-x64.AppImage",
     "sha256": "<64 hex>",
     "size": 41230011
   }
 }
 ```
-
-The archive's top-level directory is always named `Harness/` (the release script stages the built
-`bundle/` under that name before tarring it) — `lib/update/desktop_updater.dart`'s
-`downloadAndStage()` expects the unpacked archive at `<stagingDir>/Harness`, matching the installed
-layout `apps/web/src/app/desktop/install.sh` (in `autonomous-code`) creates at
-`~/.local/opt/Harness`.
 
 ### How a running Linux app self-updates
 
@@ -267,12 +276,14 @@ Same shape as macOS (see above), with the platform-specific pieces:
 
 1. `DesktopUpdater` reads the `desktop-linux-arm64` or `desktop-linux-x64` manifest entry for its
    runtime architecture instead of `desktop-macos`.
-2. The downloaded archive is a `.tar.gz`, unpacked with `tar` instead of `ditto`.
-3. The staged bundle's version comes from its `version.txt`, not an `Info.plist` extraction.
-4. On restart, the detached helper `mv`s the install directory (`~/.local/opt/Harness` by default)
-   the same way the macOS script swaps `Harness.app`, then execs the bundle's own `harness` binary
-   directly (there's no `open -n`/LaunchServices equivalent for a plain packaged Linux binary) and
-   checks it's still alive with `pgrep -f`, same as macOS.
+2. The download IS the artifact — a single `.AppImage` file, made executable after its sha256
+   verifies, with nothing to unpack.
+3. On restart, the detached helper resolves the running AppImage's own path from the `APPIMAGE`
+   environment variable (set by the AppImage runtime on launch — the process itself runs from a
+   temporary FUSE mount, not from that path), `mv`s it to a `.prev` backup, `mv`s the staged file
+   into its place, then execs that same path directly (there's no `open -n`/LaunchServices
+   equivalent for a plain packaged Linux binary) and checks it's still alive with `pgrep -f`, same as
+   macOS.
 
 ### Rolling out safely / rollback
 
