@@ -1167,6 +1167,13 @@ class _DeleteProviderButton extends StatelessWidget {
 /// This is what replaced the old "No provider" row. That row named a state in a
 /// list of providers, which put a non-provider among providers; this says the
 /// same thing where a consequence belongs, above the thing that caused it.
+///
+/// ⚠️ It STATES, it does not warn. Turning every provider off is a supported
+/// way to run the app — agents launch, work gets done, the engines bill their
+/// own subscriptions — so this carries an info glyph and names what IS
+/// happening. It used to open with an amber triangle over the words "No
+/// provider enabled", which described a deliberate choice as a fault and
+/// described it by what was missing.
 class ProviderAllOffBanner extends StatelessWidget {
   const ProviderAllOffBanner({super.key});
 
@@ -1183,10 +1190,15 @@ class ProviderAllOffBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ⚠️ An info glyph, not a warning triangle. Every provider being off
+          // is a supported setup that keeps working, not a fault: agents still
+          // launch and still bill the subscriptions on this computer. The
+          // amber triangle told somebody who had just made that choice on
+          // purpose that they had broken something.
           Icon(
-            LucideIcons.triangleAlert300,
+            LucideIcons.info300,
             size: 15,
-            color: grid.AppPalette.warn,
+            color: grid.AppPalette.textFaint,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1195,7 +1207,7 @@ class ProviderAllOffBanner extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'No provider enabled',
+                  'Running on subscriptions',
                   style: TextStyle(
                     color: grid.AppPalette.textPrimary,
                     fontFamily: grid.AppFont.sans,
@@ -1205,9 +1217,9 @@ class ProviderAllOffBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'New agents fall back to each engine’s own account — models '
-                  'and billing come from the engine, the way the app worked '
-                  'before providers.',
+                  'New agents run on each engine’s own subscription on this '
+                  'computer — models and billing come from the engine, the way '
+                  'the app worked before providers.',
                   style: TextStyle(
                     color: grid.AppPalette.textSecondary,
                     fontSize: 11.5,

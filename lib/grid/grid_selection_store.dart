@@ -6,19 +6,26 @@ import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 import 'grid_surface.dart';
 
-/// What "no provider at all" is called on screen.
+/// What running on no provider is called on screen.
 ///
-/// Named after the state itself rather than after its consequence: "Each
-/// engine's own login" made a reader work out whose login was meant, in a
-/// picker whose every other row is a provider. The consequence is still spelled
-/// out — in the pill's tooltip, and by `ProviderAllOffBanner` in Settings.
+/// ⚠️ **This used to read `No provider`, and that was the bug.** The rail's
+/// pill prints `Subscription` for this exact state, so a person clicked a pill
+/// saying one thing and found the tick sitting beside another — two names for
+/// one state, and the one in the menu named an absence. The old reasoning was
+/// that a menu row may fairly be named for what it is NOT while a readout must
+/// say what IS; that holds for a row nobody chooses on purpose, and this is not
+/// one. Switching every provider off is a deliberate, supported setup, and what
+/// it selects is a real thing: the engine subscriptions already signed in on
+/// this computer. It gets the name of that thing.
 ///
-/// ⚠️ Settings ▸ Providers no longer prints this: it dropped the row that named
+/// One word, shared with the pill, so the two can never drift apart again.
+///
+/// ⚠️ Settings ▸ Providers does not print this: it dropped the row that named
 /// this state, because a state is not a provider and the list is a list of
 /// providers. Every switch being off IS this state there. The sidebar pill
 /// keeps the row — it is a picker, not a roster, and "use nothing" is a real
 /// thing to pick from it.
-const String kNoGridTargetLabel = 'No provider';
+const String kNoGridTargetLabel = 'Subscription';
 
 /// The grid new agents are launched against, if any.
 ///

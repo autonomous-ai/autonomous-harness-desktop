@@ -69,7 +69,14 @@ class RailHoverTarget<T> extends StatelessWidget {
               // figure is already on it — a region inset from the strip's own
               // edges leaves a lane above and below that closes the panel.
               padding: const EdgeInsets.symmetric(horizontal: gap),
-              child: Center(child: child),
+              // ⚠️ No `Center` here, and that is deliberate. It used to wrap
+              // this child, and `Center` LOOSENS the width constraint on the
+              // way through — the child could then take whatever it wanted and
+              // hand the overflow up, which made every `Flexible` inside a
+              // figure inert. The vertical centring it was here for is already
+              // done by the rail's own `SizedBox(height: 26)` and the Row's
+              // default cross-axis centre.
+              child: child,
             ),
           ),
         ),

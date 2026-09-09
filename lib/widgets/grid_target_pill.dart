@@ -92,8 +92,14 @@ List<GridTargetOption> _readyOptions(
   bool Function(String)? isEnabled,
 ) {
   if (networks.isEmpty) {
+    // The one case that earns a pointer: nothing has been chosen here, so
+    // there is somewhere useful to go. Kept apart from "all switched off"
+    // below, which is a decision already made and needs no instruction.
     return const [
-      GridTargetOption(label: 'This account is on no providers', enabled: false),
+      GridTargetOption(
+        label: 'This account is on no providers yet',
+        enabled: false,
+      ),
     ];
   }
   final offered = [
@@ -105,12 +111,17 @@ List<GridTargetOption> _readyOptions(
         ),
   ];
   if (offered.isEmpty) {
-    return const [
-      GridTargetOption(
-        label: 'Every provider is off — turn one on in Settings',
-        enabled: false,
-      ),
-    ];
+    // ⚠️ Deliberately says nothing. This used to read "Every provider is off —
+    // turn one on in Settings", printed under a ticked `Subscription` row, and
+    // it was wrong on two counts. It read as an ERROR for a setup that works:
+    // switching every provider off is supported, agents keep launching, and
+    // they bill the subscriptions on this computer — which the ticked row
+    // above already names. And it gave an ORDER for a state the person had
+    // just chosen on purpose, as though the choice needed undoing.
+    //
+    // The account that owns no providers at all still gets a line, above:
+    // that one has not chosen anything and has somewhere to be pointed.
+    return const <GridTargetOption>[];
   }
   return offered;
 }

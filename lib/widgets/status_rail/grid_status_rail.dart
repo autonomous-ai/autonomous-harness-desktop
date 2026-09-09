@@ -4,10 +4,13 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
+import '../../grid/grid_selection_store.dart';
+import '../../grid/provider_enablement_store.dart';
 import '../../grid/grid_surface.dart';
 import '../../grid/node_metrics.dart';
 import '../../grid/plural.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../state/app_state.dart';
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
@@ -20,6 +23,7 @@ import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
 import 'memory_ring.dart';
 import 'rail_figure.dart';
+import 'rail_provider_pill.dart';
 import 'usage_readout.dart';
 import 'usage_panel.dart';
 
@@ -36,10 +40,17 @@ import 'usage_panel.dart';
 class GridStatusRail extends StatefulWidget {
   const GridStatusRail({
     super.key,
+    required this.notifier,
     this.controller,
     this.usage,
+    this.selection,
+    this.enablement,
     this.onShareIntelligence,
   });
+
+  /// Handed down from the shell for [RailProviderPill]'s settings row — the
+  /// rail holds no `AppNotifier` of its own, and Settings needs one.
+  final AppNotifier notifier;
 
   /// Injected by tests. Null in the app, where the rail makes — and disposes —
   /// its own.
@@ -48,6 +59,16 @@ class GridStatusRail extends StatefulWidget {
   /// The agent accounts' rate limits. Injected by tests; null in the app, where
   /// the rail makes — and disposes — its own.
   final UsageController? usage;
+
+  /// What new agents run on, for [RailProviderPill]. Injected by tests so the
+  /// pill and the overview controller read ONE store: handed different ones
+  /// they disagree about which provider is chosen, and the rail would then name
+  /// a provider whose figures it is not showing.
+  final GridSelectionStore? selection;
+
+  /// Which providers this computer offers, for the pill's menu. Injected by
+  /// tests so a run never reads the developer's own `providers_config.json`.
+  final ProviderEnablementStore? enablement;
 
   /// Opens Settings ▸ Share Intelligence — the other way a grid with no
   /// machines on it grows one. Handed down from the shell, which is where the
@@ -99,7 +120,10 @@ class _GridStatusRailState extends State<GridStatusRail> {
         child: Padding(
           // Less on the right: the version mark carries its own hover inset, so
           // 10 there lands on the same optical margin as 12 on the left.
-          padding: const EdgeInsets.only(left: 12, right: 10),
+          padding: EdgeInsets.only(
+            left: kGridSurfaceEnabled ? 4 : 12,
+            right: 10,
+          ),
           child: Row(
             children: [
               // The left of this strip answers whichever question this build
@@ -122,6 +146,9 @@ class _GridStatusRailState extends State<GridStatusRail> {
                   builder: (context, _) => _Readout(
                     controller: kGridSurfaceEnabled ? _controller : null,
                     usage: _usage,
+                    notifier: widget.notifier,
+                    selection: widget.selection,
+                    enablement: widget.enablement,
                     onShareIntelligence: widget.onShareIntelligence,
                   ),
                 ),
@@ -175,8 +202,18 @@ class _Readout extends StatefulWidget {
   const _Readout({
     required this.controller,
     required this.usage,
+    required this.notifier,
+    this.selection,
+    this.enablement,
     this.onShareIntelligence,
   });
+
+  /// All three are the provider pill's, passed straight through: the pill lives
+  /// inside this row because it stands where the grid's name did, and that is
+  /// a position only this widget knows.
+  final AppNotifier notifier;
+  final GridSelectionStore? selection;
+  final ProviderEnablementStore? enablement;
 
   /// The chosen grid's figures, or null in a build that hides Grid entirely.
   final GridOverviewController? controller;
@@ -331,7 +368,11 @@ class _ReadoutState extends State<_Readout> {
           // clusters, and a click on empty rail would pin the hardware panel.
           behavior: HitTestBehavior.deferToChild,
           onTap: _toggle,
-          child: _figures(),
+          // The rail's own width is what `_railBudget` tapers the word-carrying
+          // blocks against — see `_railBlock` for why this is not a flex.
+          child: LayoutBuilder(
+            builder: (context, constraints) => _figures(constraints.maxWidth),
+          ),
         ),
       ),
     );
@@ -342,19 +383,165 @@ class _ReadoutState extends State<_Readout> {
       if (node.online) node,
   ];
 
-  Widget _figures() {
+  /// One block on the rail: as wide as its content, shrinkable, never greedy.
+  ///
+  /// The three requirements here genuinely conflict under a plain `Flexible`,
+  /// which is why this took several passes to get right:
+  ///
+  ///  * `flex: 1` (a bare `Flexible`) lets the inner text ellipsise, but the
+  ///    block also claims an equal share of the row's leftover room — four
+  ///    such children split the slack four ways and drift apart.
+  ///  * `flex: 0` alone stops the drift, but it measures the child against an
+  ///    UNBOUNDED width, and these blocks are `mainAxisSize.max` Rows, which
+  ///    cannot resolve against infinity — a layout assertion, not a bad look.
+  ///  * `mainAxisSize.min` on the inner Row sizes to content, but on its own
+  ///    it makes the `Flexible` inside inert and a long reading overflows.
+  ///
+  /// [maxWidth] is what breaks the tie, and it is why the blocks passed here
+  /// pair it with `mainAxisSize.min`: the bound gives their inner `Flexible` a
+  /// finite budget to ellipsise against, while `min` stops the block at its
+  /// last glyph rather than stretching to fill that budget — a `max` Row here
+  /// spent the whole allowance and left the surplus as visible dead space.
+  /// Generous enough never to trim a normal reading; it bounds, it does not
+  /// size.
+  ///
+  /// ⚠️ **A flex factor cannot be the answer to the fourth requirement** —
+  /// giving width back on a narrow rail — and trying it is a mistake this
+  /// file has now made twice. `flex` means BOTH "claim a share of the slack"
+  /// and "yield a share of the shortfall", and there is no way to ask for the
+  /// second without the first: a block set to `flex: 1` starts splitting the
+  /// leftover room with the `Spacer`, so the counts at the far right stop
+  /// sitting against the window edge. Every block here stays `flex: 0`, and
+  /// the shrinking is done by [maxWidth] instead — see [_railBudget], which
+  /// scales the bound with the rail so the ellipsis arrives from the cap
+  /// rather than from the flex.
+  Widget _railBlock({required double maxWidth, required Widget child}) =>
+      Flexible(
+        flex: 0,
+        fit: FlexFit.loose,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: child,
+        ),
+      );
+
+  /// [full] on a roomy rail, tapering to [floor] as the window closes.
+  ///
+  /// This is the shrinking that [_railBlock] deliberately does not ask a flex
+  /// factor for. The rail's own width is the only honest input: below
+  /// [_taperFrom] every pixel the window loses has to come out of the two
+  /// blocks that carry words, and above it they should be left alone entirely.
+  double _railBudget(double railWidth, double full, double floor) {
+    if (railWidth >= _taperFrom) return full;
+    // Linear between the app's minimum window and the taper point, so the
+    // reading gives up width smoothly rather than snapping at a breakpoint.
+    final t = ((railWidth - _minRail) / (_taperFrom - _minRail)).clamp(0.0, 1.0);
+    return floor + (full - floor) * t;
+  }
+
+  /// Above this the rail has room to spare and no block is trimmed.
+  static const double _taperFrom = 1180;
+
+  /// `desktop_window.dart`'s `minimumSize.width` — the narrowest the rail can
+  /// actually be asked to lay out.
+  static const double _minRail = 880;
+
+  /// The rail for a provider with no machines on it.
+  ///
+  /// Everything the ordinary row would print here is zero, and zeros are the
+  /// one thing this strip must not show for an absence — `0 · 0` beside a
+  /// green dot is what a broken poll looks like, not what an empty provider
+  /// looks like. So the figures give way to the sentence they would otherwise
+  /// leave the reader to infer, and the offer that fixes it.
+  ///
+  /// The pill stays: it is how somebody switches to a provider that does have
+  /// machines, which is the likeliest thing they want from this row.
+  ///
+  /// No staleness marker here, deliberately. The live dot elsewhere on this
+  /// strip separates "measured just now" from "measured a while ago", and
+  /// there is no measurement on this row to be old — a provider with nothing
+  /// on it is equally empty whether the poll landed a second or a minute ago.
+  Widget _emptyProviderRow(GridOverviewController controller, double railWidth) {
+    final canShare = widget.onShareIntelligence != null;
+    return Row(
+      children: [
+        _railBlock(
+          maxWidth: 260,
+          child: RailProviderPill(
+            notifier: widget.notifier,
+            selection: widget.selection,
+            enablement: widget.enablement,
+            fallbackName: controller.gridName,
+          ),
+        ),
+        const SizedBox(width: RailHoverTarget.gap * 2 - 8),
+        // No hover target and no chevron: the power panel behind them lists
+        // machines, and there are none to list. A caret onto an empty card is
+        // a promise the rail cannot keep.
+        Flexible(
+          flex: 0,
+          fit: FlexFit.loose,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: _railBudget(railWidth, 360, 180),
+            ),
+            child: Text(
+              'No machines on this provider yet',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: grid.AppPalette.textFaint,
+                fontSize: 11.5,
+              ),
+            ),
+          ),
+        ),
+        const Spacer(),
+        // The one thing a person can do about it, and only when the shell
+        // handed down a way to open it — otherwise the row simply states the
+        // fact rather than drawing a button that goes nowhere.
+        if (canShare)
+          _EmptyProviderAction(onPressed: widget.onShareIntelligence!),
+      ],
+    );
+  }
+
+  Widget _figures(double railWidth) {
     final controller = _grid;
     // No grid to describe: the strip reads the agent accounts instead. These
     // are the same figures either way — a rate limit is the account's, not the
     // grid's — so this is a substitution, not a fallback.
     if (controller == null) {
-      return UsageReadout<_PanelKind>(
-        readings: widget.usage.readings,
-        loading: widget.usage.loading,
-        anchorFor: (provider) => _usageAnchors[provider]!,
-        kindFor: _PanelKind.forProvider,
-        onEnter: _onEnter,
-        onExit: _onExit,
+      // No provider chosen — so the pill says `Subscription`, and the figures
+      // beside it are exactly what that subscription has spent. In a build with
+      // no provider surface at all there is nothing to pick and no pill.
+      return Row(
+        children: [
+          if (kGridSurfaceEnabled) ...[
+            // `flex: 0` for the reason the grid branch gives at length: a bare
+            // `Flexible` here is `flex: 1` against the `Expanded` after it, so
+            // the pill would take HALF the rail to say one word.
+            _railBlock(
+              maxWidth: 260,
+              child: RailProviderPill(
+                notifier: widget.notifier,
+                selection: widget.selection,
+                enablement: widget.enablement,
+              ),
+            ),
+            const SizedBox(width: RailHoverTarget.gap * 2 - 8),
+          ],
+          Expanded(
+            child: UsageReadout<_PanelKind>(
+              readings: widget.usage.readings,
+              loading: widget.usage.loading,
+              anchorFor: (provider) => _usageAnchors[provider]!,
+              kindFor: _PanelKind.forProvider,
+              onEnter: _onEnter,
+              onExit: _onExit,
+            ),
+          ),
+        ],
       );
     }
     final power = controller.power;
@@ -364,13 +551,78 @@ class _ReadoutState extends State<_Readout> {
     // not assemble itself one number at a time — and only then: once a
     // reading exists it stays on screen through every refresh (see [stale]).
     final pending = power == null && controller.loading;
+    // A provider nobody has joined yet. The relay answered — this is not a
+    // failure and not a wait — but every figure it answered with is zero, and
+    // the ordinary row renders that as a live dot, a chevron onto an empty
+    // panel, and `0 · 0`. That reads like a rail that broke rather than a
+    // provider with nothing on it, so it says which in words instead.
+    if (power != null && power.isEmpty) {
+      return _emptyProviderRow(controller, railWidth);
+    }
     return Row(
       children: [
-        _GridMark(
-          controller: controller,
-          anchor: _nameAnchor,
-          onEnter: _onEnter,
-          onExit: _onExit,
+        // WHAT NEW AGENTS RUN ON — where the grid's name already stood.
+        //
+        // ⚠️ This REPLACES `_GridMark`'s name rather than standing beside it.
+        // The rail was measured full at a 1000px window before any of this: a
+        // pill added as a fourth thing at this end overflowed by 40px, and the
+        // name it would have duplicated was already sitting here costing the
+        // same width while being the one thing on the strip you could not act
+        // on. Turning it into the control costs an icon and a caret, not a
+        // block. What is left of `_GridMark` is the live dot and the memory
+        // ring — the facts the pill does not carry.
+        // ⚠️ `flex: 0`, and so is every flexible block on this row. A bare
+        // `Flexible` is `flex: 1`, so the pill, the mark, the work figure and
+        // the `Spacer` were splitting the rail's leftover room FOUR WAYS —
+        // each block inflating to a quarter of slack it never asked for, which
+        // is what stranded the work figure in the middle of the strip with a
+        // 445px hole ahead of it. At `flex: 0` a loose child takes its
+        // content's width and no more, and the `Spacer` is left as the only
+        // thing claiming slack, which is its whole job.
+        //
+        // Loose rather than rigid so a narrow rail can still shrink these
+        // blocks — but that only works because each one bounds itself (see
+        // `_railBlock`): `flex: 0` lays the child out against an UNBOUNDED
+        // width, and a `mainAxisSize.max` Row cannot resolve against infinity.
+        //
+        // The pill's own Row is `min` and its name is capped in its own file,
+        // so it would survive unbounded — but it goes through `_railBlock` all
+        // the same, because "safe as long as another file keeps its Row min"
+        // is an invariant nothing here can see being broken.
+        _railBlock(
+          maxWidth: 260,
+          child: RailProviderPill(
+            notifier: widget.notifier,
+            selection: widget.selection,
+            enablement: widget.enablement,
+            fallbackName: controller.gridName,
+          ),
+        ),
+        // The rail's rhythm is `RailFigure.gap` of padding on each side of a
+        // figure, so any two figures sit 2×9 apart. The pill is not a figure —
+        // it carries 8px inside its own hover box — so it needs the difference
+        // here to land on that same rhythm, or the seam between the pill and
+        // the live dot reads tighter than every other seam on the strip.
+        const SizedBox(width: RailHoverTarget.gap * 2 - 8),
+        // Flexible for the same reason the figure after it is: this block
+        // carries the memory reading, which is words (`1 / 1.7 TB`), and a
+        // rigid child demands its full width and hands the overflow to its
+        // neighbour rather than giving any up itself. `flex: 0` with a bound —
+        // see `_railBlock`.
+        // Tapers second, and less far than the work figure: the memory reading
+        // is a measurement and would rather not be trimmed, but the ring beside
+        // it makes the same claim as a picture, so a clipped `1.1 / 1.6 TB`
+        // still leaves the block readable. Without any give here the rail runs
+        // out once the work figure is spent, and a provider named longer than
+        // `autonomous.ai` overflows a window the app actually allows.
+        _railBlock(
+          maxWidth: _railBudget(railWidth, 190, 150),
+          child: _GridMark(
+            controller: controller,
+            anchor: _nameAnchor,
+            onEnter: _onEnter,
+            onExit: _onExit,
+          ),
         ),
         if (pending)
           // Measured against what lands here — `92.4M tokens / 24h`, not the
@@ -378,20 +630,30 @@ class _ReadoutState extends State<_Readout> {
           // its noun. A placeholder narrower than its answer is the jump a
           // skeleton exists to prevent.
           const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 104),
+        // Hard against the cluster it follows, not adrift after it. The gap
+        // that opened here when the grid's name moved to the pill was the
+        // hover padding `_Figure` has always carried: harmless behind a long
+        // name, plainly a gap once the block ahead of it got short.
         if (power != null && answered != null && answered.freshInputTokens > 0)
           // Flexible, so the one figure on this strip that carries words gives
           // them up before the row overflows. The rail is a plain Row over the
           // window's full width: past the Spacer there is no slack left, and a
           // narrow window is what turns the naming of this figure into a
-          // yellow-and-black bar along the bottom edge.
-          Flexible(
+          // yellow-and-black bar along the bottom edge. `flex: 0` with a bound
+          // — see `_railBlock`.
+          // Tapers first and furthest, because it carries the words a reader
+          // can most afford to lose: ` tokens / 24h` still means something
+          // half-ellipsised, where a trimmed memory figure or a trimmed
+          // provider name is simply wrong.
+          _railBlock(
+            maxWidth: _railBudget(railWidth, 230, 120),
             child: _Figure(
               anchor: _tokenAnchor,
               kind: _PanelKind.tokens,
               value: formatCount(answered.freshInputTokens),
-              // Pluralised off the raw count, not off what `formatCount` printed:
-              // past a thousand that prints "1.2M" and the noun beside it is
-              // still plural, and only the count itself knows that.
+              // Pluralised off the raw count, not off what `formatCount`
+              // printed: past a thousand that prints "1.2M" and the noun
+              // beside it is still plural, and only the count knows that.
               noun: plural(answered.freshInputTokens, 'token'),
               unit: answeredWindowLabel(answered.windowSeconds),
               semantics: 'work answered',
@@ -632,6 +894,13 @@ class _GridMark extends StatelessWidget {
       semantics: 'grid ${controller.gridName}',
       onEnter: onEnter,
       onExit: onExit,
+      // ⚠️ `min`, and the `ConstrainedBox` in `_railBlock` is what makes that
+      // safe. A `max` Row here stretched to the whole 190px budget even though
+      // this cluster is ~141px of content, and the surplus fell into the
+      // `Flexible` around the memory reading — which is the empty gap that
+      // opened between the chevron and `1.1 / 1.6 TB`. Sized to its children
+      // the block ends where its last glyph does; the bound above still gives
+      // the `Flexible` a finite budget to ellipsise against on a narrow rail.
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -647,22 +916,23 @@ class _GridMark extends StatelessWidget {
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150),
-            child: Text(
-              controller.gridName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                // The only full-strength text on the rail, so everything else
-                // reads as its supporting detail.
-                color: grid.AppPalette.textPrimary,
-                fontSize: 11.5,
-                fontWeight: grid.AppFont.medium,
-              ),
+          // ⚠️ The grid's NAME used to follow this dot. The provider pill just
+          // ahead of it carries it now — see the note at this row's head. What
+          // stays is what the pill does not say: whether the reading is fresh,
+          // and how full the memory is.
+          //
+          // The chevron that marks this block as openable moved up here with
+          // it. It used to trail the whole cluster, which read as a caret on
+          // the memory figure once the name it actually belonged to was gone —
+          // beside the live dot it marks the block, which is what it means.
+          if (power != null) ...[
+            const SizedBox(width: 5),
+            Icon(
+              LucideIcons.chevronUp300,
+              size: 11,
+              color: grid.AppPalette.textFaint,
             ),
-          ),
+          ],
           if (power == null && controller.loading) ...const [
             SizedBox(width: 9),
             Skeleton.circle(size: 11),
@@ -673,22 +943,20 @@ class _GridMark extends StatelessWidget {
             const SizedBox(width: 9),
             MemoryRing(share: share),
             const SizedBox(width: 6),
-            Text(
-              vram != null && used != null
-                  ? formatVramShare(used, vram)
-                  : '${(share * 100).round()}% load',
-              style: TextStyle(
-                color: grid.AppPalette.textSecondary,
-                fontSize: 11.5,
+            // The one string in this block that can lose characters and still
+            // mean something: the ring beside it keeps the reading legible.
+            Flexible(
+              child: Text(
+                vram != null && used != null
+                    ? formatVramShare(used, vram)
+                    : '${(share * 100).round()}% load',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: grid.AppPalette.textSecondary,
+                  fontSize: 11.5,
+                ),
               ),
-            ),
-          ],
-          if (power != null) ...[
-            const SizedBox(width: 4),
-            Icon(
-              LucideIcons.chevronUp300,
-              size: 12,
-              color: grid.AppPalette.textFaint,
             ),
           ],
         ],
@@ -736,6 +1004,13 @@ class _Figure extends StatelessWidget {
       semantics: semantics,
       onEnter: onEnter,
       onExit: onExit,
+      // ⚠️ `min`, and it is only safe because `_railBlock` bounds this widget
+      // from outside. A min-sized Row measures against its CHILDREN, so on its
+      // own it would make the `Flexible` below inert and hand the overflow
+      // upward — which is exactly what it did before that bound existed. With
+      // a finite `maxWidth` above, `min` means the block stops at its last
+      // glyph instead of stretching to fill the budget, and the flex still has
+      // something real to shrink against when the rail runs short.
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -863,6 +1138,76 @@ class _Count extends StatelessWidget {
 ///
 /// The quietest thing here on purpose: it answers a question nobody asks until
 /// something is wrong, and then it is the first thing they are asked for.
+/// The offer beside an empty provider: put this machine on it.
+///
+/// A rail is normally what you *know* rather than what you *press* — but the
+/// exception earns itself here. Every other figure on this strip reports
+/// something; this row reports an absence, and an absence with no way to act
+/// on it is a dead end at the bottom of the window. It is drawn as quietly as
+/// the version mark it sits beside, so a rail that usually carries no buttons
+/// does not suddenly grow a loud one.
+class _EmptyProviderAction extends StatefulWidget {
+  const _EmptyProviderAction({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_EmptyProviderAction> createState() => _EmptyProviderActionState();
+}
+
+class _EmptyProviderActionState extends State<_EmptyProviderAction> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Semantics(
+      button: true,
+      label: 'share this computer with the provider',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            height: 20,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: _hovered ? grid.AppSurface.hoverFill : null,
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  LucideIcons.share2300,
+                  size: 11,
+                  color: _hovered
+                      ? grid.AppPalette.accentOnSurface
+                      : grid.AppPalette.textFaint,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Share this computer',
+                  style: TextStyle(
+                    color: _hovered
+                        ? grid.AppPalette.textPrimary
+                        : grid.AppPalette.textSecondary,
+                    fontFamily: grid.AppFont.sans,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _VersionMark extends StatefulWidget {
   const _VersionMark();
 

@@ -12,7 +12,11 @@ import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/grid/managed_network_member.dart';
 import 'package:harness/grid/member_usage.dart';
+import 'package:harness/core/config.dart';
 import 'package:harness/shared/theme/app_theme.dart' as grid;
+import 'package:harness/grid/provider_enablement_store.dart';
+import 'package:harness/state/app_state.dart';
+import 'package:harness/auth/auth_session.dart';
 import 'package:harness/widgets/status_rail/grid_status_rail.dart';
 import 'package:harness/widgets/status_rail/pill_panel_shell.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -75,7 +79,12 @@ class _Api extends GridApiClient {
 /// from that panel having actually parsed the captured relay answer — a heading
 /// alone would pass on an empty list.
 const _expects = {
-  'autonomous.ai': ['IN USE', 'SELF-HOST', '1.0 / 1.7 TB · 59%', '99.9% uptime'],
+  '1.0 / 1.7 TB': [
+    'IN USE',
+    'SELF-HOST',
+    '1.0 / 1.7 TB · 59%',
+    '99.9% uptime',
+  ],
   '33': ['33 MEMBERS', 'owner', '106M input · 24h'],
   '8': ['NODES', '@team2', '828.3 GB VRAM', '4 × Apple M2 Ultra · macOS'],
   '10': ['MODELS', 'CARRYING THIS GRID · LAST 24H', 'FRESH IN', 'OTHERS · 9'],
@@ -98,7 +107,7 @@ void main() {
 
   setUpAll(loadRealFonts);
 
-  for (final target in ['autonomous.ai', '33', '8', '10', '106M']) {
+  for (final target in ['1.0 / 1.7 TB', '33', '8', '10', '106M']) {
     testWidgets('panel over $target', (tester) async {
       grid.AppTheme.brightness.value = Brightness.light;
       tester.view.physicalSize = const Size(1000, 640);
@@ -115,6 +124,12 @@ void main() {
         selection: selection,
         interval: const Duration(hours: 1),
       );
+      final notifier = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
+      addTearDown(notifier.dispose);
       await tester.pumpWidget(
         MaterialApp(
           theme: grid.buildAppTheme(brightness: Brightness.light),
@@ -123,7 +138,17 @@ void main() {
             body: Column(
               children: [
                 const Spacer(),
-                GridStatusRail(controller: controller),
+                GridStatusRail(
+                  notifier: notifier,
+                  controller: controller,
+                  selection: selection,
+                  enablement: ProviderEnablementStore(
+                    file: File(
+                      '${Directory.systemTemp.createTempSync('providers').path}'
+                      '/providers_config.json',
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
