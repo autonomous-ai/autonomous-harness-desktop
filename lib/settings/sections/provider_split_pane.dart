@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../grid/grid_access.dart';
 import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_network.dart';
+import '../../grid/node_display.dart' show kAutoModelId, modelKey;
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/skeleton.dart';
 
@@ -794,7 +795,11 @@ class _DetailHeader extends StatelessWidget {
 
   final VoidCallback? onShare;
 
-  bool get _renameable => owned && onRename != null;
+  /// ⚠️ Ownership is not the whole test — see [gridCanBeRenamed]. A
+  /// `private-domain` provider's name is the domain that may join it, and the
+  /// control plane will happily write a new one.
+  bool get _renameable =>
+      owned && onRename != null && gridCanBeRenamed(network);
 
   @override
   Widget build(BuildContext context) {
@@ -822,7 +827,19 @@ class _DetailHeader extends StatelessWidget {
             runSpacing: 4,
             children: [
               if (!_renameable)
-                name
+                // An owner who cannot rename this one is told why, rather than
+                // left to conclude the double-click is broken. Everyone else
+                // gets a plain name: "you do not own this" is already said by
+                // the absence of YOURS.
+                if (owned ? gridRenameRefusal(network) : null
+                    case final String why)
+                  Tooltip(
+                    message: why,
+                    waitDuration: const Duration(milliseconds: 500),
+                    child: name,
+                  )
+                else
+                  name
               else
                 // A gesture with no affordance is a gesture nobody finds, so
                 // the pointer changes and the tooltip says what it does. Both
@@ -1085,12 +1102,24 @@ class _ProviderModels extends StatelessWidget {
               ),
             ),
             if (onAddModel != null)
-              _QuietButton(
-                key: const Key('provider-add-model'),
-                label: 'Add model',
-                icon: LucideIcons.plus300,
-                onPressed: onAddModel!,
-              ),
+              // Loud on a provider that serves nothing, quiet everywhere else.
+              // On a grid with models this is one more thing you could do; on a
+              // grid with none it is the ONLY thing that makes the provider
+              // worth having, and the panel around it is otherwise a list of
+              // registration facts with an empty section at the bottom.
+              _bare
+                  ? _LoudButton(
+                      key: const Key('provider-add-model'),
+                      label: 'Add model',
+                      icon: LucideIcons.plus300,
+                      onPressed: onAddModel!,
+                    )
+                  : _QuietButton(
+                      key: const Key('provider-add-model'),
+                      label: 'Add model',
+                      icon: LucideIcons.plus300,
+                      onPressed: onAddModel!,
+                    ),
           ],
         ),
         const SizedBox(height: 10),
@@ -1098,6 +1127,11 @@ class _ProviderModels extends StatelessWidget {
       ],
     );
   }
+
+  /// Whether this provider has nothing to answer with — the state `Add model`
+  /// exists for, and the one it is drawn loudly in.
+  bool get _bare =>
+      models is GridModelsReady && servedModels(models).isEmpty;
 
   Widget _body() => switch (models) {
     // Idle and Loading render the same on purpose: from the reader's side
@@ -1116,14 +1150,11 @@ class _ProviderModels extends StatelessWidget {
         Skeleton(width: 132, height: _chipHeight, radius: 4),
       ],
     ),
-    GridModelsReady(:final models) when models.isEmpty => _PlainText(
-      'This provider serves no models yet.'
-      '${onAddModel == null ? '' : ' Add one to start sharing this computer.'}',
-    ),
-    GridModelsReady(:final models) => Wrap(
+    GridModelsReady() when _bare => const _BareProviderNotice(),
+    GridModelsReady() => Wrap(
       spacing: 5,
       runSpacing: 5,
-      children: [for (final model in models) _ModelChip(model)],
+      children: [for (final model in servedModels(models)) _ModelChip(model)],
     ),
     // The message, not a shrug: `GridApiClient` has already turned the failure
     // into a sentence, and a provider that is merely asleep says something
@@ -1210,6 +1241,71 @@ class _LinkButton extends StatelessWidget {
   }
 }
 
+/// What this provider can actually be asked something, out of the relay's raw
+/// list.
+///
+/// ⚠️ **A lone `Auto` is an EMPTY provider, not a provider with one model.**
+/// The relay advertises its virtual `auto` router whenever routing is on —
+/// with nothing behind it to route to — so a grid nobody has joined a node to
+/// still answers `/models` with one entry. Counting it read as "1 model" on a
+/// provider that can answer nothing, which is the exact state this pane now
+/// puts a loud button on. It is dropped from the list even when there ARE real
+/// models beside it: this section says what the provider serves, and `auto` is
+/// how it chooses between those, not one of them. See [kAutoModelId] and
+/// `answerableModels`, which the pickers apply for the same reason.
+List<String> servedModels(GridModelsState state) => switch (state) {
+  GridModelsReady(:final models) => [
+    for (final model in models)
+      if (modelKey(model) != kAutoModelId) model,
+  ],
+  _ => const [],
+};
+
+/// The empty state, which is the one worth reading: it names the consequence
+/// and the fix, in that order, because "0 models" is a number and not an
+/// instruction.
+class _BareProviderNotice extends StatelessWidget {
+  const _BareProviderNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 9, 11, 10),
+      decoration: BoxDecoration(
+        color: grid.AppSurface.accentWash,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: grid.AppPalette.accentOnSurface),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Add a model to use this provider.',
+            style: TextStyle(
+              color: grid.AppPalette.accentOnSurface,
+              fontFamily: grid.AppFont.sans,
+              fontSize: 12.5,
+              fontWeight: grid.AppFont.semibold,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Nobody is serving one here yet, so an agent launched on this '
+            'provider has nothing to answer it.',
+            style: TextStyle(
+              color: grid.AppPalette.textSecondary,
+              fontSize: 11.5,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The rail's one line under a provider's name: how many models it serves, or
 /// what is happening instead.
 ///
@@ -1217,9 +1313,10 @@ class _LinkButton extends StatelessWidget {
 /// list of names beside it can never disagree about how many there are.
 String providerModelsMeta(GridModelsState state) => switch (state) {
   GridModelsIdle() || GridModelsLoading() => 'Loading models…',
-  GridModelsReady(:final models) when models.isEmpty => 'No models',
-  GridModelsReady(:final models) =>
-    '${models.length} model${models.length == 1 ? '' : 's'}',
+  GridModelsReady() when servedModels(state).isEmpty => 'No models',
+  GridModelsReady() =>
+    '${servedModels(state).length} '
+        'model${servedModels(state).length == 1 ? '' : 's'}',
   // Deliberately not the failure's own sentence: this is a 292px line under a
   // name, and the panel prints the reason in full for whichever provider the
   // reader selects.
@@ -1378,6 +1475,49 @@ class _MakeDefaultButton extends StatelessWidget {
         ),
         child: Text(isDefault ? 'Current default' : 'Make default'),
       ),
+    );
+  }
+}
+
+/// The same button as [_QuietButton], wearing the accent.
+///
+/// Used for exactly one thing — `Add model` on a provider that serves none —
+/// where the action is not one option among several but the only one that
+/// makes the screen worth being on. It is the accent rather than a bigger
+/// quiet button because on this panel blue already means "the thing to press",
+/// and the panel's other accent button (`Make default`) is greyed out on a
+/// provider nobody can launch against anyway.
+class _LoudButton extends StatelessWidget {
+  const _LoudButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return FilledButton.icon(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: grid.AppPalette.accentOnSurface,
+        overlayColor: const Color(0x1FFFFFFF),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: TextStyle(
+          fontFamily: grid.AppFont.sans,
+          fontSize: 12.5,
+          fontWeight: grid.AppFont.semibold,
+        ),
+      ),
+      icon: Icon(icon, size: 13),
+      label: Text(label),
     );
   }
 }
