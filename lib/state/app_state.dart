@@ -202,6 +202,11 @@ class AppNotifier extends ChangeNotifier {
   WsPool? _pool;
   late String _autonomousEnv;
   String? _lastError;
+  // Retrying re-runs `refreshMachines()` — a real fix for "could not load
+  // machines" or a daemon hiccup, but a no-op for a failure that already
+  // finished (an agent's launch), where the only honest control is to
+  // dismiss it.
+  bool _lastErrorRetryable = true;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
@@ -294,6 +299,14 @@ class AppNotifier extends ChangeNotifier {
   }
 
   String? get lastError => _lastError;
+  bool get lastErrorRetryable => _lastErrorRetryable;
+
+  /// Clears the error strip without retrying anything, for a failure retrying
+  /// cannot fix (see [_lastErrorRetryable]).
+  void dismissError() {
+    _lastError = null;
+    notifyListeners();
+  }
   String get autonomousEnv => _autonomousEnv;
   bool get hasAvailableUpdate => availableUpdate != null;
   bool get hasForcedUpdate => availableUpdate?.forced ?? false;
@@ -662,6 +675,7 @@ class AppNotifier extends ChangeNotifier {
       await _ensureCliDaemon();
     } catch (error) {
       _lastError = '$error';
+      _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
@@ -685,6 +699,7 @@ class AppNotifier extends ChangeNotifier {
       await refreshMachines();
     } catch (error) {
       _lastError = 'Could not load machines: $error';
+      _lastErrorRetryable = true;
     }
     notifyListeners();
   }
@@ -771,6 +786,7 @@ class AppNotifier extends ChangeNotifier {
     unawaited(_pool?.closeAll());
     _pool = null;
     _lastError = message;
+    _lastErrorRetryable = true;
     status = AppStatus.unauthenticated;
     notifyListeners();
   }
@@ -891,6 +907,7 @@ class AppNotifier extends ChangeNotifier {
     } catch (error) {
       status = AppStatus.unauthenticated;
       _lastError = error.toString();
+      _lastErrorRetryable = true;
       // A short code, never `error.toString()` — a CLI failure carries paths
       // and host names, and this stream is not the place for them. Only the
       // two the TYPE can tell apart: a cancelled sign-in and a refused one both
@@ -1427,6 +1444,7 @@ class AppNotifier extends ChangeNotifier {
       _lastError = null;
     } catch (error) {
       _lastError = 'Could not load machines: $error';
+      _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
@@ -1826,6 +1844,9 @@ class AppNotifier extends ChangeNotifier {
     machine.agentsLoadError = null;
     if (agent.launchState == 'failed' && previous?.launchState != 'failed') {
       _lastError = agent.launchDetail ?? 'Failed to start ${agent.name}';
+      // The launch already ran and failed (e.g. the engine's automatic
+      // install failed) — reloading the machine list will not install it.
+      _lastErrorRetryable = false;
     }
   }
 
@@ -3132,6 +3153,7 @@ class AppNotifier extends ChangeNotifier {
       case 'machine_select_error':
         _lastError =
             'Machine selection failed: ${payload['error'] ?? 'unknown error'}';
+        _lastErrorRetryable = true;
         machine.connectionStatus = ConnectionStatus.disconnected;
         break;
       case 'agent_synced':
