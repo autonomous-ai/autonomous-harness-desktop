@@ -6,6 +6,8 @@ import 'package:harness/grid/grid_api_client.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_session.dart';
 
+import 'support/fake_grid_api.dart';
+
 /// A runner that answers `harness grid login` from a script instead of running
 /// a CLI. `HarnessCliRunner.run` is the only method these tests reach.
 class FakeCliRunner implements HarnessCliRunner {
@@ -43,6 +45,19 @@ name = "Someone"
 network_id = "grid-1"
 name = "macOS"
 network_type = "os-community"
+''';
+
+/// The same file after somebody else signs in on this machine. A different
+/// token above all — that is what the grid list is fetched with.
+const _otherAccount = '''
+session_token = "session-xyz"
+api_url = "https://api-grid.autonomous.ai"
+email = "nobody@example.test"
+
+[[networks]]
+network_id = "grid-2"
+name = "bubu1"
+network_type = "domain-restricted"
 ''';
 
 void main() {
@@ -397,6 +412,107 @@ name = "A Grid"
       expect(controller.state, isNot(isA<GridNetworksSignedOut>()));
     },
   );
+
+  test(
+    'the grids on screen do not outlive the account that fetched them',
+    () async {
+      // The bug this covers, end to end: sign out of Harness, sign in as
+      // somebody else, and every grid list in the app went on showing the
+      // previous account's grids — the share picker offering one grid the new
+      // account is not even on — until the app was restarted.
+      final file = File('${scratch.path}/credentials.toml')
+        ..writeAsStringSync(_realShape);
+      final store = GridSessionStore(
+        file: file,
+        runner: FakeCliRunner(exited(0)),
+      );
+      await store.load();
+      final api = FakeGridApi();
+      final controller = GridNetworksController(client: api, session: store);
+      addTearDown(controller.dispose);
+
+      await controller.refresh();
+      expect(api.calls, 1);
+
+      // Somebody else signs in. Same file, different token.
+      file.writeAsStringSync(_otherAccount);
+      await store.load();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        api.calls,
+        2,
+        reason: 'a list fetched with the old token is wrong, not merely old',
+      );
+    },
+  );
+
+  test('signing out of Grid takes the list with it', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final store = GridSessionStore(file: file, runner: FakeCliRunner(exited(0)));
+    await store.load();
+    final controller = GridNetworksController(
+      client: FakeGridApi(),
+      session: store,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.refresh();
+    expect(controller.state, isA<GridNetworksReady>());
+
+    // `grid logout` deletes the file.
+    file.deleteSync();
+    await store.load();
+    await Future<void>.delayed(Duration.zero);
+
+    // Not the old list: every grid in it is now a launch that fails at the
+    // point of use, and the pane has a sign-in card for exactly this.
+    expect(controller.state, isA<GridNetworksSignedOut>());
+  });
+
+  test('re-reading an unchanged file wakes nobody', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final store = GridSessionStore(file: file, runner: FakeCliRunner(exited(0)));
+    await store.load();
+    var woken = 0;
+    store.addListener(() => woken++);
+
+    await store.load();
+    await store.load();
+
+    // Every listener on this store either re-asks the Grid API or rebuilds a
+    // pane, and the CLI rewrites this file on a token refresh that changes
+    // nothing any of them can see.
+    expect(woken, 0);
+  });
+
+  test('a grid login in a terminal lands without a restart', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final store = GridSessionStore(file: file, runner: FakeCliRunner(exited(0)));
+    addTearDown(store.dispose);
+    await store.load();
+    store.watchForChanges();
+    expect(store.value?.email, 'someone@example.test');
+
+    // What `grid login` does: write a temp file next to it, then rename it over
+    // the top. A watch on the file's own inode would hear nothing about this.
+    final temp = File('${scratch.path}/credentials.toml.tmp')
+      ..writeAsStringSync(_otherAccount);
+    temp.renameSync(file.path);
+
+    // Real filesystem events, so this waits for one rather than pumping: the
+    // debounce alone is 250ms, and macOS adds its own latency on top.
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    while (store.value?.email == 'someone@example.test' &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+
+    expect(store.value?.email, 'nobody@example.test');
+  });
 
   test('a signed-out client is a state the pane can offer a fix for', () async {
     final store = GridSessionStore(

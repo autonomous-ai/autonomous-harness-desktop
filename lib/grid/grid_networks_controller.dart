@@ -75,22 +75,68 @@ class GridNetworksController extends ChangeNotifier {
     if (_state is GridNetworksIdle) refresh();
   }
 
-  /// A session arrived after this answered "signed out".
+  /// The Grid session moved: this answer belongs to whoever was signed in when
+  /// it was fetched, and that is no longer who is.
   ///
-  /// That answer is now stale and nothing else will ask again: [ensureLoaded]
-  /// only fetches from Idle, so the pane would sit on its sign-in card for the
-  /// life of the screen. It is a real race on a fresh machine — the bootstrap
-  /// sign-in takes a moment, and Settings can be open before it lands.
+  /// Three different things, all of them the same mistake if ignored:
+  ///
+  /// * **A session arrived after this answered "signed out."** Nothing else
+  ///   will ask again — [ensureLoaded] only fetches from Idle — so the pane
+  ///   would sit on its sign-in card for the life of the screen. A real race on
+  ///   a fresh machine: the bootstrap sign-in takes a moment, and Settings can
+  ///   be open before it lands.
+  /// * **A different account signed in.** This is the one that shipped: sign
+  ///   out of Harness, sign in as somebody else, and every grid list in the app
+  ///   — the share picker, the model menu, the status rail — went on showing
+  ///   the previous account's grids until the app was restarted. The list is
+  ///   fetched with a token, and a token that changed makes it wrong, not old.
+  /// * **The session went away.** A `grid logout` leaves an app that lists
+  ///   grids it can no longer reach, each one a launch that fails at the point
+  ///   of use.
   void _onSession() {
-    if (_state is GridNetworksSignedOut && _session.signedIn) refresh();
+    final token = _session.value?.token;
+    if (token == null) {
+      _fetchedWith = null;
+      // Whatever is in flight was asked as the account that just left, and its
+      // answer must not land on top of this.
+      _ticket++;
+      if (_state is! GridNetworksIdle) _set(const GridNetworksSignedOut());
+      return;
+    }
+    if (_state is GridNetworksSignedOut) {
+      refresh();
+      return;
+    }
+    // Null means nothing has been fetched yet, which is not a mismatch: it is
+    // Idle waiting for the first screen to ask.
+    if (_fetchedWith != null && _fetchedWith != token) refresh();
   }
+
+  /// The session token the answer on screen was fetched with, and the one the
+  /// in-flight fetch went out with. Compared, never sent anywhere — this class
+  /// passes no credential to anything; [GridApiClient] reads the store itself.
+  String? _fetchedWith;
+  String? _fetchingWith;
+
+  /// Which fetch may publish. A session that changes mid-flight starts a newer
+  /// one, and the older answer — the previous account's grids — has to lose
+  /// that race however it finishes.
+  int _ticket = 0;
 
   /// Loads again, whatever the current state — the refresh button.
   Future<void> refresh() async {
-    if (_state is GridNetworksLoading) return;
+    final token = _session.value?.token;
+    // A second press while the same session is still loading is the same
+    // question asked twice. A session that has moved is a different question
+    // and must not be dropped for arriving during the answer to the old one.
+    if (_state is GridNetworksLoading && token == _fetchingWith) return;
+    final ticket = ++_ticket;
+    _fetchingWith = token;
     _set(const GridNetworksLoading());
     try {
       final me = await _client.me();
+      if (ticket != _ticket) return;
+      _fetchedWith = token;
       _set(GridNetworksReady(me));
       // Once per launch, not per refresh: the refresh button and a second panel
       // would otherwise count one account several times over.
@@ -99,8 +145,14 @@ class GridNetworksController extends ChangeNotifier {
         analytics.gridNetworksLoaded(count: me.networks.length);
       }
     } on GridSignedOutException {
+      if (ticket != _ticket) return;
+      _fetchedWith = null;
       _set(const GridNetworksSignedOut());
     } catch (error) {
+      if (ticket != _ticket) return;
+      // Remembered even though it failed, so the Retry button stays the only
+      // thing that retries — while a later sign-in still gets a fresh look.
+      _fetchedWith = token;
       _set(GridNetworksFailed('$error'));
     }
   }
