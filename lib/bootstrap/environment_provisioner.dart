@@ -16,8 +16,9 @@ const int _linuxClockSyncFailureExitCode = 31;
 const int _linuxAptUpdateFailureExitCode = 32;
 const int _linuxAptInstallFailureExitCode = 33;
 const String _linuxClockRepairCommand =
-    'sudo timedatectl set-ntp true && '
-    'sudo systemctl restart systemd-timesyncd';
+    'if command -v chronyc >/dev/null 2>&1; then '
+    'sudo chronyc makestep; else sudo timedatectl set-ntp true && '
+    'sudo systemctl restart systemd-timesyncd; fi';
 
 enum EnvironmentStep {
   clipboard,
@@ -1188,8 +1189,31 @@ apt_as_root() {
   run_as_root env DEBIAN_FRONTEND=noninteractive apt-get "\$@"
 }
 repair_system_clock() {
+  if command -v chronyc >/dev/null 2>&1; then
+    echo 'Repository metadata is ahead of this computer. Enabling automatic time synchronization with chrony…'
+    run_as_root chronyc online >/dev/null 2>&1 || true
+    run_as_root chronyc burst 4/4 >/dev/null 2>&1 || true
+    clock_attempt=0
+    while :; do
+      chrony_tracking="\$(chronyc tracking 2>/dev/null || true)"
+      if printf '%s\n' "\$chrony_tracking" | grep -Eq 'Leap status[[:space:]]*:[[:space:]]*Normal'; then
+        if run_as_root chronyc makestep; then
+          echo 'System clock stepped with chrony.'
+          return 0
+        fi
+        echo 'chrony has a synchronized source but could not step the system clock.' >&2
+        break
+      fi
+      clock_attempt=\$((clock_attempt + 1))
+      if [ "\$clock_attempt" -ge 15 ]; then
+        echo 'chrony did not obtain a synchronized source within 30 seconds.' >&2
+        break
+      fi
+      sleep 2
+    done
+  fi
   if ! command -v timedatectl >/dev/null 2>&1; then
-    echo 'System clock is behind repository metadata, but timedatectl is unavailable.' >&2
+    echo 'System clock is behind repository metadata, but no usable time synchronization service was found.' >&2
     return $_linuxClockSyncFailureExitCode
   fi
   echo 'Repository metadata is ahead of this computer. Enabling automatic time synchronization…'

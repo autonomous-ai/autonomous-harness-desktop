@@ -158,6 +158,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (_) async => terminalLaunches++,
         run: runner(
           tmuxPresent: () => false,
@@ -184,6 +185,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         developerToolsPresent: false,
@@ -214,6 +216,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         developerToolsPresent: false,
@@ -243,10 +246,12 @@ void main() {
     );
     expect(script, contains('xcode-select --install'));
     expect(script, contains('did not become ready within 10 minutes'));
-    expect(
-      (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
-      0,
-    );
+    if (File('/bin/zsh').existsSync()) {
+      expect(
+        (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
+        0,
+      );
+    }
   });
 
   test(
@@ -259,6 +264,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (_) async => terminalLaunches++,
         run: runner(
           tmuxPresent: () => tmuxPresent,
@@ -291,6 +297,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         tmuxPresent: () => false,
@@ -324,6 +331,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (path) async => terminalScript = path,
         run: runner(
           homebrewPresent: () => false,
@@ -357,6 +365,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         run: runner(
           tmuxPresent: () => true,
           gridPresent: () => gridPresent,
@@ -467,8 +476,14 @@ void main() {
       final script = await File(terminalScript!).readAsString();
       expect(script, contains('apt_as_root install -y xclip'));
       expect(script, isNot(contains('apt_as_root install -y tmux')));
+      expect(script, contains('chronyc tracking'));
+      expect(script, contains('chronyc makestep'));
       expect(script, contains('timedatectl set-ntp true'));
       expect(script, contains('NTPSynchronized'));
+      expect(
+        script.indexOf('chronyc makestep'),
+        lessThan(script.indexOf('timedatectl set-ntp true')),
+      );
       expect(script, isNot(contains('apt_as_root update || true')));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
@@ -577,6 +592,7 @@ void main() {
 
     expect(readiness.phase, EnvironmentSetupPhase.failed);
     expect(readiness.failure?.title, contains('clock'));
+    expect(readiness.failure?.command, contains('chronyc makestep'));
     expect(readiness.failure?.command, contains('timedatectl set-ntp true'));
     expect(terminalLaunches, 0);
   });
@@ -929,6 +945,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       run: runner(
         tmuxPresent: () => true,
         gridPresent: () => false,
@@ -1013,6 +1030,7 @@ void main() {
 
       expect(failed.phase, EnvironmentSetupPhase.failed);
       expect(failed.failure?.title, contains('clock'));
+      expect(failed.failure?.command, contains('chronyc makestep'));
       expect(failed.failure?.command, contains('timedatectl set-ntp true'));
       expect(failed.output.join('\n'), contains('is not valid yet'));
       expect(launches, 1);
@@ -1064,6 +1082,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         run: runner(
           tmuxPresent: () => true,
           gridPresent: () => true,
