@@ -43,6 +43,12 @@ APP_BUNDLE="$APP_DIR/build/macos/Build/Products/Release/Harness.app"
 # --- GCS config (all overridable via env) ---
 GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
 GCS_PUBLIC_BASE_URL="${GCS_PUBLIC_BASE_URL:-https://storage.googleapis.com/${GCS_BUCKET}}"
+# The manifest itself stays on the GCS origin (read below, and in the manifest merge) — apps poll it
+# every ~60s (lib/update/desktop_updater.dart) and this zone's CDN caps ANY cacheable response at ~31
+# days regardless of origin headers (verified live), which would silently delay self-update fleet-wide.
+# The zip/dmg it points at are a different story: immutable once published (never re-upload over an
+# existing version — see RELEASE.md), so CDN caching them is pure upside. Only URL/DMG_URL below use this.
+CDN_ASSET_BASE_URL="${CDN_ASSET_BASE_URL:-https://cdn.autonomous.ai}"
 METADATA_PATH="${METADATA_PATH:-harness/desktop/metadata.json}"
 OTA_KEY="${OTA_KEY:-desktop-macos}"   # must match _otaKey in lib/update/desktop_updater.dart
 # The .dmg is the FIRST-INSTALL artifact (download, drag to Applications) and rides a SEPARATE key on
@@ -264,20 +270,22 @@ fi
 
 # --- Step 4: upload the artifact + merge the manifest ---
 GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-macos.zip}"
-URL="${GCS_PUBLIC_BASE_URL%/}/${GCS_PATH#/}"
+URL="${CDN_ASSET_BASE_URL%/}/${GCS_PATH#/}"
 SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
 SIZE="$(wc -c < "$ZIP" | tr -d ' ')"
 
 DMG_GCS_PATH="${DMG_GCS_PATH:-harness/desktop/${VER}/Harness-macos.dmg}"
-DMG_URL="${GCS_PUBLIC_BASE_URL%/}/${DMG_GCS_PATH#/}"
+DMG_URL="${CDN_ASSET_BASE_URL%/}/${DMG_GCS_PATH#/}"
 DMG_SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
 DMG_SIZE="$(wc -c < "$DMG" | tr -d ' ')"
 
 echo ">> uploading release $VER"
+# Immutable per-version path — see the CDN_ASSET_BASE_URL note near the top of this script. Long
+# max-age here is what actually lets the CDN cache these instead of hitting GCS on every install/update.
 echo "   zip: gs://${GCS_BUCKET}/${GCS_PATH}  ($SIZE bytes, sha256=$SHA)"
-gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$ZIP" "gs://${GCS_BUCKET}/${GCS_PATH}"
+gsutil -h "Cache-Control:public, max-age=31536000, immutable" cp "$ZIP" "gs://${GCS_BUCKET}/${GCS_PATH}"
 echo "   dmg: gs://${GCS_BUCKET}/${DMG_GCS_PATH}  ($DMG_SIZE bytes, sha256=$DMG_SHA)"
-gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$DMG" "gs://${GCS_BUCKET}/${DMG_GCS_PATH}"
+gsutil -h "Cache-Control:public, max-age=31536000, immutable" cp "$DMG" "gs://${GCS_BUCKET}/${DMG_GCS_PATH}"
 
 echo ">> merging manifest: gs://${GCS_BUCKET}/${METADATA_PATH}  (${OTA_KEY}, ${DMG_KEY})"
 SRC="$(mktemp)"; DST="$(mktemp)"   # removed by cleanup() on EXIT

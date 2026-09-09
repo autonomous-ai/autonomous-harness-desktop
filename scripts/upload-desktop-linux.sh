@@ -53,6 +53,12 @@ BUNDLE_DIR="$APP_DIR/build/linux/${RELEASE_ARCH}/release/bundle"
 # --- GCS config (all overridable via env) ---
 GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
 GCS_PUBLIC_BASE_URL="${GCS_PUBLIC_BASE_URL:-https://storage.googleapis.com/${GCS_BUCKET}}"
+# The manifest itself stays on the GCS origin (read below, and in the manifest merge) — apps poll it
+# every ~60s (lib/update/desktop_updater.dart) and this zone's CDN caps ANY cacheable response at ~31
+# days regardless of origin headers (verified live), which would silently delay self-update fleet-wide.
+# The AppImage it points at is a different story: immutable once published (never re-upload over an
+# existing version — see RELEASE.md), so CDN caching it is pure upside. Only URL below uses this.
+CDN_ASSET_BASE_URL="${CDN_ASSET_BASE_URL:-https://cdn.autonomous.ai}"
 METADATA_PATH="${METADATA_PATH:-harness/desktop/metadata.json}"
 OTA_KEY="${OTA_KEY:-desktop-linux-${RELEASE_ARCH}}"   # must match DesktopUpdater's architecture key
 
@@ -201,13 +207,15 @@ chmod +x "$OUTPUT"
 
 # --- Step 4: upload the artifact + merge the manifest ---
 GCS_PATH="${GCS_PATH:-harness/desktop/${VER}/Harness-linux-${RELEASE_ARCH}.AppImage}"
-URL="${GCS_PUBLIC_BASE_URL%/}/${GCS_PATH#/}"
+URL="${CDN_ASSET_BASE_URL%/}/${GCS_PATH#/}"
 SHA="$(sha256sum "$OUTPUT" | awk '{print $1}')"
 SIZE="$(wc -c < "$OUTPUT" | tr -d ' ')"
 
 echo ">> uploading release $VER ($SIZE bytes, sha256=$SHA)"
 echo "   dest: gs://${GCS_BUCKET}/${GCS_PATH}"
-gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$OUTPUT" "gs://${GCS_BUCKET}/${GCS_PATH}"
+# Immutable per-version path — see the CDN_ASSET_BASE_URL note near the top of this script. Long
+# max-age here is what actually lets the CDN cache it instead of hitting GCS on every install/update.
+gsutil -h "Cache-Control:public, max-age=31536000, immutable" cp "$OUTPUT" "gs://${GCS_BUCKET}/${GCS_PATH}"
 
 echo ">> merging manifest: gs://${GCS_BUCKET}/${METADATA_PATH}  (${OTA_KEY})"
 SRC="$(mktemp)"; DST="$(mktemp)"   # removed by cleanup() on EXIT

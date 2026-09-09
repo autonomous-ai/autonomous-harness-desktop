@@ -18,6 +18,7 @@ import '../core/models.dart';
 import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
+import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
@@ -222,6 +223,21 @@ class AppNotifier extends ChangeNotifier {
   String? _bootStatusMessage;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
+  // Polls a step stuck in needsTerminal/failed every 5s (see `_scheduleEnvironmentRecheck`) so a user
+  // who fixes it by hand in their own terminal doesn't have to remember to click Recheck. A one-shot
+  // Timer that reschedules itself rather than `Timer.periodic`, so a slow recheck can't overlap with
+  // the next tick.
+  Timer? _environmentRecheckTimer;
+
+  /// Whether a stuck step is being auto-polled right now — drives the "Checking automatically…"
+  /// caption on [EnvironmentSetupScreen] alongside its Recheck button.
+  bool get environmentRecheckPending => _environmentRecheckTimer != null;
+
+  /// Whether a provisioning run (initial or a per-step recheck) is in flight — lets the setup
+  /// screen disable its Recheck/Start over buttons and show a spinner instead of a second click
+  /// racing the first.
+  bool get environmentSetupInFlight => _environmentSetupInFlight;
+
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
   // now, not just this computer's own one (see src/lib/remoteRelay.ts in the harness CLI repo: a
   // foreign machineId is relayed to backend transparently, so the app never dials backend directly).
@@ -659,17 +675,7 @@ class AppNotifier extends ChangeNotifier {
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
       if (!environmentReady) return;
-      // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
-      // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
-      // asks the CLI whether this computer is currently signed in.
-      final authStatus = await cliLogin.checkStatus();
-      if (!authStatus.loggedIn) {
-        currentUser = null;
-        status = AppStatus.unauthenticated;
-        notifyListeners();
-        return;
-      }
-      await _finishBootstrapSignedIn();
+      await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint('bootstrap: fallback to login after error: $error\n$stack');
       currentUser = null;
@@ -712,7 +718,8 @@ class AppNotifier extends ChangeNotifier {
       // flash onto) on every later launch rather than re-verifying something already proven.
       environmentReadiness = EnvironmentReadiness(
         steps: {
-          for (final step in EnvironmentStep.values) step: EnvironmentStepStatus.ready,
+          for (final step in EnvironmentStep.values)
+            step: EnvironmentStepStatus.ready,
         },
       );
       return true;
@@ -722,23 +729,14 @@ class AppNotifier extends ChangeNotifier {
     environmentReadiness = EnvironmentReadiness.initial();
     notifyListeners();
     try {
-      final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
-      final result = await provisioner.ensureReady(
-        onProgress: (value) {
-          environmentReadiness = value;
-          notifyListeners();
-        },
-      );
-      environmentReadiness = result;
-      analytics.environmentPrepared(
-        ready: result.isReady,
-        grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
-      );
+      final result = await _runProvisioner();
       if (!result.isReady) {
         status = AppStatus.preparingEnvironment;
+        _scheduleEnvironmentRecheck();
         notifyListeners();
         return false;
       }
+      _cancelEnvironmentRecheckTimer();
       _environmentConfirmed = true;
       unawaited(_store?.saveEnvironmentConfirmed());
       return true;
@@ -747,11 +745,107 @@ class AppNotifier extends ChangeNotifier {
     }
   }
 
-  /// Used after macOS finishes the visible Homebrew / Command Line Tools path.
-  /// The first-run flow is deliberately re-run end to end: Node and Harness
-  /// checks are idempotent and this prevents a stale partial install from being
-  /// mistaken for a ready machine.
+  /// Shared with [_prepareEnvironment]: runs the provisioner, updates
+  /// [environmentReadiness] as it streams progress, and reports the outcome.
+  Future<EnvironmentReadiness> _runProvisioner({
+    EnvironmentReadiness? resumeFrom,
+  }) async {
+    final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
+    final result = await provisioner.ensureReady(
+      onProgress: (value) {
+        environmentReadiness = value;
+        notifyListeners();
+      },
+      resumeFrom: resumeFrom,
+    );
+    environmentReadiness = result;
+    analytics.environmentPrepared(
+      ready: result.isReady,
+      grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
+    );
+    return result;
+  }
+
+  /// What `bootstrap()` does right after the environment is confirmed ready — pulled out so
+  /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
+  /// load and update-check startup, which already ran on the launch that got stuck here.
+  Future<void> _continueAfterEnvironmentReady() async {
+    // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
+    // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
+    // asks the CLI whether this computer is currently signed in.
+    final authStatus = await cliLogin.checkStatus();
+    if (!authStatus.loggedIn) {
+      currentUser = null;
+      status = AppStatus.unauthenticated;
+      notifyListeners();
+      return;
+    }
+    await _finishBootstrapSignedIn();
+  }
+
+  /// Full reset: re-runs first-run provisioning end to end, same as a relaunch. Kept as an escape
+  /// hatch alongside the per-step [recheckEnvironmentStep] — Node and Harness checks are idempotent,
+  /// so this is safe even when only one step is actually stuck.
   Future<void> retryEnvironmentSetup() => bootstrap();
+
+  /// Rechecks a single stuck step (`failed`/`needsTerminal`) without re-running steps already
+  /// `ready` — the user fixed it by hand (see `environment_step_guidance.dart`'s command) and this
+  /// confirms it, then falls through to whatever step comes next, exactly like a fresh `bootstrap()`
+  /// would have. [step] identifies which row's Recheck button was pressed; the provisioner itself
+  /// decides what to (re-)attempt from the current [environmentReadiness], so an already-resolved
+  /// step is never disturbed regardless of which row triggered this.
+  Future<void> recheckEnvironmentStep(EnvironmentStep step) async {
+    if (_environmentSetupInFlight) return;
+    _cancelEnvironmentRecheckTimer();
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(resumeFrom: environmentReadiness);
+      if (!result.isReady) {
+        _scheduleEnvironmentRecheck();
+        return;
+      }
+      _environmentConfirmed = true;
+      unawaited(_store?.saveEnvironmentConfirmed());
+      await _continueAfterEnvironmentReady();
+    } catch (error, stack) {
+      debugPrint(
+        'recheckEnvironmentStep: fallback to login after error: $error\n$stack',
+      );
+      currentUser = null;
+      status = AppStatus.unauthenticated;
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+      _trackAppOpened();
+    }
+  }
+
+  /// Polls the currently-stuck required step every 5s (see `_environmentRecheckTimer`'s doc) so
+  /// fixing it in another window and forgetting to click Recheck still moves the app forward.
+  /// A no-op once nothing required is stuck (grid failures never qualify — see `EnvironmentStep.isRequired`).
+  void _scheduleEnvironmentRecheck() {
+    _environmentRecheckTimer?.cancel();
+    EnvironmentStep? stuck;
+    for (final entry in environmentReadiness.steps.entries) {
+      if (!entry.key.isRequired) continue;
+      if (entry.value == EnvironmentStepStatus.needsTerminal ||
+          entry.value == EnvironmentStepStatus.failed) {
+        stuck = entry.key;
+        break;
+      }
+    }
+    if (stuck == null) return;
+    final step = stuck;
+    _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
+      unawaited(recheckEnvironmentStep(step));
+    });
+  }
+
+  void _cancelEnvironmentRecheckTimer() {
+    _environmentRecheckTimer?.cancel();
+    _environmentRecheckTimer = null;
+  }
 
   void _bootstrapLocalManual(LocalManualFixture fixture) {
     _autonomousEnv = 'prod';
@@ -845,14 +939,21 @@ class AppNotifier extends ChangeNotifier {
   /// and about a second, so making somebody go and ask for a second sign-in is
   /// asking them to care about a split they did not create.
   ///
-  /// **Only when there is none, and that guard is the whole design.** Every run
-  /// mints a fresh 365-day session and revokes nothing, so a sign-in on every
-  /// launch would pile sessions onto the account forever — and the only cleanup
-  /// is `grid logout --everywhere`, which is all-or-nothing and signs out every
-  /// other machine too. It would also overwrite a session somebody deliberately
-  /// pointed at another account. A session that already exists is therefore
-  /// left exactly alone, whoever it belongs to; Settings ▸ Grid is where a
-  /// mismatch is said out loud.
+  /// **Only when there is none, or when the one there belongs to a DIFFERENT
+  /// account, and that guard is the whole design.** Every run mints a fresh
+  /// 365-day session and revokes nothing, so a sign-in on every launch would
+  /// pile sessions onto the account forever — and the only cleanup is
+  /// `grid logout --everywhere`, which is all-or-nothing and signs out every
+  /// other machine too. A session that matches this Harness account is
+  /// therefore left exactly alone.
+  ///
+  /// The mismatch case is not an exception to that rule but the reason it needs
+  /// one. `harness logout` deliberately never deletes `~/.grid/credentials.toml`
+  /// (no cascade, in either direction), so signing out and back in as somebody
+  /// else left the previous person's session on disk — and this app went on
+  /// listing THEIR grids, with no action anywhere in the UI that could correct
+  /// it. Replacing then is what earns the new session; Settings ▸ Grid still
+  /// says the mismatch out loud for the window between the two.
   ///
   /// Silent either way. This is a convenience on top of a Harness sign-in that
   /// already succeeded, and a machine with no `grid` on PATH (or no network)
@@ -860,10 +961,15 @@ class AppNotifier extends ChangeNotifier {
   /// still has its own button, and says why when it cannot.
   Future<void> _ensureGridSession() async {
     try {
-      // `signIn` is "make sure there is one" — it re-reads and returns early on
-      // a machine that already has a session, so the guard lives in one place
-      // rather than once here and once in the pane's button.
-      final failure = await gridSessionStore.signIn();
+      // `signIn` is "make sure there is one FOR THIS ACCOUNT" — it re-reads and
+      // returns early on a machine already signed in as `account`, so the guard
+      // lives in one place rather than once here and once in the pane's button.
+      // The address comes from the profile fetched a few lines above this
+      // call's site; null while that call failed, which reads as "leave
+      // whatever is there alone" rather than as a mismatch.
+      final failure = await gridSessionStore.signIn(
+        account: currentUser?.email,
+      );
       if (failure != null) debugPrint('grid sign-in skipped: $failure');
     } catch (error) {
       debugPrint('grid sign-in skipped: $error');
@@ -1068,6 +1174,22 @@ class AppNotifier extends ChangeNotifier {
     // process could be reached, but a real `harness logout` clears its saved session so the NEXT
     // launch doesn't silently sign back in without ever showing the login screen.
     unawaited(cliLogin.logout());
+    // Grid goes with it. `harness logout` itself never touches
+    // `~/.grid/credentials.toml` — there is no cascade inside the CLI, in
+    // either direction — so without this a sign-out left a live 365-day Grid
+    // token on the machine, and the next person to sign in inherited the
+    // previous one's grids.
+    //
+    // Not awaited, and its failure never stops the sign-out: refusing to sign
+    // somebody out of Harness because a Grid command failed would trap them in
+    // the account they asked to leave. Said out loud rather than swallowed —
+    // when it fails the credential is still there, which is exactly the thing
+    // the user needs to know.
+    unawaited(
+      gridSessionStore.signOut().then((failure) {
+        if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
+      }),
+    );
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();
@@ -2883,9 +3005,14 @@ class AppNotifier extends ChangeNotifier {
     pane.session = terminal;
     terminal.addListener(notifyListeners);
     notifyListeners();
-    // First paint is more valuable than a perfectly-sized first snapshot. Open at 80x24 now; the
-    // renderer's measured viewport is coalesced into a resize as soon as the stream is controlling.
-    await terminal.open();
+    // Wait for the pane's actual measured viewport before asking the daemon to open anything.
+    // Sending the 80x24 fallback here used to make the daemon spawn the remote TTY (and render its
+    // first keyframe) at that wrong size, which then had to be corrected by a resize round trip —
+    // visible as the terminal's content briefly rendering narrow before snapping to full width. The
+    // blank "Attaching…" placeholder already covers this measurement, which lands within a frame or
+    // two of the panel mounting; `waitForViewportSize`'s own 2s timeout falls back to 80x24 only if
+    // the pane genuinely never gets laid out.
+    await terminal.open(waitForViewportSize: true);
   }
 
   Future<void> _detachSession(
@@ -3499,6 +3626,7 @@ class AppNotifier extends ChangeNotifier {
     _disposed = true;
     _daemonSupervisionTimer?.cancel();
     _updateCheckTimer?.cancel();
+    _environmentRecheckTimer?.cancel();
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();

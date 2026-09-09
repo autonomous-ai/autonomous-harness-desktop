@@ -396,7 +396,7 @@ jobs:
             echo "::error::$REF_NAME has an empty tag message — no notes to publish."
             exit 1
           fi
-          base="https://storage.googleapis.com/${GCS_BUCKET}/harness/desktop/${VERSION}"
+          base="https://cdn.autonomous.ai/harness/desktop/${VERSION}"
           cat >> RELEASE_NOTES.md <<EOF
 
           ---
