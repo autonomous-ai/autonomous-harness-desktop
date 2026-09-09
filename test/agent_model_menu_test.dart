@@ -74,7 +74,7 @@ void main() {
   }
 
   test('an agent with no grid says so', () {
-    expect(agentModelLabel(null), 'No provider');
+    expect(agentModelLabel(null), kNoGridTargetLabel);
   });
 
   test('a grid with no model left the choice to the grid', () {

@@ -6,6 +6,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/grid/agent_grid.dart';
 import 'package:harness/grid/grid_models_controller.dart';
+import 'package:harness/grid/grid_selection_store.dart' show kNoGridTargetLabel;
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/model_picker_options.dart';
@@ -32,14 +33,14 @@ List<String> _labels(List<ModelPickerItem> items) => [
 void main() {
   group('the list', () {
     test('opens with the one choice that needs no network call', () {
-      // "No provider" must not be a row that appears once a fetch lands: it is
+      // The no-provider row must not be one that appears once a fetch lands: it is
       // the only choice the app can offer with nothing loaded at all.
       final items = modelPickerItems(
         providers: const [],
         modelsOf: _served(const {}),
       );
 
-      expect(_labels(items), ['No provider']);
+      expect(_labels(items), [kNoGridTargetLabel]);
       expect((items.first as ModelPickerRow).choice, ModelChoice.none);
     });
 
@@ -53,7 +54,7 @@ void main() {
       );
 
       expect(_labels(items), [
-        'No provider',
+        kNoGridTargetLabel,
         '# Office',
         'Auto',
         'GLM-4.7-Flash',
@@ -100,8 +101,9 @@ void main() {
       }
     });
 
-    test('a provider serving only that router is empty, not ready to chat', () {
-      // Auto with nothing to route to is a row that resolves to nothing.
+    test('a provider serving only that router is not listed at all', () {
+      // Auto with nothing to route to is a row that resolves to nothing, and a
+      // name over one apology is not a choice — so the group goes with it.
       final items = modelPickerItems(
         providers: [_office],
         modelsOf: _served({
@@ -109,14 +111,13 @@ void main() {
         }),
       );
 
-      expect(_labels(items), [
-        'No provider',
-        '# Office',
-        '· Serving no models yet',
-      ]);
+      expect(_labels(items), [kNoGridTargetLabel]);
     });
 
-    test('a provider still answering says so under its own name', () {
+    test('one still answering, or failed, is not listed either', () {
+      // On an account with four providers the panel WAS four names over four
+      // apologies, none of them a thing anyone could pick. What is still
+      // happening is said once, under the list — see the note group below.
       final items = modelPickerItems(
         providers: [_office, _lab],
         modelsOf: _served({
@@ -125,12 +126,23 @@ void main() {
         }),
       );
 
+      expect(_labels(items), [kNoGridTargetLabel]);
+    });
+
+    test('the ones that DID answer are listed while the others load', () {
+      final items = modelPickerItems(
+        providers: [_office, _lab],
+        modelsOf: _served({
+          _office.networkId: const GridModelsLoading(),
+          _lab.networkId: const GridModelsReady(['Qwen3.8-27B']),
+        }),
+      );
+
       expect(_labels(items), [
-        'No provider',
-        '# Office',
-        '· Loading models…',
+        kNoGridTargetLabel,
         '# Lab',
-        '· The relay is unreachable.',
+        'Auto',
+        'Qwen3.8-27B',
       ]);
     });
   });
@@ -180,17 +192,16 @@ void main() {
       );
     });
 
-    test('a provider still loading survives a search on its name', () {
-      // Nobody can say whether a grid serves what was typed until it answers,
-      // and dropping it would make the section blink out and back as the load
-      // lands.
+    test('a provider still loading matches nothing, name or otherwise', () {
+      // It has no rows to offer, and a header alone is a group with nothing in
+      // it.
       final items = modelPickerItems(
         providers: [_office],
         modelsOf: _served({_office.networkId: const GridModelsLoading()}),
         query: 'off',
       );
 
-      expect(_labels(items), ['# Office', '· Loading models…']);
+      expect(items, isEmpty);
     });
   });
 
@@ -209,7 +220,7 @@ void main() {
       );
 
       expect(_labels(items).take(4), [
-        'No provider',
+        kNoGridTargetLabel,
         '# Recent',
         'Qwen3.8-27B',
         'Auto',
@@ -247,7 +258,7 @@ void main() {
       );
 
       expect(_labels(items), [
-        'No provider',
+        kNoGridTargetLabel,
         '# Office',
         'Auto',
         'GLM-4.7-Flash',
@@ -280,17 +291,13 @@ void main() {
     );
 
     test('lands only where Enter means something', () {
-      // 0 No provider · 1 # Office · 2 Auto · 3 GLM · 4 # Lab · 5 note
+      // 0 no-provider · 1 # Office · 2 Auto · 3 GLM. The second provider is
+      // still answering, so it contributes nothing to walk over.
       expect(firstPickableIndex(items), 0);
       expect(
         nextPickableIndex(items, 0, 1),
         2,
         reason: 'the header is skipped',
-      );
-      expect(
-        nextPickableIndex(items, 3, 1),
-        3,
-        reason: 'the note is not a row',
       );
       expect(nextPickableIndex(items, 2, -1), 0);
     });
@@ -352,6 +359,89 @@ void main() {
           [_office, _lab],
         ),
         isNull,
+      );
+    });
+  });
+
+  group('the note under the list', () {
+    test('says once that models are still coming, not once per provider', () {
+      expect(
+        modelPickerModelsNote(
+          providers: [_office, _lab],
+          modelsOf: _served({
+            _office.networkId: const GridModelsLoading(),
+            _lab.networkId: const GridModelsIdle(),
+          }),
+        ),
+        'Loading models…',
+      );
+    });
+
+    test('goes quiet once every provider has answered', () {
+      expect(
+        modelPickerModelsNote(
+          providers: [_office, _lab],
+          modelsOf: _served({
+            _office.networkId: const GridModelsReady(['GLM-4.7-Flash']),
+            _lab.networkId: const GridModelsReady(['Qwen3.8-27B']),
+          }),
+        ),
+        isNull,
+      );
+    });
+
+    test('a provider serving nothing is not something to wait for', () {
+      // Neither pending nor broken — a grid with no models, and nothing here
+      // for the reader to wait for or fix.
+      expect(
+        modelPickerModelsNote(
+          providers: [_office],
+          modelsOf: _served({
+            _office.networkId: const GridModelsReady(['auto']),
+          }),
+        ),
+        isNull,
+      );
+    });
+
+    test('one failure is quoted, several are counted', () {
+      expect(
+        modelPickerModelsNote(
+          providers: [_office],
+          modelsOf: _served({
+            _office.networkId: const GridModelsFailed(
+              'The relay is unreachable.',
+            ),
+          }),
+        ),
+        'The relay is unreachable.',
+        reason:
+            'GridApiClient already turned it into a sentence with a way out',
+      );
+      expect(
+        modelPickerModelsNote(
+          providers: [_office, _lab],
+          modelsOf: _served({
+            _office.networkId: const GridModelsFailed('one'),
+            _lab.networkId: const GridModelsFailed('two'),
+          }),
+        ),
+        '2 providers could not be reached',
+      );
+    });
+
+    test('a load still running outranks a failure', () {
+      // The condition that resolves on its own comes first: a failure named
+      // while a grid is still answering reads as a verdict on the whole list.
+      expect(
+        modelPickerModelsNote(
+          providers: [_office, _lab],
+          modelsOf: _served({
+            _office.networkId: const GridModelsLoading(),
+            _lab.networkId: const GridModelsFailed('nope'),
+          }),
+        ),
+        'Loading models…',
       );
     });
   });

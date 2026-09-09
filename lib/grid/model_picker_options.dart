@@ -162,6 +162,8 @@ List<ModelPickerItem> modelPickerItems({
       modelsOf(provider.networkId),
       needle,
     );
+    // No models, no group. See [_providerItems].
+
     if (section.isEmpty) continue;
     items
       ..add(ModelPickerHeader(provider.displayName))
@@ -170,49 +172,81 @@ List<ModelPickerItem> modelPickerItems({
   return items;
 }
 
-/// One provider's rows — or the single note that stands in for them.
+/// One provider's rows — and NOTHING when it has no models to offer.
 ///
-/// A note survives a search only when the provider's own NAME matches: while a
-/// grid is still answering, nobody can say whether it serves what was typed,
-/// and dropping it would make a section blink out and back as the load lands.
-List<ModelPickerItem> _providerItems(
+/// ⚠️ A provider that is still answering, that failed, or that serves nothing
+/// is dropped from the list entirely: header, note and all. It used to keep its
+/// name over a line saying which of those it was, and on an account with four
+/// providers that is what the panel mostly was — four names over four
+/// apologies, none of them a thing anyone can pick. What is still happening is
+/// said ONCE, at the bottom, by [modelPickerModelsNote]; a picker's list is for
+/// the choices.
+List<ModelPickerRow> _providerItems(
   GridNetwork provider,
   GridModelsState state,
   String needle,
 ) {
+  if (state is! GridModelsReady) return const [];
+  // The relay advertises its own virtual router in `/models` (see
+  // [kAutoModelId]) whether or not a node is actually serving, so a grid whose
+  // only entry is that one has nothing to route to and is EMPTY — offering Auto
+  // there would be a row that resolves to nothing.
+  final served = [
+    for (final model in state.models)
+      if (modelKey(model) != kAutoModelId) model,
+  ];
+  if (served.isEmpty) return const [];
+  // A provider's own name brings its whole list: typing it is how a reader says
+  // "show me what this one has".
   final nameMatches = _matches(provider.displayName, needle);
-  switch (state) {
-    case GridModelsReady(:final models):
-      // The relay advertises its own virtual router in `/models` (see
-      // [kAutoModelId]) whether or not a node is actually serving, so a grid
-      // whose only entry is that one has nothing to route to and is EMPTY —
-      // offering Auto there would be a row that resolves to nothing.
-      final served = [
-        for (final model in models)
-          if (modelKey(model) != kAutoModelId) model,
-      ];
-      if (served.isEmpty) {
-        return nameMatches
-            ? const [ModelPickerNote('Serving no models yet')]
-            : const [];
-      }
-      return [
-        for (final row in _modelRows(provider, served))
-          if (nameMatches || _matches(row.label, needle)) row,
-      ];
-    // Idle is "not asked yet" rather than "answering", and it lasts the one
-    // frame between the panel opening and its own load starting. Naming it
-    // apart would put a word on screen that is gone before it can be read.
-    case GridModelsIdle():
-    case GridModelsLoading():
-      return nameMatches
-          ? const [ModelPickerNote('Loading models…')]
-          : const [];
-    // Already user-facing: GridApiClient turns the API's failure shapes into a
-    // sentence.
-    case GridModelsFailed(:final message):
-      return nameMatches ? [ModelPickerNote(message)] : const [];
+  return [
+    for (final row in _modelRows(provider, served))
+      if (nameMatches || _matches(row.label, needle)) row,
+  ];
+}
+
+/// The one line under the list saying why it may be shorter than the account
+/// is — or null when the list is the whole answer.
+///
+/// The other half of hiding a provider that has no models: dropping the rows is
+/// right, dropping the fact that four grids are still being asked is not, and a
+/// reader who opens the panel a second later sees a longer list with no idea
+/// why. Said once for all of them rather than once per provider, because the
+/// reader's question is "is this everything yet", not "which one is slow".
+///
+/// A provider serving NOTHING is deliberately silent here: it is not pending
+/// and not broken, it is simply a grid with no models, and there is nothing for
+/// the reader to wait for or fix.
+String? modelPickerModelsNote({
+  required List<GridNetwork> providers,
+  required GridModelsState Function(String networkId) modelsOf,
+}) {
+  var pending = 0;
+  final failed = <String>[];
+  for (final provider in providers) {
+    switch (modelsOf(provider.networkId)) {
+      // Idle is "not asked yet", which from here is indistinguishable from
+      // asking: the panel starts every load as it opens.
+      case GridModelsIdle():
+      case GridModelsLoading():
+        pending++;
+      case GridModelsFailed(:final message):
+        failed.add(message);
+      case GridModelsReady():
+        break;
+    }
   }
+  // Pending outranks failed: it is the one that resolves on its own, and a
+  // failure named while three grids are still answering reads as a verdict on
+  // the whole list.
+  if (pending > 0) return 'Loading models…';
+  if (failed.isEmpty) return null;
+  // One failure is worth quoting — GridApiClient has already turned it into a
+  // sentence with a way out. Several would stack into a paragraph nobody reads,
+  // and they are usually the same failure anyway.
+  return failed.length == 1
+      ? failed.single
+      : '${failed.length} providers could not be reached';
 }
 
 /// Auto, then every model [served] — the provider's own list with the relay's

@@ -11,6 +11,7 @@ import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/grid/grid_models_controller.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
+import 'package:harness/grid/grid_selection_store.dart' show kNoGridTargetLabel;
 import 'package:harness/grid/model_picker_options.dart';
 import 'package:harness/grid/model_recents_store.dart';
 import 'package:harness/grid/provider_enablement_store.dart';
@@ -131,7 +132,7 @@ void main() {
       reason: 'one row under each provider — the same id, two relays',
     );
     expect(
-      find.text('No provider'),
+      find.text(kNoGridTargetLabel),
       findsOneWidget,
       reason: "the engine's own login is a peer of every model",
     );
@@ -172,6 +173,36 @@ void main() {
     expect(find.text(kWaterName), findsNothing);
   });
 
+  testWidgets('a provider still fetching its models is not listed at all', (
+    tester,
+  ) async {
+    // Four providers meant four names over four "Loading models…" lines, none
+    // of them a thing anyone could pick. The rows wait until there is something
+    // to pick, and one line under the list says the wait is still on.
+    models.debugSetState(kWaterId, const GridModelsLoading());
+    await pumpPicker(tester);
+
+    expect(find.text(kOfficeName), findsOneWidget);
+    expect(find.text(kWaterName), findsNothing);
+    expect(
+      find.text('Loading models…'),
+      findsOneWidget,
+      reason: 'said once for the account, not once per provider',
+    );
+  });
+
+  testWidgets('a provider serving nothing is dropped, silently', (
+    tester,
+  ) async {
+    // Nothing is pending and nothing is broken — it is a grid with no models,
+    // so there is nothing for the reader to wait for or fix.
+    models.debugSetState(kWaterId, const GridModelsReady(['auto']));
+    await pumpPicker(tester);
+
+    expect(find.text(kWaterName), findsNothing);
+    expect(find.text('Loading models…'), findsNothing);
+  });
+
   testWidgets(
     'the search crosses providers, and says so when nothing matches',
     (tester) async {
@@ -184,7 +215,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('GLM-4.7-Flash'), findsNWidgets(2));
       expect(
-        find.text('No provider'),
+        find.text(kNoGridTargetLabel),
         findsNothing,
         reason: 'a row that does not match is not an exception to the search',
       );
@@ -284,7 +315,7 @@ void main() {
   testWidgets('a tap on a row resolves the same way', (tester) async {
     await pumpPicker(tester);
 
-    await tester.tap(find.text('No provider'));
+    await tester.tap(find.text(kNoGridTargetLabel));
     await tester.pumpAndSettle();
 
     expect(picked.closed, isTrue);

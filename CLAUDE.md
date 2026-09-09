@@ -261,9 +261,16 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   choice, never as a row number, since a provider answering late inserts rows above it — and it is
   re-placed on the agent's own row until the reader takes the keyboard, because that row does not
   exist on the frame the panel opens on. `Auto` and
-  `No provider` are different rows on purpose (the relay's own virtual `auto` id is dropped from
-  every list — see `kAutoModelId`), and a provider switched off in Settings ▸ Providers is not
-  offered here either. At create time the New agent
+  the no-provider row (`kNoGridTargetLabel`) are different rows on purpose (the relay's own virtual
+  `auto` id is dropped from every list — see `kAutoModelId`), and a provider switched off in
+  Settings ▸ Providers is not offered here either. ⚠️ **A provider with nothing to pick is dropped
+  from the list entirely** — still loading, failed, or serving no models: header, note and all. An
+  account on four grids opened a panel that was four names over four apologies, none of them a
+  choice. What is still happening is said ONCE, under the list, by `modelPickerModelsNote`
+  (`Loading models…`, or the failure when a load ended in one) — dropping the rows is right,
+  dropping the fact that grids are still being asked is not, since the reader would otherwise watch
+  the list grow with no idea why. A grid serving NOTHING is silent there: it is neither pending nor
+  broken, and there is nothing to wait for or fix. At create time the New agent
   dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
   as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
   always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field

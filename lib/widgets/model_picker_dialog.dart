@@ -174,7 +174,7 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
                   }),
                 ),
                 _hairline(),
-                Flexible(child: _list(context, highlighted)),
+                Flexible(child: _list(context, providers, highlighted)),
                 _hairline(),
                 const ModelPickerFooter(),
               ],
@@ -201,8 +201,17 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
     ];
   }
 
-  Widget _list(BuildContext context, int? highlighted) {
-    final note = providerLoadNote(_networks.state);
+  Widget _list(
+    BuildContext context,
+    List<GridNetwork> providers,
+    int? highlighted,
+  ) {
+    // Two notes, one slot, and they cannot both be true: the first speaks for
+    // the ACCOUNT (no providers listed yet, or signed out), the second for the
+    // providers in the list still being asked for their models.
+    final note =
+        providerLoadNote(_networks.state) ??
+        modelPickerModelsNote(providers: providers, modelsOf: _models.stateFor);
     if (_items.isEmpty) {
       return SizedBox(
         height: kModelPickerEmptyHeight,
