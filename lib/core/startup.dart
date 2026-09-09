@@ -2,6 +2,7 @@ import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
 import '../grid/model_recents_store.dart';
 import '../grid/provider_enablement_store.dart';
+import '../share/share_target_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../shared/theme/theme_mode_store.dart';
 import '../stats/harness_stats.dart';
@@ -26,6 +27,7 @@ Future<void> loadPersistedSettings({
   GridSessionStore? gridSession,
   ProviderEnablementStore? providerEnablement,
   ModelRecentsStore? modelRecents,
+  ShareTargetStore? shareTarget,
   AppearancePrefsStore? appearance,
   HarnessStats? stats,
 }) async {
@@ -47,6 +49,12 @@ Future<void> loadPersistedSettings({
   // model picker's top section: recents that landed a frame late would push
   // every provider's rows down under a pointer already on its way to one.
   await (modelRecents ?? modelRecentsStore).load();
+  // Not needed for the first frame — Share Intelligence is several clicks away
+  // — but loaded with the rest so the page never opens on Providers' default
+  // and then swaps to the pinned grid a moment later. On this page that flicker
+  // is not cosmetic: for the half-second it lasts, the screen names the wrong
+  // grid as the one this computer serves.
+  await (shareTarget ?? shareTargetStore).load();
   // Last but not optional. Every control box in the app is sized from
   // `AppControl.heightScaled`/`paddingScaled`, so a UI size that arrived after
   // the first frame would relayout the whole window one frame in — a worse

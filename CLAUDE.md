@@ -314,6 +314,21 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   anything this app remembers — and closing Harness does not stop it, which the rail's footnote
   says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
   is the page's own palette, copied value-for-value from Grid — keep the two in step.
+- **Which grid this computer SERVES is not `GridSelectionStore`.** It is
+  `share/share_target_store.dart`, and the split is the point: Providers' `DEFAULT` answers "where do
+  the agents I start get credentials" (what this machine *consumes*), the share target answers "who
+  do my GPU and my keys answer for" (what it *gives*). One value for both meant pointing the share
+  at a lab grid silently moved every new agent with it. `resolveShareTarget(pin, providersDefault)`
+  is the only place the precedence is written: **an absent pin means "follow Providers", not "no
+  grid"**, so a machine that never opens the picker behaves exactly as it did before the picker
+  existed, and a pin deliberately does NOT track the default afterwards. The page says which of the
+  two produced the grid it is showing in every state (`ShareTargetPicker`) — a reader looking at
+  `Water Grid` has to be able to tell, without leaving the page, whether their agents moved too.
+  The picker **locks while an engine is up**: a join is per-grid and detached, so switching under a
+  live run would leave it serving a grid the page no longer names, with no Stop button anywhere for
+  it (Stop only ever leaves the grid currently on screen). ⚠️ `ShareController.refresh` takes a
+  **nullable** grid id on purpose — what this machine can offer is a fact about the machine, so the
+  probe runs before any grid is chosen and the rail (which holds the picker) can draw itself.
   **Manage models is the one part of this feature that is NOT the Grid CLI**: the shelf is
   `POST /v1/grid/catalog` on the control plane (`GridApiClient.catalog`/`catalogDetail`, the same
   bearer as the Grid tab), because `grid catalog` answers with two or three picks ranked for THIS

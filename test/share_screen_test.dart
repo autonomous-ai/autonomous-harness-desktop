@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/local_key_value_store.dart';
+import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/share/backend_detector.dart';
 import 'package:harness/share/grid_cli.dart';
@@ -8,6 +9,8 @@ import 'package:harness/share/share_route.dart';
 import 'package:harness/share/widgets/share_rail.dart';
 import 'package:harness/share/widgets/share_pane.dart';
 import 'package:harness/share/share_controller.dart';
+
+import 'support/fake_grid_api.dart';
 
 /// An in-memory store, so a test never touches `~/.harness`.
 class _MemoryStore implements LocalKeyValueStore {
@@ -33,17 +36,34 @@ class _AbsentCli extends GridCli {
 
 Widget _app(Widget child) => MaterialApp(home: child);
 
+/// The account's grids, without going near the network. The pane fetches these
+/// for its own grid picker, so every test that mounts it needs one — the
+/// singleton would make a real HTTP call from a unit test.
+GridNetworksController _networks() =>
+    GridNetworksController(client: FakeGridApi());
+
 void main() {
-  testWidgets('with no grid chosen it says so instead of a broken form', (
+  testWidgets('with no grid chosen the page still draws, and does not throw', (
     tester,
   ) async {
+    // The regression this closes: the pane probed with a non-null grid id and
+    // showed a dead end when there wasn't one. It now probes the MACHINE either
+    // way — what a CLI and a GPU can do is not a fact about any grid — so a
+    // null id has to travel all the way through `ShareController.refresh`.
     final selection = GridSelectionStore(storage: _MemoryStore());
     await tester.pumpWidget(
-      _app(SharePane(selection: selection, cli: _AbsentCli())),
+      _app(
+        SharePane(
+          selection: selection,
+          networks: _networks(),
+          cli: _AbsentCli(),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Pick a grid first.'), findsOneWidget);
+    // With no CLI that is the more fundamental blocker, and it wins the page.
+    expect(find.text('The Grid CLI is not on this computer.'), findsOneWidget);
   });
 
   testWidgets('without the Grid CLI it explains, rather than offering forms', (
@@ -55,7 +75,13 @@ void main() {
       networkName: 'autonomous.ai',
     );
     await tester.pumpWidget(
-      _app(SharePane(selection: selection, cli: _AbsentCli())),
+      _app(
+        SharePane(
+          selection: selection,
+          networks: _networks(),
+          cli: _AbsentCli(),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
 
