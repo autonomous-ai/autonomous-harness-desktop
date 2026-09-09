@@ -136,6 +136,25 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+  testWidgets('an existing pairing makes the form an addition', (tester) async {
+    final cli = FakeAutonomousDeviceCli();
+    await open(tester, cli);
+    expect(find.text('Pair a device'), findsOneWidget);
+    // The CLI keeps every pairing, so the form adds rather than replaces.
+    cli.devices = [
+      {
+        'id': 'fingerprint-1',
+        'fingerprint': 'fingerprint-1',
+        'label': 'Kitchen',
+        'online': true,
+      },
+    ];
+    await tester.tap(find.byType(AppIconButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Pair another device'), findsOneWidget);
+    expect(find.text('Pair a device'), findsNothing);
+  });
+
   testWidgets('single discovered device still requires explicit selection', (
     tester,
   ) async {

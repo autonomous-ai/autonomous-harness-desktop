@@ -333,7 +333,9 @@ class _DevicesSectionState extends State<DevicesSection> {
                 const SizedBox(height: 10),
               ],
               SettingRow(
-                title: 'Pair a device',
+                // The CLI's pair store is a map with no cap, so a paired device
+                // is never replaced by the next one — say which act this is.
+                title: _devices.isEmpty ? 'Pair a device' : 'Pair another device',
                 alignTop: true,
                 detail: _discovered.isEmpty
                     ? 'No Autonomous devices found. Keep your device on the same network, then refresh.'
