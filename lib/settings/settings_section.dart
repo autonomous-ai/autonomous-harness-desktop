@@ -15,6 +15,7 @@ enum SettingsSection {
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   usage(LucideIcons.chartNoAxesColumn300, 'Usage'),
+  devices(LucideIcons.zap300, 'Autonomous devices'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
   debug(LucideIcons.bug300, 'Debug'),
   tracking(LucideIcons.activity300, 'Tracking'),
@@ -119,6 +120,7 @@ const _kSettingsGroups = [
     SettingsSection.appearance,
     SettingsSection.terminal,
     SettingsSection.usage,
+    SettingsSection.devices,
   ]),
   // Debug and Tracking sit between the two things they are most often reached
   // from: the keys that open them, and the version a report has to name. The
