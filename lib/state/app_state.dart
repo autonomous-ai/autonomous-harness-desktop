@@ -222,6 +222,21 @@ class AppNotifier extends ChangeNotifier {
   String? _bootStatusMessage;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
+  // Polls a step stuck in needsTerminal/failed every 5s (see `_scheduleEnvironmentRecheck`) so a user
+  // who fixes it by hand in their own terminal doesn't have to remember to click Recheck. A one-shot
+  // Timer that reschedules itself rather than `Timer.periodic`, so a slow recheck can't overlap with
+  // the next tick.
+  Timer? _environmentRecheckTimer;
+
+  /// Whether a stuck step is being auto-polled right now — drives the "Checking automatically…"
+  /// caption on [EnvironmentSetupScreen] alongside its Recheck button.
+  bool get environmentRecheckPending => _environmentRecheckTimer != null;
+
+  /// Whether a provisioning run (initial or a per-step recheck) is in flight — lets the setup
+  /// screen disable its Recheck/Start over buttons and show a spinner instead of a second click
+  /// racing the first.
+  bool get environmentSetupInFlight => _environmentSetupInFlight;
+
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
   // now, not just this computer's own one (see src/lib/remoteRelay.ts in the harness CLI repo: a
   // foreign machineId is relayed to backend transparently, so the app never dials backend directly).
@@ -659,17 +674,7 @@ class AppNotifier extends ChangeNotifier {
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
       if (!environmentReady) return;
-      // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
-      // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
-      // asks the CLI whether this computer is currently signed in.
-      final authStatus = await cliLogin.checkStatus();
-      if (!authStatus.loggedIn) {
-        currentUser = null;
-        status = AppStatus.unauthenticated;
-        notifyListeners();
-        return;
-      }
-      await _finishBootstrapSignedIn();
+      await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint('bootstrap: fallback to login after error: $error\n$stack');
       currentUser = null;
@@ -712,7 +717,8 @@ class AppNotifier extends ChangeNotifier {
       // flash onto) on every later launch rather than re-verifying something already proven.
       environmentReadiness = EnvironmentReadiness(
         steps: {
-          for (final step in EnvironmentStep.values) step: EnvironmentStepStatus.ready,
+          for (final step in EnvironmentStep.values)
+            step: EnvironmentStepStatus.ready,
         },
       );
       return true;
@@ -722,23 +728,14 @@ class AppNotifier extends ChangeNotifier {
     environmentReadiness = EnvironmentReadiness.initial();
     notifyListeners();
     try {
-      final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
-      final result = await provisioner.ensureReady(
-        onProgress: (value) {
-          environmentReadiness = value;
-          notifyListeners();
-        },
-      );
-      environmentReadiness = result;
-      analytics.environmentPrepared(
-        ready: result.isReady,
-        grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
-      );
+      final result = await _runProvisioner();
       if (!result.isReady) {
         status = AppStatus.preparingEnvironment;
+        _scheduleEnvironmentRecheck();
         notifyListeners();
         return false;
       }
+      _cancelEnvironmentRecheckTimer();
       _environmentConfirmed = true;
       unawaited(_store?.saveEnvironmentConfirmed());
       return true;
@@ -747,11 +744,107 @@ class AppNotifier extends ChangeNotifier {
     }
   }
 
-  /// Used after macOS finishes the visible Homebrew / Command Line Tools path.
-  /// The first-run flow is deliberately re-run end to end: Node and Harness
-  /// checks are idempotent and this prevents a stale partial install from being
-  /// mistaken for a ready machine.
+  /// Shared with [_prepareEnvironment]: runs the provisioner, updates
+  /// [environmentReadiness] as it streams progress, and reports the outcome.
+  Future<EnvironmentReadiness> _runProvisioner({
+    EnvironmentReadiness? resumeFrom,
+  }) async {
+    final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
+    final result = await provisioner.ensureReady(
+      onProgress: (value) {
+        environmentReadiness = value;
+        notifyListeners();
+      },
+      resumeFrom: resumeFrom,
+    );
+    environmentReadiness = result;
+    analytics.environmentPrepared(
+      ready: result.isReady,
+      grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
+    );
+    return result;
+  }
+
+  /// What `bootstrap()` does right after the environment is confirmed ready — pulled out so
+  /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
+  /// load and update-check startup, which already ran on the launch that got stuck here.
+  Future<void> _continueAfterEnvironmentReady() async {
+    // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
+    // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
+    // asks the CLI whether this computer is currently signed in.
+    final authStatus = await cliLogin.checkStatus();
+    if (!authStatus.loggedIn) {
+      currentUser = null;
+      status = AppStatus.unauthenticated;
+      notifyListeners();
+      return;
+    }
+    await _finishBootstrapSignedIn();
+  }
+
+  /// Full reset: re-runs first-run provisioning end to end, same as a relaunch. Kept as an escape
+  /// hatch alongside the per-step [recheckEnvironmentStep] — Node and Harness checks are idempotent,
+  /// so this is safe even when only one step is actually stuck.
   Future<void> retryEnvironmentSetup() => bootstrap();
+
+  /// Rechecks a single stuck step (`failed`/`needsTerminal`) without re-running steps already
+  /// `ready` — the user fixed it by hand (see `environment_step_guidance.dart`'s command) and this
+  /// confirms it, then falls through to whatever step comes next, exactly like a fresh `bootstrap()`
+  /// would have. [step] identifies which row's Recheck button was pressed; the provisioner itself
+  /// decides what to (re-)attempt from the current [environmentReadiness], so an already-resolved
+  /// step is never disturbed regardless of which row triggered this.
+  Future<void> recheckEnvironmentStep(EnvironmentStep step) async {
+    if (_environmentSetupInFlight) return;
+    _cancelEnvironmentRecheckTimer();
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(resumeFrom: environmentReadiness);
+      if (!result.isReady) {
+        _scheduleEnvironmentRecheck();
+        return;
+      }
+      _environmentConfirmed = true;
+      unawaited(_store?.saveEnvironmentConfirmed());
+      await _continueAfterEnvironmentReady();
+    } catch (error, stack) {
+      debugPrint(
+        'recheckEnvironmentStep: fallback to login after error: $error\n$stack',
+      );
+      currentUser = null;
+      status = AppStatus.unauthenticated;
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+      _trackAppOpened();
+    }
+  }
+
+  /// Polls the currently-stuck required step every 5s (see `_environmentRecheckTimer`'s doc) so
+  /// fixing it in another window and forgetting to click Recheck still moves the app forward.
+  /// A no-op once nothing required is stuck (grid failures never qualify — see `EnvironmentStep.isRequired`).
+  void _scheduleEnvironmentRecheck() {
+    _environmentRecheckTimer?.cancel();
+    EnvironmentStep? stuck;
+    for (final entry in environmentReadiness.steps.entries) {
+      if (!entry.key.isRequired) continue;
+      if (entry.value == EnvironmentStepStatus.needsTerminal ||
+          entry.value == EnvironmentStepStatus.failed) {
+        stuck = entry.key;
+        break;
+      }
+    }
+    if (stuck == null) return;
+    final step = stuck;
+    _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
+      unawaited(recheckEnvironmentStep(step));
+    });
+  }
+
+  void _cancelEnvironmentRecheckTimer() {
+    _environmentRecheckTimer?.cancel();
+    _environmentRecheckTimer = null;
+  }
 
   void _bootstrapLocalManual(LocalManualFixture fixture) {
     _autonomousEnv = 'prod';
@@ -3499,6 +3592,7 @@ class AppNotifier extends ChangeNotifier {
     _disposed = true;
     _daemonSupervisionTimer?.cancel();
     _updateCheckTimer?.cancel();
+    _environmentRecheckTimer?.cancel();
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();

@@ -66,6 +66,7 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
   @override
   Future<EnvironmentReadiness> ensureReady({
     required void Function(EnvironmentReadiness value) onProgress,
+    EnvironmentReadiness? resumeFrom,
   }) async {
     called = true;
     final ready = EnvironmentReadiness(
@@ -76,6 +77,29 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
     );
     onProgress(ready);
     return ready;
+  }
+}
+
+/// Returns one scripted [EnvironmentReadiness] per call to `ensureReady`, and records the
+/// `resumeFrom` each call was given — lets a test assert `recheckEnvironmentStep` passed the
+/// current stuck state back in, and that a step already `ready` is never handed a fresh probe.
+class _ScriptedEnvironmentProvisioner extends EnvironmentProvisioner {
+  final List<EnvironmentReadiness> results;
+  final List<EnvironmentReadiness?> resumeFromCalls = [];
+  var callCount = 0;
+  _ScriptedEnvironmentProvisioner(this.results) : super(isMacOS: true);
+
+  @override
+  Future<EnvironmentReadiness> ensureReady({
+    required void Function(EnvironmentReadiness value) onProgress,
+    EnvironmentReadiness? resumeFrom,
+  }) async {
+    resumeFromCalls.add(resumeFrom);
+    final result =
+        results[callCount < results.length ? callCount : results.length - 1];
+    callCount++;
+    onProgress(result);
+    return result;
   }
 }
 
@@ -195,6 +219,87 @@ void main() {
     },
   );
 
+  test(
+    'recheckEnvironmentStep succeeds and continues past environment setup',
+    () async {
+      final stuck = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.ready,
+          EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
+          EnvironmentStep.grid: EnvironmentStepStatus.pending,
+        },
+      );
+      final ready = EnvironmentReadiness(
+        steps: {
+          for (final step in EnvironmentStep.values)
+            step: EnvironmentStepStatus.ready,
+        },
+      );
+      final storage = _FakeKeyValueStore();
+      final provisioner = _ScriptedEnvironmentProvisioner([stuck, ready]);
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+      expect(
+        app.environmentReadiness.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.needsTerminal,
+      );
+      expect(app.status, AppStatus.preparingEnvironment);
+
+      await app.recheckEnvironmentStep(EnvironmentStep.tmux);
+
+      // The user's current (stuck) readiness was handed back in, not a fresh `initial()` — this is
+      // what lets the provisioner skip the already-`ready` harness step during the recheck.
+      expect(provisioner.resumeFromCalls.last, same(stuck));
+      expect(app.environmentReadiness.isReady, isTrue);
+      expect(app.status, AppStatus.unauthenticated);
+      expect(storage.values['environment_confirmed_ready'], 'true');
+      expect(app.environmentRecheckPending, isFalse);
+      app.dispose();
+    },
+  );
+
+  test(
+    'recheckEnvironmentStep still stuck keeps polling instead of advancing',
+    () async {
+      final stuck = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.ready,
+          EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
+          EnvironmentStep.grid: EnvironmentStepStatus.pending,
+        },
+      );
+      final storage = _FakeKeyValueStore();
+      final provisioner = _ScriptedEnvironmentProvisioner([stuck, stuck]);
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+      // The first stuck result schedules the 5s auto-poll.
+      expect(app.environmentRecheckPending, isTrue);
+
+      await app.recheckEnvironmentStep(EnvironmentStep.tmux);
+
+      expect(app.status, AppStatus.preparingEnvironment);
+      expect(app.environmentReadiness.isReady, isFalse);
+      expect(storage.values['environment_confirmed_ready'], isNull);
+      // Rescheduled rather than given up on.
+      expect(app.environmentRecheckPending, isTrue);
+      app.dispose();
+    },
+  );
+
   testWidgets('boot -> unauthenticated shows LoginScreen', (tester) async {
     final app = makeNotifier(AppStatus.unauthenticated);
     await tester.pumpWidget(
@@ -232,30 +337,35 @@ void main() {
     expect(find.text('Sign in'), findsNothing);
   });
 
-  testWidgets('environment setup exposes progress and a recoverable retry', (
-    tester,
-  ) async {
-    final app = makeNotifier(AppStatus.preparingEnvironment);
-    app.environmentReadiness = EnvironmentReadiness(
-      steps: {
+  testWidgets(
+    'environment setup exposes per-step guidance and a scoped recheck',
+    (tester) async {
+      final app = makeNotifier(AppStatus.preparingEnvironment);
+      app.environmentReadiness = EnvironmentReadiness(
+        steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.ready,
-        EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
-        EnvironmentStep.grid: EnvironmentStepStatus.pending,
-      },
-      message: 'Complete the macOS setup in Terminal, then click Retry.',
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [appStateProvider.overrideWithValue(app)],
-        child: const DesktopApp(),
-      ),
-    );
-    await tester.pump();
+          EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
+          EnvironmentStep.grid: EnvironmentStepStatus.pending,
+        },
+        message:
+            'Complete the setup in the terminal window, then click Recheck.',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [appStateProvider.overrideWithValue(app)],
+          child: const DesktopApp(),
+        ),
+      );
+      await tester.pump();
 
-    expect(find.text('Preparing this computer'), findsOneWidget);
-    expect(find.text('Harness CLI & runtime'), findsOneWidget);
-    expect(find.text('Retry after setup'), findsOneWidget);
-  });
+      expect(find.text('Preparing this computer'), findsOneWidget);
+      expect(find.text('Harness CLI & runtime'), findsOneWidget);
+      // The already-ready harness step gets no guidance block or Recheck button — only the stuck
+      // tmux step does, plus the always-present "Start over" full-reset escape hatch.
+      expect(find.text('Recheck'), findsOneWidget);
+      expect(find.text('Start over'), findsOneWidget);
+    },
+  );
 
   testWidgets('RootShell rebuilds to LoginScreen when status flips after boot', (
     tester,
