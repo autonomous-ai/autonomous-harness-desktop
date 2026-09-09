@@ -19,6 +19,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../analytics/analytics.dart';
 import '../grid/grid_network.dart';
 import '../grid/grid_networks_controller.dart';
+import '../grid/model_picker_options.dart' show providerLoadNote;
 import '../grid/provider_enablement_store.dart';
 import '../grid/grid_selection_store.dart';
 import '../settings/settings_screen.dart';
@@ -63,21 +64,14 @@ List<GridTargetOption> gridTargetMenuOptions(
 }) => [
   const GridTargetOption(label: kNoGridTargetLabel),
   ...switch (state) {
-    GridNetworksIdle() || GridNetworksLoading() => const [
-      GridTargetOption(label: 'Loading providers…', enabled: false),
-    ],
-    // No Grid sign-in on this computer. Said as a disabled row rather than
-    // offered as one: signing in is a real action with a real failure mode, and
-    // a menu that opens upward off a pill at the window's edge is the wrong
-    // place to run it. Settings ▸ Providers has the button.
-    GridNetworksSignedOut() => const [
-      GridTargetOption(label: 'Sign in to Grid in Settings', enabled: false),
-    ],
-    // Already user-facing — GridApiClient turns the API's failure shapes into a sentence.
-    GridNetworksFailed(:final message) => [
-      GridTargetOption(label: message, enabled: false),
-    ],
     GridNetworksReady(:final me) => _readyOptions(me.networks, isEnabled),
+    // Loading, signed out, failed — one disabled row saying which, in the words
+    // the model picker uses for the same three states. [providerLoadNote] is
+    // where they are written down, once.
+    final other => [
+      if (providerLoadNote(other) case final note?)
+        GridTargetOption(label: note, enabled: false),
+    ],
   },
 ];
 
@@ -93,7 +87,10 @@ List<GridTargetOption> _readyOptions(
 ) {
   if (networks.isEmpty) {
     return const [
-      GridTargetOption(label: 'This account is on no providers', enabled: false),
+      GridTargetOption(
+        label: 'This account is on no providers',
+        enabled: false,
+      ),
     ];
   }
   final offered = [

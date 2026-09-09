@@ -233,12 +233,37 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   has everything switched on, and `kDefaultSettingsSection` is derived from the visible list rather
   than named (it used to name Grid, the first row a shipped build drops).
   The model is chosen per agent, not globally, and **only once the agent exists**: the agent view's
-  header menu (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
+  header pill (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
   dialog offers no model at all — every new agent launches on Auto (no `model` on the wire, the grid
   chooses), because a model picked before there is an agent to apply it to is a second door onto a
-  setting the header menu already owns. That header menu draws **nothing at all** when no grid is
-  picked: every choice it offers needs a grid to move the agent onto, so a dimmed pill there would
-  be one more word in the header to decode with nothing behind it. At create time the New agent
+  setting the header already owns. **The pill prints one word — `Model` — not the model id**
+  (`kModelPillLabel`): a pane header already carries the agent's name, a status dot, a transport
+  badge and the pane's own buttons, so four panes side by side leave it ~150px and a real id
+  ellipsized to `DeepSeek-V4-F…`, which answers nothing and costs the width anyway. The answer is
+  on hover, where the tooltip leads with the model and follows with the caveat, and in the picker,
+  where the row the agent is on is ticked. It draws **nothing at all** only where there are no
+  providers in the build (`kGridSurfaceEnabled`, taken as a `@visibleForTesting` argument so the
+  shipped shape can be asserted). It used to leave whenever the SIDEBAR had picked no default,
+  which was right while the menu could only offer that one grid's models — with the picker listing
+  every provider, that hid the door for exactly the people who had not found the sidebar's picker.
+  **The choices themselves are a DIALOG, grouped by provider**
+  (`widgets/model_picker_dialog.dart`, rows from the pure `grid/model_picker_options.dart`), the
+  shape OpenCode's model picker uses: a search that crosses providers, the last five picks under
+  `Recent` (`grid/model_recents_store.dart`, loaded by `loadPersistedSettings` because it is drawn
+  on the frame the panel opens), then one group per provider with the models it serves, and ↑/↓/↵.
+  It replaced a dropdown that could only list the models of the ONE provider the sidebar had
+  picked, which made "run this agent on that other provider" a trip to the sidebar that also
+  changed where every future agent launched. A pick therefore carries **both halves** — a
+  `ModelChoice` is a provider *and* a model, because a model id names nothing without the relay
+  that answers for it — so one restart can do what two used to, and the sidebar's default is not
+  touched by moving one agent. `gridModelsController` is keyed **per network** for the same reason:
+  a single slot had each provider's answer evicting the last one's. The highlight is held as a
+  choice, never as a row number, since a provider answering late inserts rows above it — and it is
+  re-placed on the agent's own row until the reader takes the keyboard, because that row does not
+  exist on the frame the panel opens on. `Auto` and
+  `No provider` are different rows on purpose (the relay's own virtual `auto` id is dropped from
+  every list — see `kAutoModelId`), and a provider switched off in Settings ▸ Providers is not
+  offered here either. At create time the New agent
   dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
   as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
   always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field

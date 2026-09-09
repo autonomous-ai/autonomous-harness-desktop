@@ -1,5 +1,6 @@
 import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
+import '../grid/model_recents_store.dart';
 import '../grid/provider_enablement_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../shared/theme/theme_mode_store.dart';
@@ -24,6 +25,7 @@ Future<void> loadPersistedSettings({
   GridSelectionStore? gridSelection,
   GridSessionStore? gridSession,
   ProviderEnablementStore? providerEnablement,
+  ModelRecentsStore? modelRecents,
   AppearancePrefsStore? appearance,
   HarnessStats? stats,
 }) async {
@@ -41,6 +43,10 @@ Future<void> loadPersistedSettings({
   // providers, so a set that landed a frame later would show the full list and
   // then drop rows out from under a menu somebody had already opened.
   await (providerEnablement ?? providerEnablementStore).load();
+  // Before the first frame for the same reason as the two above, and it is the
+  // model picker's top section: recents that landed a frame late would push
+  // every provider's rows down under a pointer already on its way to one.
+  await (modelRecents ?? modelRecentsStore).load();
   // Last but not optional. Every control box in the app is sized from
   // `AppControl.heightScaled`/`paddingScaled`, so a UI size that arrived after
   // the first frame would relayout the whole window one frame in — a worse
