@@ -3005,9 +3005,14 @@ class AppNotifier extends ChangeNotifier {
     pane.session = terminal;
     terminal.addListener(notifyListeners);
     notifyListeners();
-    // First paint is more valuable than a perfectly-sized first snapshot. Open at 80x24 now; the
-    // renderer's measured viewport is coalesced into a resize as soon as the stream is controlling.
-    await terminal.open();
+    // Wait for the pane's actual measured viewport before asking the daemon to open anything.
+    // Sending the 80x24 fallback here used to make the daemon spawn the remote TTY (and render its
+    // first keyframe) at that wrong size, which then had to be corrected by a resize round trip —
+    // visible as the terminal's content briefly rendering narrow before snapping to full width. The
+    // blank "Attaching…" placeholder already covers this measurement, which lands within a frame or
+    // two of the panel mounting; `waitForViewportSize`'s own 2s timeout falls back to 80x24 only if
+    // the pane genuinely never gets laid out.
+    await terminal.open(waitForViewportSize: true);
   }
 
   Future<void> _detachSession(

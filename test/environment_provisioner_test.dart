@@ -208,7 +208,6 @@ void main() {
         harnessHome: scratch,
         isMacOS: true,
         run: (executable, arguments, {environment}) async {
-          final command = arguments.join(' ');
           if (arguments.contains('auth') && arguments.contains('status')) {
             harnessProbes++;
             return result(0, stdout: '{"loggedIn":false}\n');
