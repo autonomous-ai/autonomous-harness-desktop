@@ -231,7 +231,7 @@ class DesktopUpdater {
   /// build is found (re-finding the same version on a later tick is harmless; the caller is expected
   /// to no-op if it's already showing that version). Cancel the returned [Timer] to stop.
   Timer startChecking({
-    Duration interval = const Duration(hours: 6),
+    Duration interval = const Duration(minutes: 1),
     required void Function(UpdateInfo info) onUpdateAvailable,
     // Forwarded to checkOnce() on every tick — tests pass this to avoid checkOnce()'s default
     // runningAppVersion() call, which (via PackageInfo.fromPlatform()) needs a platform method

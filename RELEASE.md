@@ -174,14 +174,14 @@ which doesn't reliably pick up the quarantine flag in the first place).
 
 ## How a running app self-updates
 
-1. `DesktopUpdater` checks the manifest once on launch, then every few hours
+1. `DesktopUpdater` checks the manifest once on launch, then every minute
    (`lib/update/desktop_updater.dart`).
 2. Compares against the running app's own version (`package_info_plus`) — strictly newer only, so
    republishing an old build cannot downgrade anyone.
 3. After the user chooses **Update now**, downloads the zip and verifies its sha256 **before** anything is unpacked. A mismatch is discarded.
 4. Unpacks into a staging directory and re-reads `CFBundleShortVersionString` from the staged bundle as
    a sanity check that the download really is the version it claims to be.
-5. Checks on launch (including the sign-in screen) and every few hours. When a newer build exists,
+5. Checks on launch (including the sign-in screen) and every minute. When a newer build exists,
    it shows a non-blocking notification. The user chooses **Update now** to download and install it,
    or **Skip version** to silence that exact version. A later version is shown normally; the account
    menu also has **Check for updates** to revisit a skipped version.
