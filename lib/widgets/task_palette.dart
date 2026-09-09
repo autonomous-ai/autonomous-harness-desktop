@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,11 +24,81 @@ import 'engine_identity.dart';
 /// simply becomes that agent — the text arriving in the terminal is the receipt, and a toast on top of it
 /// would be a second one. Below it, nothing is sent and the runners-up are offered instead.
 Future<void> showTaskPalette(BuildContext context, AppNotifier notifier) {
-  return showDialog<void>(
+  // showGeneralDialog, not showDialog, and the barrier is BUILT rather than coloured: the design's veil
+  // is `rgba(0,0,0,.74)` over `backdrop-filter: blur(3px)`, and `barrierColor` can only do the first
+  // half. The blur is what makes the terminals behind read as *behind* instead of as text competing with
+  // the field — at 74% flat they are dimmed but still legible, which is worse than either extreme.
+  return showGeneralDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.42),
-    builder: (context) => _TaskPalette(notifier: notifier),
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.transparent,
+    transitionDuration: const Duration(milliseconds: 160),
+    pageBuilder: (context, _, _) => _TaskPalette(notifier: notifier),
+    transitionBuilder: (context, anim, _, child) => FadeTransition(
+      opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
+      child: child,
+    ),
   );
+}
+
+/// The design's own values, lifted rather than approximated.
+///
+/// Every number here is read off the `Palette_*` CSS module the design team published on the product
+/// page — the same component, already drawn for this exact feature down to the "taken" row and the
+/// confidence column. Naming them together is what keeps a later "small tidy" from drifting off it one
+/// value at a time; if the page changes, this block is the diff.
+abstract final class _D {
+  /// The frosted sheet.
+  static const width = 680.0;
+  static const radius = 16.0;
+  static const fill = Color(0xE11E1E21); // rgba(30,30,33,.88)
+  static const rim = Color(0x1FFFFFFF); // rgba(255,255,255,.12)
+  static const blur = 24.0;
+
+  /// The lit top edge — `inset 0 1px 0 rgba(255,255,255,.06)`. A one-pixel highlight is most of what
+  /// makes glass read as glass rather than as a grey box.
+  static const innerLight = Color(0x0FFFFFFF);
+
+  /// The veil.
+  static const veil = Color(0xBD000000); // rgba(0,0,0,.74)
+  static const veilBlur = 3.0;
+
+  /// ABOVE the middle, deliberately: the list grows downwards, and a box pinned to the centre would
+  /// jump every time the answer arrived. Anchored high, it stays put and the results unroll beneath it.
+  static const lift = -0.38;
+
+  /// The field.
+  static const fieldInk = Color(0xFFF4F4F6);
+  static const hint = Color(0xFF6E6E76);
+  static const caret = Color(0xFFE6E6EA);
+  static const fieldSize = 22.0;
+
+  /// The rows.
+  static const sep = Color(0x14FFFFFF); // rgba(255,255,255,.08)
+  static const activeFill = Color(0x14FFFFFF);
+  static const engineInk = Color(0xFFF4F4F6);
+  static const machineInk = Color(0xFF8A8A92);
+  static const machineDim = Color(0xFF6A6A72);
+  static const nameInk = Color(0xFFD0D0D6);
+  static const questionInk = Color(0xFF7C7C84);
+  static const questionMark = Color(0xFFB9F0CF);
+
+  /// Green means "this one", in both places it appears: the fit that is worth considering, and the row
+  /// that took the work.
+  static const green = Color(0xFF3DDC84);
+  static const takenFill = Color(0x243DDC84); // rgba(61,220,132,.14)
+  static const takenRim = Color(0x733DDC84); // rgba(61,220,132,.45)
+  static const lowFit = Color(0xFF8A8A92);
+
+  /// The five columns. Fixed, and that IS the feature: three rows whose machine and fit line up can be
+  /// read down a column, which is the comparison the person was stopped to make. Flex columns put the
+  /// same facts at three different x positions and turn a comparison into three separate readings.
+  static const colIcon = 16.0;
+  static const colName = 118.0;
+  static const colMachine = 190.0;
+  static const colFit = 44.0;
+  static const colGap = 12.0;
 }
 
 /// Below this the palette stops guessing and asks.
@@ -83,7 +154,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
   /// keys the field did not want. Enter was never one of them. A FocusNode's own onKeyEvent runs while
   /// the event is dispatched TO the node, ahead of the editing shortcuts that would type the newline, so
   /// this is the one place that can take Enter back.
-  late final FocusNode _field = FocusNode(onKeyEvent: _onFieldKey);
+  late final FocusNode _fieldFocus = FocusNode(onKeyEvent: _onFieldKey);
 
   _Stage _stage = _Stage.typing;
   String _note = '';
@@ -92,9 +163,9 @@ class _TaskPaletteState extends State<_TaskPalette> {
   /// across how many computers, and whether a classifier or the name matcher produced this.
   RouteAnswer? _answer;
 
-  /// Who took the work — held for the receipt beat only.
-  String _sentName = '';
-  String _sentMachine = '';
+  /// Which agent took the work — held for the receipt beat, where the design lights that row rather
+  /// than printing a sentence about it.
+  String _committed = '';
 
   /// Seconds on the clock while the router thinks.
   ///
@@ -103,8 +174,6 @@ class _TaskPaletteState extends State<_TaskPalette> {
   Timer? _ticker;
   int _elapsed = 0;
 
-  /// Which half of the wait is on screen — choosing an agent, or handing the task over.
-  bool _sending = false;
   List<RouteCandidate> _choices = const [];
   int _cursor = 0;
 
@@ -117,7 +186,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
     _generation++; // anything still in flight now answers to nobody
     _ticker?.cancel();
     _text.dispose();
-    _field.dispose();
+    _fieldFocus.dispose();
     super.dispose();
   }
 
@@ -127,7 +196,6 @@ class _TaskPaletteState extends State<_TaskPalette> {
     final mine = ++_generation;
     setState(() {
       _stage = _Stage.routing;
-      _sending = false;
       _note = '';
       _answer = null;
     });
@@ -198,7 +266,6 @@ class _TaskPaletteState extends State<_TaskPalette> {
     final mine = ++_generation;
     setState(() {
       _stage = _Stage.routing;
-      _sending = true;
       _note = '';
     });
     _startClock();
@@ -216,12 +283,10 @@ class _TaskPaletteState extends State<_TaskPalette> {
       });
       return;
     }
-    // Landed. Name who took it, then close — see [_confirmBeat].
-    final taker = _named(agentId);
+    // Landed. Light the row that took it, then close — see [_confirmBeat].
     setState(() {
       _stage = _Stage.sent;
-      _sentName = taker?.name ?? _answer?.name ?? '';
-      _sentMachine = taker?.machine ?? '';
+      _committed = agentId;
     });
     await Future<void>.delayed(_confirmBeat);
     if (!mounted || mine != _generation) return;
@@ -275,48 +340,86 @@ class _TaskPaletteState extends State<_TaskPalette> {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return Dialog(
-      // Centred. It was pinned near the top out of palette habit, but this one is not a list you scan
-      // while reading the screen behind it — it is a single field that owns the moment, and the eye is
-      // already in the middle of the window.
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
-      backgroundColor: grid.AppGlass.surfaceFill,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: grid.AppGlass.hair),
-      ),
-      // NARROWER than it was, and shorter: at rest this is one line of text in a box, and every pixel it
-      // takes is a pixel of the terminal it is covering.
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                _stage == _Stage.typing ? 20 : 14,
+    return Stack(
+      children: [
+        // The veil, built rather than tinted — see showTaskPalette. Tapping it closes, which is what the
+        // barrier it replaces did.
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).maybePop(),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: _D.veilBlur,
+                sigmaY: _D.veilBlur,
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: _input()),
-                  // The only furniture at rest. It says what to press without spending a row on saying it.
-                  if (_stage == _Stage.typing) ...[
-                    const SizedBox(width: 12),
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: _Chord('⏎'),
-                    ),
-                  ],
-                ],
+              child: const ColoredBox(color: _D.veil),
+            ),
+          ),
+        ),
+        Center(
+          child: FractionalTranslation(
+            translation: const Offset(0, _D.lift),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: _D.width),
+                child: _sheet(),
               ),
             ),
-            _footer(),
-          ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The frosted sheet: a clip, the blur behind it, the fill and rim on top, and a one-pixel lit edge.
+  ///
+  /// The order matters. The blur has to be INSIDE the same clip as the fill or it squares off the
+  /// corners, and the lit edge has to sit above the fill or the fill covers it.
+  Widget _sheet() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_D.radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: _D.blur, sigmaY: _D.blur),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _D.fill,
+            borderRadius: BorderRadius.circular(_D.radius),
+            border: Border.all(color: _D.rim),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x99000000),
+                blurRadius: 100,
+                offset: Offset(0, 40),
+              ),
+            ],
+          ),
+          // TRANSPARENT Material, and it is required rather than decorative: dropping Dialog for a
+          // hand-built veil dropped the Material ancestor with it, and TextField and InkWell both
+          // assert without one. `transparency` provides it while painting nothing, so the glass above
+          // stays the only surface — a MaterialType.canvas here would put an opaque sheet over it.
+          child: Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [_field(), _results()],
+                ),
+                // `inset 0 1px 0 rgba(255,255,255,.06)`.
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: ColoredBox(
+                    color: _D.innerLight,
+                    child: SizedBox(height: 1),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -328,404 +431,340 @@ class _TaskPaletteState extends State<_TaskPalette> {
   /// not tidying — the same trap `ShareTextField` documents. The app's global [InputDecorationTheme] sets
   /// `filled: true`, a `minHeight` sized for a 32px control, and a focus ring on all three border slots.
   /// `border: InputBorder.none` alone does NOT win: `enabledBorder` and `focusedBorder` are consulted
-  /// first, so the field drew a rounded pill in the app's grey INSIDE this dialog's own box — two nested
-  /// boxes around one line of text, which is exactly what made the first cut of this palette look cheap.
-  Widget _input() {
-    return TextField(
-      controller: _text,
-      focusNode: _field,
-      autofocus: true,
-      maxLines: 4,
-      minLines: 1,
-      // Enter routes; a newline needs the modifier. The field is for a sentence, not a document, and the
-      // common case must not cost a reach for the mouse.
-      // Read-only rather than disabled while the router thinks: a disabled field drops the focus, and the
-      // focus is what Esc is listening on.
-      readOnly: _stage == _Stage.routing || _stage == _Stage.sent,
-      // Big, because the field IS the interface here. There is nothing else to look at, and a sentence
-      // you are about to send to a machine deserves to be read back before you press Enter.
-      style: TextStyle(
-        color: grid.AppPalette.textPrimary,
-        fontSize: 20,
-        height: 1.35,
-      ),
-      cursorColor: grid.AppPalette.accentOnSurface,
-      cursorWidth: 1.5,
-      decoration: InputDecoration(
-        filled: false,
-        isDense: true,
-        isCollapsed: true,
-        contentPadding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        disabledBorder: InputBorder.none,
-        hintText: 'Describe the work…',
-        hintStyle: TextStyle(
-          color: grid.AppPalette.textFaint,
-          fontSize: 20,
-          height: 1.35,
-        ),
-      ),
-    );
-  }
-
-  Widget _footer() {
-    switch (_stage) {
-      // Nothing at all. The keycap beside the field has already said the one thing that matters, and a
-      // box with nothing in it is the point: at rest this palette is 60px of window instead of 130.
-      case _Stage.typing:
-        return const SizedBox.shrink();
-
-      case _Stage.routing:
-      case _Stage.sent:
-        return _working();
-
-      case _Stage.empty:
-        return _lines([
-          _muted(_note),
-          const SizedBox(height: 10),
-          const _Keys([('⏎', 'try again'), ('esc', 'close')]),
-        ]);
-
-      case _Stage.choosing:
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-              child: _askedWhy(),
-            ),
-            for (var i = 0; i < _choices.length; i++)
-              _row(_choices[i], i == _cursor),
-            _lines([
-              const SizedBox(height: 4),
-              const _Keys([('↑↓', 'choose'), ('⏎', 'send'), ('esc', 'close')]),
-            ]),
-          ],
-        );
-    }
-  }
-
-  /// One column of text, in the field's own left margin. Everything this palette says lines up under the
-  /// sentence it is about.
-  Widget _lines(List<Widget> children) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
-    ),
-  );
-
-  Widget _muted(String text) => Text(
-    text,
-    style: TextStyle(
-      color: grid.AppPalette.textSecondary,
-      fontSize: 12.5,
-      height: 1.45,
-    ),
-  );
-
-  /// Why it is asking, and what it looked at before it gave up — one line, no heading.
-  ///
-  /// Two different sentences, and the difference is the point: a classifier that WAS unsure and a router
-  /// that could not run at all both land here — deliberately, so a broken router can never guess — but
-  /// they send a person to different next moves. One means "say it differently"; the other means
-  /// something on this computer is not working.
-  Widget _askedWhy() {
-    final answer = _answer;
-    final heuristic = answer?.via == 'heuristic';
-    final reason = (answer?.reason ?? '').trim();
-    final weighed = answer?.weighed ?? 0;
-    final machines = answer?.machines ?? 0;
-    final looked = weighed == 0
-        ? ''
-        : machines > 1
-        ? 'Weighed $weighed agents on $machines computers — '
-        : 'Weighed $weighed agents — ';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  /// first, so the field drew a rounded pill in the app's grey INSIDE this sheet — two nested boxes
+  /// around one line of text, which is what made the first cut of this palette look cheap.
+  Widget _field() {
+    final working = _stage == _Stage.routing;
+    // 56 of right padding is the design's, and it is what the spinner stands in. The clock needs its own
+    // room, so the gap widens only while it is showing rather than leaving a permanent hole.
+    final rightPad = working && _elapsed >= 5 ? 84.0 : 56.0;
+    return Stack(
       children: [
-        Text(
-          heuristic
-              ? '${looked}the router could not run, so these are name matches'
-              : '${looked}not sure enough to send it',
-          style: TextStyle(
-            color: grid.AppPalette.textSecondary,
-            fontSize: 12.5,
-          ),
-        ),
-        // The router's own words. It has always sent them and the window has always dropped them, which
-        // left the person guessing at a judgement the machine had already explained.
-        if (!heuristic && reason.isNotEmpty) ...[
-          const SizedBox(height: 3),
-          Text(
-            '“$reason”',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: grid.AppPalette.textFaint,
-              fontSize: 11.5,
-              fontStyle: FontStyle.italic,
+        Padding(
+          padding: EdgeInsets.fromLTRB(24, 19, rightPad, 19),
+          child: TextField(
+            controller: _text,
+            focusNode: _fieldFocus,
+            autofocus: true,
+            maxLines: 4,
+            minLines: 1,
+            // Enter routes; a newline needs the modifier. The field is for a sentence, not a document,
+            // and the common case must not cost a reach for the mouse.
+            // Read-only rather than disabled while the router thinks: a disabled field drops the focus,
+            // and the focus is what Esc is listening on.
+            readOnly: working || _stage == _Stage.sent,
+            style: const TextStyle(
+              color: _D.fieldInk,
+              fontSize: _D.fieldSize,
+              height: 1.35,
+              letterSpacing: -0.22, // -.01em at 22px
+            ),
+            cursorColor: _D.caret,
+            cursorWidth: 2,
+            cursorHeight: _D.fieldSize * 1.05,
+            cursorRadius: Radius.zero,
+            decoration: const InputDecoration(
+              filled: false,
+              isDense: true,
+              isCollapsed: true,
+              contentPadding: EdgeInsets.zero,
+              constraints: BoxConstraints(),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              hintText: 'Describe the work…',
+              hintStyle: TextStyle(
+                color: _D.hint,
+                fontSize: _D.fieldSize,
+                height: 1.35,
+              ),
             ),
           ),
+        ),
+        // The whole of the waiting state, in the field's own right margin: a 16px ring at right:24.
+        if (working) ...[
+          const Positioned(
+            right: 24,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.8,
+                  color: _D.hint,
+                ),
+              ),
+            ),
+          ),
+          // Past five seconds, and only then. The route can run to twenty; under five a clock is noise,
+          // over it, it is the difference between working and stopped. The design has no slot for this,
+          // so it borrows the spinner's margin rather than adding a row.
+          if (_elapsed >= 5)
+            Positioned(
+              right: 46,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Text(
+                  '${_elapsed}s',
+                  style: const TextStyle(
+                    color: _D.hint,
+                    fontSize: 11.5,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
         ],
       ],
     );
   }
 
-  /// The wait and the receipt: one line of text, and a hairline at the very bottom edge.
-  ///
-  /// No spinner and no stepper — this palette has no chrome to put them in. What it does say is WHICH
-  /// half of the wait is running (the two take different times and only one can be slow for a reason you
-  /// could act on) and, past five seconds, how long. Under five a clock is noise; over it, it is the
-  /// difference between working and stopped.
-  Widget _working() {
-    final done = _stage == _Stage.sent;
-    return Column(
+  /// Everything below the hairline: the question, the rows, or nothing at all.
+  Widget _results() {
+    switch (_stage) {
+      case _Stage.typing:
+      case _Stage.routing:
+        return const SizedBox.shrink();
+
+      case _Stage.empty:
+        return _panel([
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+            child: Text(
+              _note,
+              style: const TextStyle(
+                color: _D.questionInk,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ]);
+
+      case _Stage.sent:
+        // The receipt is the ROW, lit. The design drew this state and it is better than the line of text
+        // it replaces: the eye is already on the row, and a lit row answers "who" as well as "done".
+        final taker = _named(_committed);
+        return _panel([
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
+            child: Row(
+              children: [
+                Icon(Icons.check, size: 14, color: _D.green),
+                SizedBox(width: 8),
+                Text(
+                  'on it',
+                  style: TextStyle(
+                    color: _D.green,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (taker != null) _row(taker, active: false, taken: true),
+        ]);
+
+      case _Stage.choosing:
+        return _panel([
+          _question(),
+          for (var i = 0; i < _choices.length; i++)
+            _row(_choices[i], active: i == _cursor, taken: false),
+        ]);
+    }
+  }
+
+  Widget _panel(List<Widget> children) => Container(
+    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+    decoration: const BoxDecoration(
+      border: Border(top: BorderSide(color: _D.sep)),
+    ),
+    child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Row(
-            children: [
-              if (done) ...[
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: grid.AppPalette.online,
+      children: children,
+    ),
+  );
+
+  /// Why it stopped, and what it looked at before it did.
+  ///
+  /// The counts are marked, not buried: the design gives the numbers inside this line their own colour,
+  /// and they are the ones that answer the question a person actually has here — was the agent I mean
+  /// even in the running? The list the daemon weighs is capped, so without this nothing on screen says.
+  Widget _question() {
+    final answer = _answer;
+    final heuristic = answer?.via == 'heuristic';
+    final reason = (answer?.reason ?? '').trim();
+    final weighed = answer?.weighed ?? 0;
+    final machines = answer?.machines ?? 0;
+    const base = TextStyle(color: _D.questionInk, fontSize: 12, height: 1.45);
+    const mark = TextStyle(
+      color: _D.questionMark,
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              style: base,
+              children: [
+                if (weighed > 0) ...[
+                  const TextSpan(text: 'Weighed '),
+                  TextSpan(
+                    text: '$weighed agent${weighed == 1 ? '' : 's'}',
+                    style: mark,
                   ),
+                  if (machines > 1) ...[
+                    const TextSpan(text: ' on '),
+                    TextSpan(text: '$machines computers', style: mark),
+                  ],
+                  const TextSpan(text: ' — '),
+                ],
+                TextSpan(
+                  text: heuristic
+                      ? 'the router could not run, so these are name matches'
+                      : 'not sure enough to send it',
                 ),
-                const SizedBox(width: 8),
               ],
-              Expanded(
-                child: Text(
-                  done
-                      ? 'Sent to ${_sentName.isEmpty ? 'the agent' : _sentName}'
-                            '${_sentMachine.isEmpty ? '' : ' · $_sentMachine'}'
-                      : _sending
-                      ? 'handing it over…'
-                      : 'choosing an agent…',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: done
-                        ? grid.AppPalette.textSecondary
-                        : grid.AppPalette.textFaint,
-                    fontSize: 12.5,
-                  ),
+            ),
+          ),
+          // The router's own words. It has always sent them and the window has always dropped them,
+          // which left the person guessing at a judgement the machine had already explained. The design
+          // has no slot for it, so it goes here, quieter than the line above it.
+          if (!heuristic && reason.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '“$reason”',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _D.machineDim,
+                  fontSize: 11.5,
+                  fontStyle: FontStyle.italic,
                 ),
               ),
-              if (!done && _elapsed >= 5)
-                Text(
-                  '${_elapsed}s',
-                  style: TextStyle(
-                    color: grid.AppPalette.textFaint,
-                    fontSize: 11.5,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        // The only moving part in the whole palette, and it sits on the edge rather than in the column —
-        // a progress bar in the text would be one more thing to look at while reading.
-        SizedBox(
-          height: 2,
-          child: done
-              ? ColoredBox(color: grid.AppPalette.online)
-              : LinearProgressIndicator(
-                  minHeight: 2,
-                  backgroundColor: Colors.transparent,
-                  valueColor: AlwaysStoppedAnimation(
-                    grid.AppPalette.accentOnSurface,
-                  ),
-                ),
-        ),
-      ],
+            ),
+        ],
+      ),
     );
   }
 
-  Widget _row(RouteCandidate candidate, bool active) {
+  /// One candidate, on the design's five-column grid.
+  Widget _row(
+    RouteCandidate candidate, {
+    required bool active,
+    required bool taken,
+  }) {
     final fit = candidate.confidence;
+    // Green is a claim, and it is only made about the leader. Everything else is grey — a runner-up
+    // wearing the same colour as the pick would be the palette arguing with itself.
+    final leader = fit > 0 && candidate.agentId == (_answer?.agentId ?? '');
     return InkWell(
-      onTap: () => unawaited(
-        _commit(candidate.agentId, candidate.machineId, _text.text.trim()),
-      ),
+      onTap: taken
+          ? null
+          : () => unawaited(
+              _commit(
+                candidate.agentId,
+                candidate.machineId,
+                _text.text.trim(),
+              ),
+            ),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        color: active ? grid.AppGlass.surfaceHoverFill : null,
-        padding: const EdgeInsets.fromLTRB(0, 8, 20, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: taken
+              ? _D.takenFill
+              : active
+              ? _D.activeFill
+              : null,
+          borderRadius: BorderRadius.circular(10),
+          border: taken ? Border.all(color: _D.takenRim) : null,
+        ),
         child: Row(
           children: [
-            // The cursor, as a rail rather than the fill alone: on rows this quiet a tint change is easy
-            // to miss, and this is the row Enter acts on.
-            Container(
-              width: 2,
-              height: 32,
-              decoration: BoxDecoration(
-                color: active ? grid.AppPalette.accent : Colors.transparent,
-                borderRadius: const BorderRadius.horizontal(
-                  right: Radius.circular(2),
+            // Greyed and lifted, so a row of six vendors reads as one list instead of six brand marks.
+            SizedBox(
+              width: _D.colIcon,
+              height: _D.colIcon,
+              child: ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  0.2126 * 1.3, 0.7152 * 1.3, 0.0722 * 1.3, 0, 0, //
+                  0.2126 * 1.3, 0.7152 * 1.3, 0.0722 * 1.3, 0, 0, //
+                  0.2126 * 1.3, 0.7152 * 1.3, 0.0722 * 1.3, 0, 0, //
+                  0, 0, 0, 1, 0,
+                ]),
+                child: EngineMark(engine: candidate.engine, size: _D.colIcon),
+              ),
+            ),
+            const SizedBox(width: _D.colGap),
+            SizedBox(
+              width: _D.colName,
+              child: Text(
+                candidate.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: taken ? const Color(0xFFDFFBE9) : _D.engineInk,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-            const SizedBox(width: 18),
-            // The SAME mark the rail draws for this agent. A picker that invented its own would make the
-            // row and the rail read as two lists that happen to share names.
-            EngineMark(engine: candidate.engine, size: 15),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          candidate.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: grid.AppPalette.textPrimary,
-                            fontSize: 13.5,
-                            fontWeight: active
-                                ? grid.AppFont.medium
-                                : grid.AppFont.regular,
-                          ),
-                        ),
-                      ),
-                      // Which computer, as a chip rather than grey text trailing the name: the list spans
-                      // every machine, so two agents called the same thing on two of them are one row
-                      // twice without it — and a chip survives a long name where trailing text does not.
-                      if (candidate.machine.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        _MachineChip(candidate.machine),
-                      ],
-                    ],
-                  ),
-                  if (candidate.recent.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      candidate.recent,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: grid.AppPalette.textFaint,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ],
-                ],
+            const SizedBox(width: _D.colGap),
+            SizedBox(
+              width: _D.colMachine,
+              child: Text(
+                candidate.machine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: taken ? const Color(0xFF9FD9B6) : _D.machineInk,
+                  fontSize: 12.5,
+                ),
               ),
             ),
-            // The fit, as the number and nothing else. A bar would be chrome, and this palette has none;
-            // three numbers in a column already say "near-tie" or "clear leader" at a glance.
-            //
-            // Drawn only where there IS one: 0 means the router said nothing about this candidate, and a
-            // printed 0.00 would be a claim it never made.
-            if (fit > 0) ...[
-              const SizedBox(width: 12),
-              Text(
-                fit.toStringAsFixed(2),
+            const SizedBox(width: _D.colGap),
+            Expanded(
+              child: Text(
+                candidate.recent,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: active
-                      ? grid.AppPalette.textSecondary
-                      : grid.AppPalette.textFaint,
-                  fontSize: 11.5,
+                  color: taken ? const Color(0xFFDFFBE9) : _D.nameInk,
+                  fontFamily: grid.AppFont.mono,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(width: _D.colGap),
+            SizedBox(
+              width: _D.colFit,
+              // Drawn only where there IS one: 0 means the router said nothing about this candidate, and
+              // a printed 0.00 would be a claim it never made.
+              child: Text(
+                fit > 0 ? fit.toStringAsFixed(2) : '',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  color: leader || taken ? _D.green : _D.lowFit,
+                  fontFamily: grid.AppFont.mono,
+                  fontSize: 12,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
-            ],
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// A key, drawn as a key — small enough to read as a hint rather than as a button.
-class _Chord extends StatelessWidget {
-  const _Chord(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: grid.AppGlass.hair),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: grid.AppPalette.textFaint,
-          fontSize: 10.5,
-          height: 1.1,
-        ),
-      ),
-    );
-  }
-}
-
-class _Keys extends StatelessWidget {
-  const _Keys(this.pairs);
-
-  final List<(String, String)> pairs;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        for (final (chord, what) in pairs)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _Chord(chord),
-              const SizedBox(width: 6),
-              Text(
-                what,
-                style: TextStyle(
-                  color: grid.AppPalette.textFaint,
-                  fontSize: 11.5,
-                ),
-              ),
-            ],
-          ),
-      ],
-    );
-  }
-}
-
-class _MachineChip extends StatelessWidget {
-  const _MachineChip(this.name);
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: grid.AppGlass.hair),
-      ),
-      child: Text(
-        name,
-        style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 10.5),
       ),
     );
   }
