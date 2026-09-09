@@ -21,6 +21,9 @@ class ReloadTrackingNotifier extends AppNotifier {
       );
 
   @override
+  Future<void> ensureCliDaemonReady() async {}
+
+  @override
   Future<void> refreshMachines() async {
     machineRefreshes++;
   }

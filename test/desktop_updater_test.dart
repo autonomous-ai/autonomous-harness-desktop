@@ -69,26 +69,13 @@ Future<(List<int>, String)> _buildFakeBundleZip(
   return (bytes, await _sha256Hex(bytes));
 }
 
-/// Builds a real Linux-shaped bundle at [dir]/Harness/{harness,version.txt} — the flat layout
-/// `scripts/upload-desktop-linux.sh` packages — tars it with the same `tar` invocation that script
-/// uses, and returns (tarGzBytes, sha256Hex). `tar` (unlike `ditto`/`plutil`) exists on every dev
-/// machine, so this exercises the real Linux unpack/version-check path even from a macOS test host.
-Future<(List<int>, String)> _buildFakeLinuxBundleTarGz(
-  Directory dir,
-  String version,
-) async {
-  final bundle = Directory('${dir.path}/Harness')..createSync(recursive: true);
-  File('${bundle.path}/harness')
-      .writeAsStringSync('#!/bin/sh\necho fake harness\n');
-  File('${bundle.path}/version.txt').writeAsStringSync(version);
-  final tarPath = '${dir.path}/Harness-linux-x64.tar.gz';
-  final result = await Process.run('/usr/bin/tar', [
-    '-czf',
-    'Harness-linux-x64.tar.gz',
-    'Harness',
-  ], workingDirectory: dir.path);
-  expect(result.exitCode, 0, reason: 'tar failed: ${result.stderr}');
-  final bytes = File(tarPath).readAsBytesSync();
+/// Stand-in bytes for a Linux AppImage.
+///
+/// `downloadAndStage` no longer unpacks or inspects the Linux artifact — sha256 already
+/// authenticates the whole single-file download — so a fake AppImage needs nothing more than
+/// deterministic bytes with a known size and hash, the same idea as [_fakeArchiveBytes].
+Future<(List<int>, String)> _fakeAppImageBytes(String version) async {
+  final bytes = utf8.encode('not-a-real-appimage:$version\n' * 8);
   return (bytes, await _sha256Hex(bytes));
 }
 
@@ -418,47 +405,60 @@ void main() {
   test('currentBundlePath walks up to the enclosing .app', () {
     expect(
       currentBundlePath(
-        '/Applications/Harness.app/Contents/MacOS/Harness',
-        false, // isLinux — the .app walk, on whatever host runs the suite
+        executablePath: '/Applications/Harness.app/Contents/MacOS/Harness',
+        isLinux: false, // the .app walk, on whatever host runs the suite
       ),
       '/Applications/Harness.app',
     );
-    expect(currentBundlePath('/usr/local/bin/some-tool', false), isNull);
+    expect(
+      currentBundlePath(
+        executablePath: '/usr/local/bin/some-tool',
+        isLinux: false,
+      ),
+      isNull,
+    );
   });
 
   test(
-    'currentBundlePath on Linux is just the executable\'s parent directory',
+    'currentBundlePath on Linux resolves to the given AppImage override',
     () {
       expect(
         currentBundlePath(
-          '/home/user/.local/opt/Harness/harness',
-          true, // isLinux
+          isLinux: true,
+          appImagePath: '/home/user/.local/opt/Harness.AppImage',
         ),
-        '/home/user/.local/opt/Harness',
+        '/home/user/.local/opt/Harness.AppImage',
       );
     },
   );
 
+  test(
+    'currentBundlePath on Linux is null with no override and no APPIMAGE env var',
+    () {
+      // Production falls through to Platform.environment['APPIMAGE'], which is unset for the test
+      // runner's own process — the same "cannot resolve" state a non-packaged dev run would hit.
+      expect(currentBundlePath(isLinux: true), isNull);
+    },
+  );
+
   group('Linux architecture packaging', () {
-    late List<int> tarBytes;
-    late String tarSha;
+    late List<int> appImageBytes;
+    late String appImageSha;
 
     setUp(() async {
-      final (bytes, sha) = await _buildFakeLinuxBundleTarGz(
-        scratch,
-        newVersion,
-      );
-      tarBytes = bytes;
-      tarSha = sha;
+      final (bytes, sha) = await _fakeAppImageBytes(newVersion);
+      appImageBytes = bytes;
+      appImageSha = sha;
     });
 
-    Future<String> serveLinuxMetadataAndTar({
+    Future<String> serveLinuxMetadataAndAppImage({
       required String manifestVersion,
       String architecture = 'x64',
+      String? shaOverride,
     }) async {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final base = 'http://127.0.0.1:${server!.port}';
-      final archive = 'Harness-linux-$architecture.tar.gz';
+      final archive = 'Harness-linux-$architecture.AppImage';
       server!.listen((request) async {
         if (request.uri.path == '/metadata.json') {
           request.response.headers.contentType = ContentType.json;
@@ -467,13 +467,13 @@ void main() {
               'desktop-linux-$architecture': {
                 'version': manifestVersion,
                 'url': '$base/$archive',
-                'sha256': tarSha,
-                'size': tarBytes.length,
+                'sha256': shaOverride ?? appImageSha,
+                'size': appImageBytes.length,
               },
             }),
           );
         } else if (request.uri.path == '/$archive') {
-          request.response.add(tarBytes);
+          request.response.add(appImageBytes);
         } else {
           request.response.statusCode = HttpStatus.notFound;
         }
@@ -483,7 +483,9 @@ void main() {
     }
 
     test('checkOnce reads the desktop-linux-x64 manifest entry', () async {
-      final url = await serveLinuxMetadataAndTar(manifestVersion: newVersion);
+      final url = await serveLinuxMetadataAndAppImage(
+        manifestVersion: newVersion,
+      );
       final updater = DesktopUpdater(
         dio: Dio(),
         metadataUrl: url,
@@ -494,11 +496,11 @@ void main() {
       final info = await updater.checkOnce(currentVersion: '1.0.0');
       expect(info, isNotNull);
       expect(info!.version, newVersion);
-      expect(info.sha256, tarSha);
+      expect(info.sha256, appImageSha);
     });
 
     test('checkOnce reads the desktop-linux-arm64 manifest entry', () async {
-      final url = await serveLinuxMetadataAndTar(
+      final url = await serveLinuxMetadataAndAppImage(
         manifestVersion: newVersion,
         architecture: 'arm64',
       );
@@ -511,50 +513,58 @@ void main() {
       );
       final info = await updater.checkOnce(currentVersion: '1.0.0');
       expect(info, isNotNull);
-      expect(info!.url, endsWith('/Harness-linux-arm64.tar.gz'));
-      expect(info.sha256, tarSha);
-    });
-
-    test('downloadAndStage untars and confirms the staged bundle carries the advertised version', () async {
-      await serveLinuxMetadataAndTar(manifestVersion: newVersion);
-      final updater = DesktopUpdater(
-        dio: Dio(),
-        isLinux: true,
-        linuxArchitecture: 'x64',
-      );
-      final info = UpdateInfo(
-        version: newVersion,
-        url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
-        sha256: tarSha,
-        size: tarBytes.length,
-      );
-      final staged = await updater.downloadAndStage(info);
-      expect(staged, isNotNull);
-      expect(staged!.version, newVersion);
-      expect(staged.bundlePath, endsWith('/Harness'));
-      expect(File('${staged.bundlePath}/harness').existsSync(), isTrue);
-      await Directory(staged.stagingDirPath).delete(recursive: true);
-    });
-
-    test('downloadAndStage rejects a Linux bundle whose version.txt does not match', () async {
-      await serveLinuxMetadataAndTar(manifestVersion: newVersion);
-      final updater = DesktopUpdater(
-        dio: Dio(),
-        isLinux: true,
-        linuxArchitecture: 'x64',
-      );
-      final mismatched = UpdateInfo(
-        version: '1.2.3',
-        url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.tar.gz',
-        sha256: tarSha,
-        size: tarBytes.length,
-      );
-      final staged = await updater.downloadAndStage(mismatched);
-      expect(staged, isNull);
+      expect(info!.url, endsWith('/Harness-linux-arm64.AppImage'));
+      expect(info.sha256, appImageSha);
     });
 
     test(
-      'applyStaged on Linux execs the binary directly instead of `open -n`',
+      'downloadAndStage stages the AppImage as-is and makes it executable',
+      () async {
+        await serveLinuxMetadataAndAppImage(manifestVersion: newVersion);
+        final updater = DesktopUpdater(
+          dio: Dio(),
+          isLinux: true,
+          linuxArchitecture: 'x64',
+        );
+        final info = UpdateInfo(
+          version: newVersion,
+          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.AppImage',
+          sha256: appImageSha,
+          size: appImageBytes.length,
+        );
+        final staged = await updater.downloadAndStage(info);
+        expect(staged, isNotNull);
+        expect(staged!.version, newVersion);
+        expect(staged.bundlePath, endsWith('/Harness-linux-x64.AppImage'));
+        expect(File(staged.bundlePath).existsSync(), isTrue);
+        final mode = File(staged.bundlePath).statSync().modeString();
+        expect(mode, contains('x'), reason: 'staged AppImage should be +x');
+        await Directory(staged.stagingDirPath).delete(recursive: true);
+      },
+    );
+
+    test(
+      'downloadAndStage rejects a Linux download whose sha256 does not match',
+      () async {
+        await serveLinuxMetadataAndAppImage(manifestVersion: newVersion);
+        final updater = DesktopUpdater(
+          dio: Dio(),
+          isLinux: true,
+          linuxArchitecture: 'x64',
+        );
+        final badInfo = UpdateInfo(
+          version: newVersion,
+          url: 'http://127.0.0.1:${server!.port}/Harness-linux-x64.AppImage',
+          sha256: '0' * 64,
+          size: appImageBytes.length,
+        );
+        final staged = await updater.downloadAndStage(badInfo);
+        expect(staged, isNull);
+      },
+    );
+
+    test(
+      'applyStaged on Linux execs the swapped AppImage file directly instead of `open -n`',
       () async {
         final calls = <String>[];
         final updater = DesktopUpdater(
@@ -564,18 +574,19 @@ void main() {
         );
         final staged = StagedUpdate(
           version: newVersion,
-          bundlePath: '${scratch.path}/staged/Harness',
+          bundlePath: '${scratch.path}/staged/Harness-linux-x64.AppImage',
           stagingDirPath: '${scratch.path}/staged',
         );
         final ok = await updater.applyStaged(
           staged,
           selfPid: 12345,
-          runningBundlePath: '/home/user/.local/opt/Harness',
+          runningBundlePath: '/home/user/.local/opt/Harness.AppImage',
         );
         expect(ok, isTrue);
         expect(calls, hasLength(1));
         expect(calls.single, contains('kill -0 12345'));
-        expect(calls.single, contains('/home/user/.local/opt/Harness/harness'));
+        expect(calls.single, contains('/home/user/.local/opt/Harness.AppImage'));
+        expect(calls.single, contains(staged.bundlePath));
         expect(calls.single, contains('nohup'));
         expect(calls.single, isNot(contains('open -n')));
         expect(calls.single, contains('pgrep -f'));

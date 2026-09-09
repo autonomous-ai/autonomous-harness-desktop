@@ -319,7 +319,7 @@ echo
 echo ">> published desktop app $VER"
 echo "   zip:      $URL"
 echo "   dmg:      $DMG_URL"
-echo "   download: https://harness.autonomous.ai/desktop/download  (redirects to the dmg above)"
+echo "   download: https://harness.autonomous.ai/desktop/download-macos  (redirects to the dmg above)"
 echo "   sha256:   $SHA"
 echo "   manifest: ${GCS_PUBLIC_BASE_URL%/}/${METADATA_PATH#/}"
 echo "   Running apps poll this on their own schedule (DesktopUpdater, every few hours + on launch)."

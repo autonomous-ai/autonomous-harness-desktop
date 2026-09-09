@@ -53,11 +53,14 @@ class UpdateInfo {
   });
 }
 
-/// A downloaded, sha256-verified, unpacked-and-version-confirmed build sitting in a temp directory,
-/// not yet swapped into place.
+/// A downloaded, sha256-verified build sitting in a temp directory, not yet swapped into place.
 class StagedUpdate {
   final String version;
-  final String bundlePath; // .../Harness.app inside stagingDirPath
+
+  /// On macOS: `.../Harness.app` inside [stagingDirPath], unpacked and version-confirmed. On
+  /// Linux: the downloaded `.AppImage` file itself (already made executable), directly inside
+  /// [stagingDirPath] — there is nothing to unpack.
+  final String bundlePath;
   final String stagingDirPath;
 
   const StagedUpdate({
@@ -107,18 +110,24 @@ List<int>? _parseSemverCore(String version) {
 
 String _singleQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";
 
-/// Resolves the running build's install root.
+/// Resolves the path the running build should be swapped at.
 ///
 /// On macOS this walks up from the running executable to the enclosing
 /// `.app` bundle — `.../Harness.app/Contents/MacOS/Harness` -> `.../Harness.app`.
-/// On Linux the packaged build (see `scripts/upload-desktop-linux.sh`) is a
-/// flat directory — the `harness` executable, `lib/`, and `data/` all sit
-/// directly inside it — so the bundle root is simply the executable's parent.
-String? currentBundlePath([String? executablePath, bool? isLinux]) {
-  final resolved = executablePath ?? Platform.resolvedExecutable;
+/// On Linux the packaged build is a single `.AppImage` file (see
+/// `scripts/upload-desktop-linux.sh`), and a running AppImage executes from a temporary FUSE mount,
+/// not from that file — so the file's own path comes from [appImagePath] (tests) or the `APPIMAGE`
+/// environment variable the AppImage runtime sets on launch (production), never from
+/// `Platform.resolvedExecutable`.
+String? currentBundlePath({
+  String? executablePath,
+  bool? isLinux,
+  String? appImagePath,
+}) {
   if (isLinux ?? Platform.isLinux) {
-    return File(resolved).parent.path;
+    return appImagePath ?? Platform.environment['APPIMAGE'];
   }
+  final resolved = executablePath ?? Platform.resolvedExecutable;
   var dir = File(resolved).parent;
   for (var i = 0; i < 6; i++) {
     if (dir.path.endsWith('.app')) return dir.path;
@@ -160,8 +169,8 @@ class DesktopUpdater {
     // outside release mode, so tests that want to exercise checkOnce()'s real logic pass `true` here.
     bool? releaseMode,
     // Defaults to the real host OS. Tests force this to exercise the Linux packaging/relaunch branch
-    // (tar/version.txt instead of ditto/plutil) from any host, since the actual archive tooling used
-    // on that branch (tar) is present on every dev machine, unlike ditto/plutil on Linux.
+    // (a single downloaded file, no unpacking) from any host, since that branch needs no extra
+    // tooling beyond the standard library, unlike ditto/plutil on macOS.
     bool? isLinux,
     // Linux artifacts are architecture-specific. Tests can override this to exercise both
     // manifest keys on any host; production resolves it from the running Dart ABI.
@@ -250,8 +259,11 @@ class DesktopUpdater {
     return Timer.periodic(interval, (_) => tick());
   }
 
-  /// Downloads [info], verifies its sha256 BEFORE trusting the bytes, unpacks into a fresh temp
-  /// directory, and confirms the staged bundle's own Info.plist really carries [info].version.
+  /// Downloads [info] and verifies its sha256 BEFORE trusting the bytes. On macOS, unpacks the zip
+  /// and confirms the staged bundle's own Info.plist really carries [info].version — the archive
+  /// holds more than the hash alone authenticates. On Linux, the download itself is the artifact (a
+  /// single AppImage file), so the sha256 check already covers everything there is: it is made
+  /// executable and staged as-is, with nothing to unpack or recheck.
   /// Returns null (and cleans up anything partially written) on any verification failure.
   Future<StagedUpdate?> downloadAndStage(UpdateInfo info) async {
     Directory? stagingDir;
@@ -279,35 +291,35 @@ class DesktopUpdater {
       }
 
       stagingDir = await Directory.systemTemp.createTemp('harness-update-');
-      final archivePath = _isLinux
-          ? '${stagingDir.path}/Harness-linux-$_linuxArchitecture.tar.gz'
-          : '${stagingDir.path}/Harness-macos.zip';
+
+      if (_isLinux) {
+        final appImagePath =
+            '${stagingDir.path}/Harness-linux-$_linuxArchitecture.AppImage';
+        await File(appImagePath).writeAsBytes(bytes, flush: true);
+        await Process.run('/bin/chmod', ['+x', appImagePath]);
+        return StagedUpdate(
+          version: info.version,
+          bundlePath: appImagePath,
+          stagingDirPath: stagingDir.path,
+        );
+      }
+
+      final archivePath = '${stagingDir.path}/Harness-macos.zip';
       await File(archivePath).writeAsBytes(bytes, flush: true);
 
-      final unpack = _isLinux
-          ? await Process.run('/usr/bin/tar', [
-              '-xzf',
-              archivePath,
-              '-C',
-              stagingDir.path,
-            ])
-          : await Process.run('/usr/bin/ditto', [
-              '-x',
-              '-k',
-              archivePath,
-              stagingDir.path,
-            ]);
+      final unpack = await Process.run('/usr/bin/ditto', [
+        '-x',
+        '-k',
+        archivePath,
+        stagingDir.path,
+      ]);
       if (unpack.exitCode != 0) {
-        debugPrint(
-          'DesktopUpdater: ${_isLinux ? 'tar' : 'ditto'} unpack failed: ${unpack.stderr}',
-        );
+        debugPrint('DesktopUpdater: ditto unpack failed: ${unpack.stderr}');
         await stagingDir.delete(recursive: true);
         return null;
       }
 
-      final bundlePath = _isLinux
-          ? '${stagingDir.path}/Harness'
-          : '${stagingDir.path}/Harness.app';
+      final bundlePath = '${stagingDir.path}/Harness.app';
       if (!Directory(bundlePath).existsSync()) {
         debugPrint(
           'DesktopUpdater: no Harness bundle inside the downloaded archive',
@@ -316,26 +328,15 @@ class DesktopUpdater {
         return null;
       }
 
-      // macOS reads the version Xcode stamped into Info.plist at build time; `flutter build linux`
-      // has no equivalent, so the Linux release script (scripts/upload-desktop-linux.sh) writes it
-      // into a plain version.txt at the bundle root instead — see lib/core/app_version.dart.
-      String? stagedVersion;
-      if (_isLinux) {
-        final versionFile = File('$bundlePath/version.txt');
-        stagedVersion = await versionFile.exists()
-            ? (await versionFile.readAsString()).trim()
-            : null;
-      } else {
-        final plutil = await Process.run('/usr/bin/plutil', [
-          '-extract',
-          'CFBundleShortVersionString',
-          'raw',
-          '$bundlePath/Contents/Info.plist',
-        ]);
-        stagedVersion = plutil.exitCode == 0
-            ? (plutil.stdout as String?)?.trim()
-            : null;
-      }
+      final plutil = await Process.run('/usr/bin/plutil', [
+        '-extract',
+        'CFBundleShortVersionString',
+        'raw',
+        '$bundlePath/Contents/Info.plist',
+      ]);
+      final stagedVersion = plutil.exitCode == 0
+          ? (plutil.stdout as String?)?.trim()
+          : null;
       if (stagedVersion != info.version) {
         debugPrint(
           'DesktopUpdater: staged bundle reports version "$stagedVersion", expected "${info.version}"',
@@ -370,7 +371,8 @@ class DesktopUpdater {
     required int selfPid,
     String? runningBundlePath,
   }) async {
-    final bundlePath = runningBundlePath ?? currentBundlePath(null, _isLinux);
+    final bundlePath =
+        runningBundlePath ?? currentBundlePath(isLinux: _isLinux);
     if (bundlePath == null) {
       debugPrint(
         'DesktopUpdater: could not resolve the running bundle path — not applying',
@@ -378,8 +380,11 @@ class DesktopUpdater {
       return false;
     }
     final prevPath = '$bundlePath.prev';
+    // On Linux, `bundlePath` IS the AppImage file (see currentBundlePath) — there is no enclosing
+    // directory to exec into, so the "executable" is the swapped file itself. downloadAndStage()
+    // already made staged.bundlePath executable, and mv preserves that bit across the swap below.
     final executableInBundle = _isLinux
-        ? '$bundlePath/harness'
+        ? bundlePath
         : '$bundlePath/Contents/MacOS/Harness';
     // macOS relaunches through `open -n` (LaunchServices, so Dock/menu-bar identity stays correct).
     // Linux has no such registry for a plain packaged binary — exec it directly, detached from this

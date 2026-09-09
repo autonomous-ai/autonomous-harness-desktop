@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 import '../widgets/login_relay_diagram.dart';
-import '../widgets/theme_mode_switch.dart';
-import '../widgets/window_chrome.dart';
 
 /// The sign-in screen.
 ///
@@ -108,17 +106,6 @@ class LoginScreen extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-          // ⚠️ Below the window's 28px drag band, not inside it. That strip
-          // belongs to AppKit — `TitleBarStyle.hidden` makes the title bar
-          // transparent rather than removing it, so anything drawn up there can
-          // be looked at but not clicked. `FullWindowScreen` lays its
-          // `WindowDragStrip` over this screen's top edge; a control at `top: 0`
-          // would render perfectly and simply never respond.
-          const Positioned(
-            top: windowDragBandHeight + 8,
-            right: 16,
-            child: ThemeModeSwitch(),
           ),
         ],
       ),

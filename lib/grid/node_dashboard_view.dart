@@ -325,7 +325,7 @@ String nodeDashboardSubtitle(int total, int shown) {
 /// The dashboard's sort and filters, remembered for as long as the app runs.
 ///
 /// A [ValueNotifier] singleton rather than state inside the dialog — the same
-/// idiom as `themeModeStore`, and here for the reason Grid's provider was not
+/// idiom as `gridSelectionStore`, and here for the reason Grid's provider was not
 /// `autoDispose`: the dialog is the only reader, so holding the choice inside
 /// it would reset it every time it closed, and someone who sorted by requests
 /// to find the busy machine is reopening this to look at that same machine

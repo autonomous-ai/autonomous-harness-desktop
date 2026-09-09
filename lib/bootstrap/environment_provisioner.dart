@@ -423,7 +423,19 @@ fi
     final run = _run(_isMacOS ? '/bin/zsh' : '/bin/bash', [
       '-l',
       '-c',
-      'export PATH="\$HOME/.local/bin:\$PATH"; $command',
+      // The Homebrew prefixes are named rather than trusted to be on PATH, for
+      // the same reason `GridCli.locate` names them: `-l` is a LOGIN shell but
+      // not an interactive one, so it reads `~/.zprofile` and never `~/.zshrc`
+      // — which is where `brew shellenv` sits on plenty of machines. A Finder
+      // launch then starts from launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`
+      // and this probe reports tmux missing on a computer that has it, then
+      // "installs" it through whichever `brew` it can see. Measured: an Apple
+      // Silicon Mac with both Homebrews picked up Intel `/usr/local/bin/brew`
+      // and built openssl@3 from source under Rosetta, holding the boot open
+      // on "Checking tmux…" for as long as that took. Apple Silicon first, so
+      // a machine with both never installs through the Intel one. The CLI
+      // closed the same gap in `lib/tmuxOnPath.ts`.
+      'export PATH="\$HOME/.local/bin${_isMacOS ? ':/opt/homebrew/bin:/usr/local/bin' : ''}:\$PATH"; $command',
     ], environment: environment);
     if (timeout == null) return run;
     // The child keeps running — Process.run gives us no handle to kill. That is

@@ -66,7 +66,7 @@ class GridSelection {
 
 /// Remembers which grid new agents should run against.
 ///
-/// A persisted [ValueNotifier] singleton, like `themeModeStore`: Settings ▸
+/// A persisted [ValueNotifier] singleton, like `terminalFontStore`: Settings ▸
 /// Grid writes it, and it is read by the New agent dialog, the agent view's
 /// header menu (`widgets/agent_model_menu.dart`), the share pane, and the
 /// status rail — with no common ancestor short of `MaterialApp` between them —
@@ -152,7 +152,7 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
 
   /// The notifier moves FIRST and the write is awaited after, so the sidebar
   /// repaints on the click rather than on the disk — the same trade
-  /// `ThemeModeStore.select` makes.
+  /// `TerminalFontStore.setFamily` makes.
   Future<void> _write(GridSelection next) async {
     if (value == next) return;
     value = next;
@@ -172,6 +172,6 @@ class GridSelectionStore extends ValueNotifier<GridSelection> {
 }
 
 /// The one instance the app reads. Lives here rather than beside `main()` for
-/// the reason `themeModeStore` does — a widget must not have to import the
+/// the reason `terminalFontStore` does — a widget must not have to import the
 /// entrypoint to read it.
 final gridSelectionStore = GridSelectionStore();

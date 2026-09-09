@@ -15,6 +15,7 @@ import '../settings/settings_screen.dart';
 import '../settings/settings_section.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../widgets/new_agent_dialog.dart';
+import '../widgets/task_palette.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
 import '../widgets/status_rail/grid_status_rail.dart';
@@ -182,6 +183,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
               ShortcutAction.changeModel: _changeModel,
+              ShortcutAction.routeTask: () =>
+                  unawaited(showTaskPalette(context, notifier)),
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
               ShortcutAction.pinPane: () {
                 final id = notifier.focusedPaneId;

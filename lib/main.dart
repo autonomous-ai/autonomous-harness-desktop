@@ -12,7 +12,6 @@ import 'screens/login_screen.dart';
 import 'state/app_state.dart';
 import 'shared/theme/app_theme.dart' as grid;
 import 'shared/theme/appearance_prefs_store.dart';
-import 'shared/theme/theme_mode_store.dart';
 import 'terminal/terminal_font_store.dart';
 import 'widgets/layout_palette.dart';
 import 'widgets/environment_setup_screen.dart';
@@ -43,23 +42,19 @@ class DesktopApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuilds MaterialApp on a theme change, which is what re-resolves both
-    // ThemeData objects and, through the scope below, every Grid token with them.
+    // Rebuilds MaterialApp on a font/size change, which is what re-resolves
+    // every Grid token with it.
     //
-    // The type settings need the same treatment for a different reason:
     // `buildAppTheme` bakes `AppControl.*Scaled` into plain numbers at the
     // moment it runs, so a UI size that changed without rebuilding this would
     // repaint nothing at all.
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeModeStore,
-      builder: (context, mode, _) => ValueListenableBuilder<AppearancePrefs>(
-        valueListenable: appearancePrefsStore,
-        builder: (context, prefs, _) => _app(mode, prefs),
-      ),
+    return ValueListenableBuilder<AppearancePrefs>(
+      valueListenable: appearancePrefsStore,
+      builder: (context, prefs, _) => _app(prefs),
     );
   }
 
-  Widget _app(ThemeMode mode, AppearancePrefs prefs) {
+  Widget _app(AppearancePrefs prefs) {
     // ⚠️ ORDER MATTERS, and it is why this is a statement rather than something
     // tucked into the tree below: `buildAppTheme` reads `AppFont.sans` and
     // `AppControl.*Scaled`, so the settings have to be on `AppFont` BEFORE the
@@ -80,23 +75,11 @@ class DesktopApp extends StatelessWidget {
     );
     return MaterialApp(
       title: 'Harness',
-      // Both shells are built from the SAME function against different
-      // palettes, so the two can never drift apart.
-      //
-      // ⚠️ This is the design system's own `buildAppTheme`, and until now it was
-      // NOT what the app wore — these two lines named a second, hand-written
-      // ThemeData that shadowed it, which is why the type ramp, `AppControl`,
-      // `AppMenu` and `trackingFor` rendered nothing at runtime. See the note
-      // where that theme used to live, in `lib/theme/app_theme.dart`.
-      theme: grid.buildAppTheme(brightness: Brightness.light),
-      darkTheme: grid.buildAppTheme(brightness: Brightness.dark),
-      themeMode: mode,
-      // Publishes the brightness Grid's tokens resolve against, and marks every
-      // widget that reads one dirty when it changes.
-      //
-      // It has to sit inside `builder` rather than above MaterialApp: only here
-      // is there a Theme to read. Without it the tokens default to their light
-      // values and the rail would paint white inside a dark window.
+      // The design system's own `buildAppTheme` — see the note where a second,
+      // hand-written `ThemeData` used to shadow it, in `lib/theme/app_theme.dart`.
+      // Harness Desktop is dark-only: one theme, no `darkTheme`/`themeMode` to
+      // resolve between.
+      theme: grid.buildAppTheme(brightness: Brightness.dark),
       // The UI size reaches every `Text` as a text SCALE rather than as hundreds
       // of edited call sites. `withClampedTextScaling` with both bounds equal IS
       // the way to force a factor — MediaQuery has no "set the scale"
@@ -133,6 +116,10 @@ class DesktopApp extends StatelessWidget {
 /// top-down rebuild never reaches one — it would keep the palette it first
 /// mounted with. [grid.BrightnessScope] marks the ones that called
 /// `AppTheme.watch` dirty directly, across that boundary.
+///
+/// Pinned to [Brightness.dark] rather than read from `Theme.of(context)`:
+/// Harness Desktop is dark-only, and there is no other theme for `Theme.of`
+/// to ever resolve to here.
 class _GridTokenScope extends StatelessWidget {
   const _GridTokenScope({required this.child});
 
@@ -140,7 +127,7 @@ class _GridTokenScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    grid.AppTheme.brightness.value = Theme.of(context).brightness;
+    grid.AppTheme.brightness.value = Brightness.dark;
     return grid.BrightnessScope(child: child);
   }
 }
@@ -222,8 +209,19 @@ class _RootShellState extends ConsumerState<RootShell> {
               // and again on success.
               screen = app.signingIn
                   ? LoginScreen(notifier: app)
-                  : const Scaffold(
-                      body: Center(child: CircularProgressIndicator()),
+                  : Scaffold(
+                      body: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            if (app.bootStatusMessage != null) ...[
+                              const SizedBox(height: 16),
+                              Text(app.bootStatusMessage!),
+                            ],
+                          ],
+                        ),
+                      ),
                     );
             case AppStatus.preparingEnvironment:
               screen = EnvironmentSetupScreen(notifier: app);

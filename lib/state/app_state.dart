@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show exit, pid;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,6 +15,7 @@ import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/engine_availability.dart';
 import '../core/models.dart';
+import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
 import '../settings/config_store.dart';
@@ -110,6 +112,10 @@ class MachineState {
   bool terminalCapabilityLoaded = false;
   bool terminalCapabilityAvailable = false;
   String? terminalCapabilityError;
+  // Whether this machine's CLI daemon understands `terminal_paste` (a clipboard paste delivered as
+  // one atomic tmux paste-buffer, not chunked like ordinary keystrokes — see TerminalSession.pasteText).
+  // False for any CLI published before this existed; the panel falls back to the old chunked path.
+  bool terminalPasteRawAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -184,13 +190,17 @@ class AppNotifier extends ChangeNotifier {
   // rare case a push event was dropped. Runs silently: see _syncAgentsIfChanged.
   final Map<String, Timer> _agentSyncTimers = {};
   // Keeps the local `harness` daemon alive for the whole app run — started once after the first
-  // successful bootstrap (see `_ensureCliDaemon`), cancelled on dispose. Cancelling only stops this
+  // successful bootstrap (see `ensureCliDaemonReady`), cancelled on dispose. Cancelling only stops this
   // Dart-side loop; the daemon itself self-daemonizes and must keep running after the app quits.
   Timer? _daemonSupervisionTimer;
   // Update checks do not depend on the daemon or SSO. A signed-out user should
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
   String? _skippedDesktopUpdateVersion;
+  // Set from the store on every `bootstrap()` (see `_prepareEnvironment`), never mutated except
+  // there or on the first successful environment check — a machine that has passed once skips
+  // re-probing CLI/tmux/Grid presence on every later launch.
+  bool _environmentConfirmed = false;
   UpdateInfo? availableUpdate;
   bool isCheckingForUpdate = false;
   bool isInstallingUpdate = false;
@@ -207,6 +217,9 @@ class AppNotifier extends ChangeNotifier {
   // finished (an agent's launch), where the only honest control is to
   // dismiss it.
   bool _lastErrorRetryable = true;
+  // Shown on the pre-navigation `bootstrapping` screen while [_finishBootstrapSignedIn] waits on the
+  // local daemon — null the rest of the time, including once [status] flips to `authenticated`.
+  String? _bootStatusMessage;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
@@ -300,6 +313,7 @@ class AppNotifier extends ChangeNotifier {
 
   String? get lastError => _lastError;
   bool get lastErrorRetryable => _lastErrorRetryable;
+  String? get bootStatusMessage => _bootStatusMessage;
 
   /// Clears the error strip without retrying anything, for a failure retrying
   /// cannot fix (see [_lastErrorRetryable]).
@@ -307,6 +321,7 @@ class AppNotifier extends ChangeNotifier {
     _lastError = null;
     notifyListeners();
   }
+
   String get autonomousEnv => _autonomousEnv;
   bool get hasAvailableUpdate => availableUpdate != null;
   bool get hasForcedUpdate => availableUpdate?.forced ?? false;
@@ -479,6 +494,98 @@ class AppNotifier extends ChangeNotifier {
     if (_dismissedLinkPrompts.add(machineId)) notifyListeners();
   }
 
+  // ── ⌘K: a typed task, and which agent it belongs to ────────────────────────────────────────────
+
+  /// The machine this window is running ON — where the daemon that ANSWERS ⌘K lives.
+  ///
+  /// It is not the scope of the search: the daemon weighs agents on every machine and answers with the
+  /// one each pick belongs to. This is only the socket the question travels on, because the router, the
+  /// registry and the recap mirror it reads are all on this computer.
+  MachineState? get localMachineState {
+    for (final state in machineStates.values) {
+      if (state.isLocalMachine)
+        return state; // the flag is the STATE's, not the machine row's
+    }
+    return null;
+  }
+
+  /// Ask the daemon which agent a typed task belongs to. Sends nothing.
+  ///
+  /// Rides the app's own rpc convention (`ws_conn.request`), so the pending map, the timeout and the
+  /// logging are the ones every other request already uses. Returns null when there is nobody to ask —
+  /// no local machine, or its socket is not up — which the palette says out loud rather than spinning.
+  Future<RouteAnswer?> routeTask(String text) async {
+    final machineId = localMachineState?.machine.machineId;
+    final connection = machineId == null ? null : _pool?[machineId];
+    if (connection == null) return null;
+    try {
+      final reply = await connection.request(
+        'route_task',
+        payload: {'text': text},
+        // Over the daemon's own classification budget — which is 20s on this path — plus room for
+        // gathering the candidates and the round trip. A request that gives up BEFORE the router does
+        // leaves the person with nothing WHILE the answer is on its way, which is the one outcome worse
+        // than waiting; and at exactly 20s each it would be a coin toss which of the two fired first.
+        timeout: const Duration(seconds: 35),
+      );
+      return RouteAnswer.fromJson(reply);
+    } catch (_) {
+      // A timeout or a transport failure is not an error the person can act on — the palette shows the
+      // candidates it has and lets them choose, which is the same thing it does for a weak answer.
+      return null;
+    }
+  }
+
+  /// Commit: deliver the task, then bring the agent onto the grid the way a rail click does.
+  ///
+  /// The daemon delivers it through the SAME door as the web's messages and the dial's — queueing,
+  /// retries and the per-engine slash-command adaptation are not re-implemented for the caller that
+  /// types instead of speaking.
+  /// Commit: deliver the task, then bring the agent onto the grid the way a rail click does.
+  ///
+  /// Returns null when it landed, or a sentence saying why it did not — which the palette shows instead
+  /// of closing. It ASKS rather than tells for a reason measured on the desk: the remote leg carries no
+  /// ack of its own, so a machine that has gone deaf takes the turn and nothing comes back. A confident
+  /// route closes this window silently, so without an answer that is a task that vanished with no mark
+  /// anywhere — the worst outcome this flow can produce.
+  ///
+  /// [agentMachineId] is the agent's OWN machine, which is not this one when the router reached across.
+  Future<String?> sendRoutedTask(
+    String agentId,
+    String agentMachineId,
+    String text,
+  ) async {
+    final localId = localMachineState?.machine.machineId;
+    if (localId == null) return 'No local machine is connected.';
+    final connection = _pool?[localId];
+    if (connection == null) return 'No local machine is connected.';
+    // The task goes to the LOCAL daemon whichever machine the agent is on: it owns the dispatch that
+    // knows the difference (its own registry, or the fleet link to the other computer). Sending it down
+    // the remote machine's own socket would be a second delivery path for the same thing.
+    try {
+      final reply = await connection.request(
+        'route_send',
+        payload: {'agentId': agentId, 'text': text},
+        timeout: const Duration(seconds: 15),
+      );
+      if (reply['ok'] != true) {
+        final machine = (reply['machine'] as String?) ?? '';
+        final reason =
+            (reply['reason'] as String?) ?? 'it could not be delivered';
+        return machine.isEmpty
+            ? 'Not sent — $reason.'
+            : 'Not sent to $machine — $reason.';
+      }
+    } catch (_) {
+      return 'The daemon did not answer. Nothing was sent.';
+    }
+    // …the PANE opens on the agent's machine. Falling back to this computer would open a tile for an
+    // agent it does not have and leave the person looking at an empty terminal.
+    final target = agentMachineId.isNotEmpty ? agentMachineId : localId;
+    await selectAgent(target, agentId);
+    return null;
+  }
+
   MachineState? get activeMachineState {
     final terminal = activeTerminal;
     if (terminal != null) return machineStates[terminal.machineId];
@@ -547,6 +654,7 @@ class AppNotifier extends ChangeNotifier {
         _autonomousEnv = 'prod';
         api = ApiClient(config: config, session: session);
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
+        _environmentConfirmed = _store.environmentConfirmed;
       }
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
@@ -598,6 +706,17 @@ class AppNotifier extends ChangeNotifier {
   /// first-run phase instead.
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
+    if (_environmentConfirmed) {
+      // CLI, tmux and Grid were all found ready on this machine before, and none of the three
+      // uninstall themselves — skip the three subprocess probes (and the screen they'd otherwise
+      // flash onto) on every later launch rather than re-verifying something already proven.
+      environmentReadiness = EnvironmentReadiness(
+        steps: {
+          for (final step in EnvironmentStep.values) step: EnvironmentStepStatus.ready,
+        },
+      );
+      return true;
+    }
     _environmentSetupInFlight = true;
     status = AppStatus.preparingEnvironment;
     environmentReadiness = EnvironmentReadiness.initial();
@@ -620,6 +739,8 @@ class AppNotifier extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+      _environmentConfirmed = true;
+      unawaited(_store?.saveEnvironmentConfirmed());
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -663,7 +784,13 @@ class AppNotifier extends ChangeNotifier {
   /// start on its own, and every call below is a local-CLI-proxied request that needs it), then fetch
   /// the profile and load the machine list over it.
   Future<void> _finishBootstrapSignedIn() async {
-    status = AppStatus.authenticated;
+    // Stays on the pre-navigation `bootstrapping` screen (main.dart) until the daemon is
+    // confirmed reachable — flipping to `authenticated` any earlier is what let the home UI
+    // race `harness start`'s own backend handshake and surface a bogus 30s "Could not load
+    // machines" timeout. A daemon that never comes up still gets a home screen below, with
+    // the failure shown there as before, since that's where the retry affordance lives.
+    _bootStatusMessage = 'Starting local service…';
+    notifyListeners();
     // Before the machines, deliberately: the tiles are intent, they render as
     // "waiting for that machine" on their own, and each attaches as its machine
     // answers. Waiting for the machine list first would leave the window empty
@@ -672,13 +799,20 @@ class AppNotifier extends ChangeNotifier {
     await _restorePaneLayout();
     _ensurePool();
     try {
-      await _ensureCliDaemon();
+      await ensureCliDaemonReady();
     } catch (error) {
+      _bootStatusMessage = null;
+      status = AppStatus.authenticated;
       _lastError = '$error';
       _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
+    _bootStatusMessage = null;
+    // `ensureCliDaemonReady` may have signed the app out instead of succeeding (daemon absent AND
+    // the saved session gone) — that already routed to the login screen, so don't clobber it.
+    if (status == AppStatus.unauthenticated) return;
+    status = AppStatus.authenticated;
     try {
       final me = await api.me();
       if (me != null) {
@@ -738,8 +872,9 @@ class AppNotifier extends ChangeNotifier {
 
   /// The local daemon (`harness start`) must be up before any local REST/WS call can work — unlike
   /// `harness login`, it does not start on its own. Sets [_cliEndpoint], the dial target every
-  /// machine's WsConn now uses.
-  Future<void> _ensureCliDaemon() async {
+  /// machine's WsConn now uses. Public (like [refreshMachines]) so a test subclass can stub it
+  /// without shelling out to a real `harness` binary.
+  Future<void> ensureCliDaemonReady() async {
     final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
     final endpoint = await discovery.ensureRunning();
     if (endpoint == null) {
@@ -1126,7 +1261,20 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<Machine>> _fetchMachines() => api.machines();
+  // The daemon reports `connected` only once its own backend socket is open, but
+  // `/api/machines` is a separate REST leg (fresh token refresh + fetch) that can still stall
+  // briefly right after that — a bounded retry absorbs that transient window without falling
+  // back to the 30s Dio timeout. Never retries an `ApiException` (a real HTTP error response);
+  // only a `DioException` (timeout/connection failure) is worth a second try.
+  // Capped at 2 attempts, not 3: `receiveTimeout` is 30s, so every retried attempt can cost
+  // another 30s on a genuine failure — one retry absorbs the transient window above without
+  // tripling how long a truly broken backend takes to surface its error.
+  Future<List<Machine>> _fetchMachines() => withRetry(
+    api.machines,
+    maxAttempts: 2,
+    initialDelay: const Duration(milliseconds: 500),
+    isRetryable: (error) => error is DioException,
+  );
 
   void _startOfflineRetry(MachineState machine) {
     final machineId = machine.machine.machineId;
@@ -1439,6 +1587,17 @@ class AppNotifier extends ChangeNotifier {
   }
 
   Future<void> _performRetryMachines() async {
+    // Re-verify the daemon first: a retry that skips straight to `refreshMachines()` can hit
+    // the exact same "daemon not connected yet" timeout the button was pressed to escape.
+    try {
+      await ensureCliDaemonReady();
+    } catch (error) {
+      _lastError = '$error';
+      _lastErrorRetryable = true;
+      notifyListeners();
+      return;
+    }
+    if (status == AppStatus.unauthenticated) return;
     try {
       await refreshMachines();
       _lastError = null;
@@ -1787,10 +1946,14 @@ class AppNotifier extends ChangeNotifier {
       machine.terminalCapabilityError = machine.terminalCapabilityAvailable
           ? null
           : 'tmux terminal streaming is unavailable';
+      final features = result['features'];
+      machine.terminalPasteRawAvailable =
+          features is Map && features['pasteRaw'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
       machine.terminalCapabilityError = 'Could not negotiate terminal protocol';
+      machine.terminalPasteRawAvailable = false;
     }
   }
 
@@ -2526,8 +2689,12 @@ class AppNotifier extends ChangeNotifier {
       machineStates[machineId]?.activeAgentId = agentId;
       focusPane(existing.id);
       final terminal = existing.session;
-      if (terminal != null &&
-          terminal.status != TerminalSessionStatus.opening &&
+      if (terminal == null) {
+        // The pane wanted this agent before `_attachSession` could actually attach it (the agent's
+        // terminal wasn't verified yet, the machine was briefly offline, ...). Nothing else retries a
+        // null session on its own — see `_attachPendingPanes` — so a click here has to.
+        await _attachSession(existing);
+      } else if (terminal.status != TerminalSessionStatus.opening &&
           terminal.status != TerminalSessionStatus.controlling &&
           terminal.status != TerminalSessionStatus.resyncing) {
         // A healthy pane is focus-only: opening the same daemon controller a
@@ -2802,9 +2969,7 @@ class AppNotifier extends ChangeNotifier {
       final to = shape[i];
       // Below means below: its top edge is at or past ours, and the two overlap
       // horizontally, so a tile in the next COLUMN is never "down".
-      final vertical = delta > 0
-          ? to.top - from.top
-          : from.top - to.top;
+      final vertical = delta > 0 ? to.top - from.top : from.top - to.top;
       if (vertical <= 0.001) continue;
       final overlap =
           (from.right < to.left + 0.001) || (to.right < from.left + 0.001);
@@ -3163,6 +3328,10 @@ class AppNotifier extends ChangeNotifier {
             final agent = Agent.fromJson(Map<String, dynamic>.from(raw));
             if (agent.terminalAvailable) {
               _upsertAgent(machine, agent);
+              // A pane created before this agent's terminal was verified is still sitting on
+              // "Attaching…" with no session — nothing else re-checks it once agentLoadStatus is
+              // already `loaded`, so this push is the only signal that it can attach now.
+              _attachPendingPanes(machine);
             } else {
               await _removeAgent(machine, agent.id);
             }
@@ -3177,10 +3346,11 @@ class AppNotifier extends ChangeNotifier {
         final raw = payload['agent'];
         if (raw is Map && raw['terminal'] is Map) {
           try {
-            _upsertAgent(
-              machine,
-              Agent.fromJson(Map<String, dynamic>.from(raw)),
-            );
+            final agent = Agent.fromJson(Map<String, dynamic>.from(raw));
+            _upsertAgent(machine, agent);
+            // Same reattach as `agent_synced` above — a pane can be waiting on this exact agent
+            // (e.g. one this window's own New Agent dialog just opened) with no session yet.
+            _attachPendingPanes(machine);
           } catch (_) {
             unawaited(_loadMachineData(machine, force: true));
           }

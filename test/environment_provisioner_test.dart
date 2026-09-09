@@ -54,6 +54,27 @@ void main() {
     expect(installEnvironments.single?.containsKey('HARNESS_NODE_BINARY'), isNot(isTrue));
   });
 
+  test('probes through the Homebrew prefixes, Apple Silicon first', () async {
+    final shellCommands = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      run: (executable, arguments, {environment}) async {
+        if (executable == '/bin/zsh') shellCommands.add(arguments.last);
+        return result(0, stdout: '{"loggedIn":false}\n');
+      },
+    );
+
+    await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(shellCommands, isNotEmpty);
+    // A Finder launch starts from launchd's bare PATH, so the prefixes have to
+    // be named. Intel last: a Mac with both must not install through it.
+    for (final command in shellCommands) {
+      expect(command, contains('/opt/homebrew/bin:/usr/local/bin'));
+    }
+  });
+
   test(
     'fails only when the platform is neither macOS nor Linux',
     () async {

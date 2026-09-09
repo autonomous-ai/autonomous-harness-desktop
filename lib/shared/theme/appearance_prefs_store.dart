@@ -12,11 +12,6 @@ import 'app_theme.dart';
 /// scale is fenced out of it at five seams (see the notes in
 /// `terminal_panel.dart` and `terminal_composer.dart`, and the regression test
 /// in `test/terminal_ui_scale_isolation_test.dart`).
-///
-/// Theme mode is not here either: [themeModeStore] already owns it, and it owns
-/// more than Flutter — it drives `NSApp.appearance` over a MethodChannel so the
-/// native menu bar and title bar follow the choice too. A second source of truth
-/// would light the window one way and the chrome around it the other.
 @immutable
 class AppearancePrefs {
   const AppearancePrefs({this.uiFamily, this.uiSize = uiSizeDefault});
@@ -67,7 +62,7 @@ class AppearancePrefs {
 
 /// The user's appearance choices, remembered across launches.
 ///
-/// Same shape as [ThemeModeStore] and [TerminalFontStore]: a [ValueNotifier]
+/// Same shape as [TerminalFontStore]: a [ValueNotifier]
 /// singleton over [HarnessFileStore], loaded once by `loadPersistedSettings()`
 /// before the first frame. Not a Riverpod provider — `MaterialApp` is built
 /// above every provider scope in this app, and these values have to resolve
@@ -167,8 +162,8 @@ class AppearancePrefsStore extends ValueNotifier<AppearancePrefs> {
 
 /// The one instance the app reads.
 ///
-/// Here rather than beside `main()` for the same reason [themeModeStore] is: the
-/// widgets that change these values would otherwise have to reach up into the
-/// app entrypoint, dragging `runApp` and every screen into anything that renders
-/// them — tests included.
+/// Here rather than beside `main()` for the same reason `terminalFontStore` is:
+/// the widgets that change these values would otherwise have to reach up into
+/// the app entrypoint, dragging `runApp` and every screen into anything that
+/// renders them — tests included.
 final appearancePrefsStore = AppearancePrefsStore();

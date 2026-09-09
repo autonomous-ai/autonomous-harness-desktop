@@ -263,6 +263,20 @@ jobs:
 
       - run: flutter pub get
 
+      # appimagetool packages the Linux bundle into the single-file .AppImage the release publishes
+      # (see RELEASE.md). --appimage-extract-and-run in upload-desktop-linux.sh means the runner
+      # itself never needs FUSE. Pinned to a numbered release (not "continuous") for reproducibility.
+      - name: Download appimagetool
+        env:
+          APPIMAGETOOL_VERSION: '1.9.1'
+          APPIMAGE_ARCH: ${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${APPIMAGE_ARCH}.AppImage"
+          curl -fL "$url" -o "$RUNNER_TEMP/appimagetool"
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -394,8 +408,8 @@ jobs:
           | | |
           |---|---|
           | macOS (universal) | [Harness-macos.dmg](${base}/Harness-macos.dmg) |
-          | Linux x64 | [Harness-linux-x64.tar.gz](${base}/Harness-linux-x64.tar.gz) |
-          | Linux arm64 | [Harness-linux-arm64.tar.gz](${base}/Harness-linux-arm64.tar.gz) |
+          | Linux x64 | [Harness-linux-x64.AppImage](${base}/Harness-linux-x64.AppImage) |
+          | Linux arm64 | [Harness-linux-arm64.AppImage](${base}/Harness-linux-arm64.AppImage) |
 
           Already running Harness? It updates itself — no download needed.
           EOF
