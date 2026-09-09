@@ -65,7 +65,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
         // rule reading as an exclusion: the allowlist keeps working beside it,
         // which is why this grid's roster holds both kinds of row.
         description:
-            'Anyone with an @$domain email can use this grid, or start an AI '
+            'Anyone with an @$domain email can use this provider, or start an AI '
             'node to power it, as well as the people you invite.',
       );
     case kNetworkTypePermissioned:
@@ -73,7 +73,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
       return (
         label: 'Invite only',
         description:
-            'Only the people listed above can use this grid, or start an AI '
+            'Only the people listed above can use this provider, or start an AI '
             'node to power it.',
       );
     case kNetworkTypePermissionedProviders:
@@ -90,7 +90,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
       return (
         label: 'Public',
         description:
-            'Anyone can use this grid, or start an AI node to power it.',
+            'Anyone can use this provider, or start an AI node to power it.',
       );
     default:
       return null;

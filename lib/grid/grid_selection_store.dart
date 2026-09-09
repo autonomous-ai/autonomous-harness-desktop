@@ -6,17 +6,19 @@ import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 import 'grid_surface.dart';
 
-/// What "no grid at all" is called on screen.
+/// What "no provider at all" is called on screen.
 ///
 /// Named after the state itself rather than after its consequence: "Each
 /// engine's own login" made a reader work out whose login was meant, in a
-/// picker whose every other row is a grid. The consequence is still spelled
-/// out — under this row in Settings, and in the pill's tooltip.
+/// picker whose every other row is a provider. The consequence is still spelled
+/// out — in the pill's tooltip, and by `ProviderAllOffBanner` in Settings.
 ///
-/// Stated once because four places print it — the sidebar pill, its menu row,
-/// Settings ▸ Grid's strip and that pane's table — and two of them wording the
-/// same state differently is how a user comes to believe they are two states.
-const String kNoGridTargetLabel = 'No grid';
+/// ⚠️ Settings ▸ Providers no longer prints this: it dropped the row that named
+/// this state, because a state is not a provider and the list is a list of
+/// providers. Every switch being off IS this state there. The sidebar pill
+/// keeps the row — it is a picker, not a roster, and "use nothing" is a real
+/// thing to pick from it.
+const String kNoGridTargetLabel = 'No provider';
 
 /// The grid new agents are launched against, if any.
 ///

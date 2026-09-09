@@ -156,13 +156,13 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('with no grid chosen it says so and asks the relay nothing', (
+  testWidgets('with no provider chosen it says so and asks the relay nothing', (
     tester,
   ) async {
     final api = _Api();
     final controller = await _pump(tester, api: api, withGrid: false);
 
-    expect(find.text('No grid chosen'), findsOneWidget);
+    expect(find.text('No provider chosen'), findsOneWidget);
     expect(api.overviewCalls, 0);
     controller.dispose();
   });

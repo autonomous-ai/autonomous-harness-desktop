@@ -18,7 +18,7 @@ const kNetworkId = 'grid-live';
 
 void main() {
   test('an agent with no grid says so', () {
-    expect(agentModelLabel(null), 'No grid');
+    expect(agentModelLabel(null), 'No provider');
   });
 
   test('a grid with no model left the choice to the grid', () {
@@ -135,7 +135,7 @@ void main() {
         const GridModelsReady(['auto', 'GLM-4.7-Flash']),
       );
 
-      expect(options.map((o) => o.label), ['No grid', 'Auto', 'GLM-4.7-Flash']);
+      expect(options.map((o) => o.label), ['No provider', 'Auto', 'GLM-4.7-Flash']);
       expect(options.last.value, 'GLM-4.7-Flash');
       expect(options.first.value, kNoGridModelOption);
     });
@@ -144,7 +144,7 @@ void main() {
       expect(
         agentModelMenuOptions(const GridModelsReady(['auto']))
             .map((o) => o.label),
-        ['No grid', 'Auto'],
+        ['No provider', 'Auto'],
       );
     });
   });

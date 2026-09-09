@@ -81,11 +81,12 @@ class _GridStatusRailState extends State<GridStatusRail> {
           padding: const EdgeInsets.only(left: 12, right: 10),
           child: Row(
             children: [
-              // Every figure on the left of this strip is a grid's, and the
-              // version mark on the right is not — so a build that hides Grid
-              // keeps the strip for the mark alone. The readout's other state
-              // is the words "No grid chosen", which is a fair thing to say to
-              // someone who can pick one and a riddle for someone who cannot.
+              // Every figure on the left of this strip is a provider's, and the
+              // version mark on the right is not — so a build that hides the
+              // provider surface keeps the strip for the mark alone. The
+              // readout's other state is the words "No provider chosen", which
+              // is a fair thing to say to someone who can pick one and a riddle
+              // for someone who cannot.
               if (kGridSurfaceEnabled)
                 Expanded(
                   child: ListenableBuilder(
@@ -231,7 +232,7 @@ class _ReadoutState extends State<_Readout> {
       return Align(
         alignment: Alignment.centerLeft,
         child: Text(
-          'No grid chosen',
+          'No provider chosen',
           style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
         ),
       );

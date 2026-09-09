@@ -1,5 +1,6 @@
 import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
+import '../grid/provider_enablement_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../shared/theme/theme_mode_store.dart';
 import '../terminal/terminal_font_store.dart';
@@ -21,6 +22,7 @@ Future<void> loadPersistedSettings({
   TerminalFontStore? terminalFont,
   GridSelectionStore? gridSelection,
   GridSessionStore? gridSession,
+  ProviderEnablementStore? providerEnablement,
   AppearancePrefsStore? appearance,
 }) async {
   await (themeMode ?? themeModeStore).load();
@@ -33,6 +35,10 @@ Future<void> loadPersistedSettings({
   // session that arrived a frame later would show the sign-in prompt and then
   // snap away from under whoever was reaching for it.
   await (gridSession ?? gridSessionStore).load();
+  // Before the first frame too: the sidebar's provider pill lists only enabled
+  // providers, so a set that landed a frame later would show the full list and
+  // then drop rows out from under a menu somebody had already opened.
+  await (providerEnablement ?? providerEnablementStore).load();
   // Last but not optional. Every control box in the app is sized from
   // `AppControl.heightScaled`/`paddingScaled`, so a UI size that arrived after
   // the first frame would relayout the whole window one frame in — a worse

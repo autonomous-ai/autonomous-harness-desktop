@@ -101,7 +101,7 @@ class _CreateGridDialogState extends State<_CreateGridDialog> {
         return PopScope(
           canPop: !submitting,
           child: AlertDialog(
-            title: const Text('Create grid'),
+            title: const Text('Create provider'),
             content: SizedBox(
               width: 380,
               child: Column(
@@ -119,7 +119,7 @@ class _CreateGridDialogState extends State<_CreateGridDialog> {
                     onSubmitted: (_) => _submit(selected),
                     style: grid.kFieldTextStyle,
                     decoration: const InputDecoration(
-                      hintText: 'my-team-grid',
+                      hintText: 'my-team-provider',
                       // The counter is furniture for a limit nobody is near: it
                       // sits under the field from the first keystroke to say
                       // "0/64". `maxLength` still enforces it.

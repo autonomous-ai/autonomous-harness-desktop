@@ -184,7 +184,7 @@ void main() {
       expect(rule.label, '@autonomous.ai emails');
       expect(
         rule.description,
-        'Anyone with an @autonomous.ai email can use this grid, or start an '
+        'Anyone with an @autonomous.ai email can use this provider, or start an '
         'AI node to power it, as well as the people you invite.',
       );
     });
@@ -472,7 +472,7 @@ void main() {
       expect(find.text('Invite only'), findsOneWidget);
       expect(
         find.text(
-          'Only the people listed above can use this grid, or start an AI '
+          'Only the people listed above can use this provider, or start an AI '
           'node to power it.',
         ),
         findsOneWidget,

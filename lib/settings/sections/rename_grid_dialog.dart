@@ -108,14 +108,14 @@ class _RenameGridDialogState extends State<_RenameGridDialog> {
         return PopScope(
           canPop: !saving,
           child: AlertDialog(
-            title: const Text('Rename grid'),
+            title: const Text('Rename provider'),
             content: SizedBox(
               width: 380,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const FieldLabel('Grid name'),
+                  const FieldLabel('Provider name'),
                   TextField(
                     key: const Key('rename-grid-name-field'),
                     controller: _name,
@@ -130,7 +130,7 @@ class _RenameGridDialogState extends State<_RenameGridDialog> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Only the name changes. Everyone on this grid keeps their '
+                    'Only the name changes. Everyone on this provider keeps their '
                     'access, and apps you connected keep working.',
                     style: TextStyle(
                       color: grid.AppPalette.textSecondary,

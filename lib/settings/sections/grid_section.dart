@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../analytics/analytics.dart';
-import '../../grid/grid_access.dart';
 import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
+import '../../grid/provider_enablement_store.dart';
 import '../../grid/grid_session.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
@@ -16,22 +16,22 @@ import '../../shared/widgets/section_scaffold.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../widgets/share_grid/share_grid_dialog.dart';
 import 'create_grid_dialog.dart';
-import 'grid_hero.dart';
+import 'provider_split_pane.dart';
 import 'rename_grid_dialog.dart';
-import 'grid_network_table.dart';
 
-/// Settings ▸ Grid: where new agents send their inference, and every grid this
-/// account could send it to instead.
+/// Settings ▸ Providers: which providers this computer will use, and which one
+/// new agents launch against.
 ///
 /// Read straight from the Grid control plane over HTTPS — this screen does not
 /// go through the `harness` CLI, which knows nothing about Grid accounts. See
 /// [GridApiClient].
 ///
-/// The pane is a **picker wearing a table**: the headline at the top says what
-/// is in force and carries that grid's own actions ([GridHero]), the table
-/// under it is the radio group that changes it, and the filter between them
-/// exists because an account on twenty grids should not have to scroll to find
-/// the one it means. Picking here retargets nothing that is already running —
+/// The pane is a **split**: a rail of every provider on the left, and on the
+/// right everything about the one the rail has selected ([ProviderSplitPane]).
+/// The headline card this replaced repeated the chosen provider's name, access
+/// rule and owner — facts the selected row already carried — so the panel now
+/// IS the headline, describing whatever is selected rather than whatever is in
+/// force. Choosing a default here retargets nothing that is already running;
 /// the subtitle is what says so.
 class GridSection extends StatefulWidget {
   const GridSection({
@@ -41,6 +41,7 @@ class GridSection extends StatefulWidget {
     this.session,
     this.harnessEmail,
     this.mutations,
+    this.enablement,
   });
 
   final GridNetworksController controller;
@@ -57,6 +58,10 @@ class GridSection extends StatefulWidget {
   /// Who the app is signed in to Harness as, for the one comparison nothing
   /// else makes — see [_AccountMismatch]. Null before the profile lands.
   final String? harnessEmail;
+
+  /// Which providers this computer will use, injected by tests. The app uses
+  /// the shared singleton, so a switch here reaches the sidebar's pill too.
+  final ProviderEnablementStore? enablement;
 
   /// Creating and deleting, injected by tests. The app builds one per visit to
   /// this pane: unlike [GridNetworksController] it caches nothing worth sharing
@@ -77,6 +82,9 @@ class _GridSectionState extends State<GridSection> {
   bool _ownsMutations = false;
 
   GridSelectionStore get _selection => widget.selection ?? gridSelectionStore;
+
+  ProviderEnablementStore get _enablement =>
+      widget.enablement ?? providerEnablementStore;
 
   @override
   void initState() {
@@ -106,7 +114,11 @@ class _GridSectionState extends State<GridSection> {
     // to the list would leave that row saying "Delete grid" for the whole
     // call — the click would look like it did nothing.
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.controller, _mutations]),
+      listenable: Listenable.merge([
+        widget.controller,
+        _mutations,
+        _enablement,
+      ]),
       builder: (context, _) {
         final state = widget.controller.state;
         final total = state is GridNetworksReady
@@ -119,7 +131,7 @@ class _GridSectionState extends State<GridSection> {
           fontSize: 12.5,
         );
         return SectionScaffold(
-          title: 'Grid',
+          title: 'Providers',
           // The count is part of the load, so while it is unknown the heading
           // wears a bar of the same height rather than nothing: a heading that
           // grows a figure a beat after the table is a heading that moved.
@@ -132,13 +144,14 @@ class _GridSectionState extends State<GridSection> {
                       )
                     : null)
               : Text(
-                  '$total grid${total == 1 ? '' : 's'}',
+                  _countLabel(total, state),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: countStyle,
                 ),
           subtitle:
-              'Every grid this account can reach, and which one new agents '
+              'Every provider this account can reach. Enabled providers are '
+              'available to your agents; the default is the one new agents '
               'launch against. Agents already running stay where they are.',
           child: switch (state) {
             // The headline does not wait on the network — the chosen grid's
@@ -175,90 +188,155 @@ class _GridSectionState extends State<GridSection> {
     return grid.toLowerCase() == harness.toLowerCase() ? null : grid;
   }
 
-  /// The pane's one layout, with or without its answer. [email] and
-  /// [networks] are null while the grids load, and every part that depends
-  /// on them is then drawn at its final size and left blank.
+  /// How many providers there are, and how many of them this computer will
+  /// use — two figures because they answer different questions, and a count
+  /// alone would hide a machine that has switched all but one off.
+  String _countLabel(int total, GridNetworksState state) {
+    final plural = total == 1 ? '' : 's';
+    if (state is! GridNetworksReady) return '$total provider$plural';
+    final enabled = state.me.networks
+        .where((n) => _enablement.isEnabled(n.networkId))
+        .length;
+    return '$total provider$plural · $enabled enabled';
+  }
+
+  /// The pane's one layout, with or without its answer. [user] and [networks]
+  /// are null while the providers load, and every part that depends on them is
+  /// then drawn at its final size and left blank.
   Widget _body(GridUser? user, List<GridNetwork>? networks) {
     final email = user?.email;
     final visible = email == null || networks == null
         ? null
         : _visible(email, networks);
+    // Both stores, because the pane reads both on every frame: which provider
+    // new agents use, and which ones this computer will offer at all. Nested
+    // rather than merged into one listenable so each rebuild names its own
+    // cause — and because they hold different types.
     return ValueListenableBuilder<GridSelection>(
       valueListenable: _selection,
-      builder: (context, chosen, _) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          GridHero(
-            chosen: chosen,
-            network: _chosenNetwork(networks, chosen),
-            owned: _ownsChosen(networks, chosen, email),
-            onShare: _shareTarget(networks, chosen),
-            onRename: _renameTarget(networks, chosen),
-            onDelete: _deleteTarget(networks, chosen),
-            deleting:
-                chosen.networkId != null &&
-                _mutations.isDeleting(chosen.networkId!),
-          ),
-          if (_mismatch(email) case final String grid) ...[
-            const SizedBox(height: 12),
-            _AccountMismatch(
-              gridEmail: grid,
-              harnessEmail: widget.harnessEmail!,
-            ),
-          ],
-          const SizedBox(height: 16),
-          _FilterBar(
-            query: _query,
-            filter: _filter,
-            shown: visible?.length,
-            total: networks?.length,
-            email: email,
-            onQuery: (value) => setState(() => _query = value),
-            onFilter: (value) => setState(() => _filter = value),
-            onReload: () => unawaited(widget.controller.refresh()),
-            onCreate: user == null ? null : () => unawaited(_create(user)),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: visible == null
-                ? GridNetworkTableSkeleton(
-                    key: const Key('grid-table-skeleton'),
-                    noGridSelected: chosen.networkId == null,
-                  )
-                : GridNetworkTable(
-                    networks: visible,
-                    signedInEmail: email!,
-                    selectedId: chosen.networkId,
-                    filtered: visible.length != networks!.length,
-                    onDelete: _confirmDelete,
-                    onRename: _rename,
-                    isDeleting: _mutations.isDeleting,
-                    onUse: (network) {
-                      analytics.gridPicked(
-                        source: 'settings',
-                        networkId: network?.networkId,
-                      );
-                      unawaited(
-                        network == null
-                            ? _selection.clear()
-                            : _selection.selectNetwork(
-                                networkId: network.networkId,
-                                networkName: network.displayName,
-                              ),
-                      );
-                    },
+      builder: (context, chosen, _) =>
+          ValueListenableBuilder<Set<String>>(
+            valueListenable: _enablement,
+            builder: (context, _, _) {
+              final allOff =
+                  networks != null &&
+                  networks.isNotEmpty &&
+                  networks.every((n) => !_enablement.isEnabled(n.networkId));
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_mismatch(email) case final String gridEmail) ...[
+                    _AccountMismatch(
+                      gridEmail: gridEmail,
+                      harnessEmail: widget.harnessEmail!,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // Above the split rather than inside it: the consequence is
+                  // about the pane as a whole, not about any one provider, and
+                  // a reader scanning down meets it before the switches that
+                  // caused it.
+                  if (allOff) ...[
+                    const ProviderAllOffBanner(),
+                    const SizedBox(height: 12),
+                  ],
+                  _FilterBar(
+                    query: _query,
+                    filter: _filter,
+                    shown: visible?.length,
+                    total: networks?.length,
+                    email: email,
+                    onQuery: (value) => setState(() => _query = value),
+                    onFilter: (value) => setState(() => _filter = value),
+                    onReload: () => unawaited(widget.controller.refresh()),
+                    onCreate: user == null
+                        ? null
+                        : () => unawaited(_create(user)),
                   ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: visible == null
+                        ? const ProviderSplitPaneSkeleton(
+                            key: Key('provider-split-skeleton'),
+                          )
+                        : ProviderSplitPane(
+                            networks: visible,
+                            signedInEmail: email!,
+                            defaultId: chosen.networkId,
+                            filtered: visible.length != networks!.length,
+                            isEnabled: (network) =>
+                                _enablement.isEnabled(network.networkId),
+                            onToggleEnabled: _toggleEnabled,
+                            onMakeDefault: _makeDefault,
+                            onShare: _share,
+                            onRename: _rename,
+                            onDelete: _confirmDelete,
+                            isDeleting: _mutations.isDeleting,
+                          ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'A provider is where new agents get their credentials. '
+                    'Each agent picks its own model from its header.',
+                    style: TextStyle(
+                      color: grid.AppPalette.textFaint,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 8),
-          Text(
-            'The grid is where new agents get their credentials. Each agent '
-            'picks its own model from its header.',
-            style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
-          ),
-        ],
+    );
+  }
+
+  /// Point new agents at [network].
+  void _makeDefault(GridNetwork network) {
+    analytics.gridPicked(source: 'settings', networkId: network.networkId);
+    unawaited(
+      _selection.selectNetwork(
+        networkId: network.networkId,
+        networkName: network.displayName,
       ),
     );
   }
+
+  /// Turn a provider on or off for this computer.
+  ///
+  /// Switching the DEFAULT off does not refuse the click — it hands the default
+  /// to the next enabled provider, or clears it when there is none left, which
+  /// is the state [ProviderAllOffBanner] then explains. The alternative was a
+  /// dialog telling the user to go and change something else first, which is a
+  /// screen refusing to do the obvious thing on the user's behalf.
+  void _toggleEnabled(GridNetwork network, bool enabled) {
+    unawaited(_enablement.setEnabled(network.networkId, enabled));
+    if (enabled) return;
+    if (_selection.value.networkId != network.networkId) return;
+
+    final state = widget.controller.state;
+    final all = state is GridNetworksReady
+        ? state.me.networks
+        : const <GridNetwork>[];
+    for (final candidate in all) {
+      if (candidate.networkId == network.networkId) continue;
+      if (!_enablement.isEnabled(candidate.networkId)) continue;
+      _makeDefault(candidate);
+      return;
+    }
+    // Nothing left to hand it to.
+    analytics.gridPicked(source: 'settings', networkId: null);
+    unawaited(_selection.clear());
+  }
+
+  /// Invite people to a provider.
+  void _share(GridNetwork network) => unawaited(
+    showShareGridDialog(
+      context,
+      networkId: network.networkId,
+      gridName: network.displayName,
+      networks: widget.controller,
+    ),
+  );
 
   /// Open the create form, and say what happened afterwards.
   ///
@@ -278,7 +356,7 @@ class _GridSectionState extends State<GridSection> {
     final state = _mutations.createState;
     final warning = state is CreateGridDone ? state.warning : null;
     messenger.showSnackBar(
-      SnackBar(content: Text(warning ?? 'Grid “$name” created.')),
+      SnackBar(content: Text(warning ?? 'Provider “$name” created.')),
     );
   }
 
@@ -311,63 +389,10 @@ class _GridSectionState extends State<GridSection> {
     );
   }
 
-  /// The chosen grid as the fetched list describes it, or null when the list
-  /// has not arrived or no longer holds it (deleted elsewhere, or a remembered
-  /// id from an account this machine has since signed out of).
-  GridNetwork? _chosenNetwork(
-    List<GridNetwork>? networks,
-    GridSelection chosen,
-  ) {
-    final id = chosen.networkId;
-    if (id == null || networks == null) return null;
-    for (final network in networks) {
-      if (network.networkId == id) return network;
-    }
-    return null;
-  }
 
-  bool _ownsChosen(
-    List<GridNetwork>? networks,
-    GridSelection chosen,
-    String? email,
-  ) {
-    final network = _chosenNetwork(networks, chosen);
-    return network != null && gridIsOwnedBy(network, email);
-  }
 
-  /// The headline's actions, bound to the chosen grid — null while there is no
-  /// grid to act on, which leaves the buttons off the headline entirely rather
-  /// than drawing them dead.
-  VoidCallback? _shareTarget(List<GridNetwork>? networks, GridSelection chosen) {
-    final network = _chosenNetwork(networks, chosen);
-    if (network == null) return null;
-    return () => unawaited(
-      showShareGridDialog(
-        context,
-        networkId: network.networkId,
-        gridName: network.displayName,
-        networks: widget.controller,
-      ),
-    );
-  }
 
-  VoidCallback? _renameTarget(
-    List<GridNetwork>? networks,
-    GridSelection chosen,
-  ) {
-    final network = _chosenNetwork(networks, chosen);
-    if (network == null) return null;
-    return () => unawaited(_rename(network));
-  }
 
-  VoidCallback? _deleteTarget(
-    List<GridNetwork>? networks,
-    GridSelection chosen,
-  ) {
-    final network = _chosenNetwork(networks, chosen);
-    if (network == null) return null;
-    return () => unawaited(_confirmDelete(network));
-  }
 
   /// The grids the filter and the query leave standing.
   ///
@@ -394,14 +419,26 @@ class _GridSectionState extends State<GridSection> {
   ].join(' ').toLowerCase();
 }
 
-/// The three questions worth asking of a list of grids.
+/// The three questions worth asking of a list of providers.
 ///
-/// Not a general facet builder: these are the axes that decide whether a grid
-/// is one you can act on — is it mine, and does it route.
+/// Not a general facet builder: these are the axes that decide whether a
+/// provider is one you can act on — is it mine, and does it route.
+///
+/// ⚠️ There was a fourth, `Enabled`, and it was removed because the word was
+/// already on screen meaning something else: the panel's own ENABLED sits
+/// beside the switch that CHANGES the thing, 400px from a chip that only hid
+/// rows. One word, two meanings, one of them a control and one of them a
+/// filter — which is exactly the confusion a person reported. The switch is on
+/// every rail row anyway, so the eye does this filter's work for it, and the
+/// heading's `N enabled` still answers the question it asked.
 enum _GridFilter {
   all('All'),
   owned('You own'),
-  router('Router on');
+  // "Has a router", not "Router on": the second reads as a state this control
+  // puts the provider INTO, which is the same misreading `Enabled` caused —
+  // and the panel a few hundred pixels away really does print `router on` as a
+  // fact about the provider. A filter's label should name what it keeps.
+  router('Has a router');
 
   const _GridFilter(this.label);
 
@@ -466,7 +503,7 @@ class _FilterBar extends StatelessWidget {
                   onChanged: onQuery,
                   style: grid.kFieldTextStyle,
                   decoration: InputDecoration(
-                    hintText: 'Filter grids',
+                    hintText: 'Filter providers',
                     prefixIcon: Icon(
                       LucideIcons.search300,
                       size: grid.kFieldIconSize,
@@ -505,11 +542,11 @@ class _FilterBar extends StatelessWidget {
                       )
                     : Text(
                         // The plain total lives on the heading now. This line
-                        // says whose grids these are, and speaks up only when
+                        // says whose providers these are, and speaks up only when
                         // the filter is hiding some of them.
                         shown == total
                             ? email!
-                            : '$shown of $total grids · $email',
+                            : '$shown of $total providers · $email',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.right,
@@ -524,7 +561,7 @@ class _FilterBar extends StatelessWidget {
                 key: const Key('grid-refresh-button'),
                 icon: LucideIcons.refreshCw300,
                 size: 16,
-                tooltip: 'Reload grids',
+                tooltip: 'Reload providers',
                 onPressed: onReload,
               ),
               const SizedBox(width: 6),
@@ -552,7 +589,7 @@ class _FilterBar extends StatelessWidget {
                   LucideIcons.plus300,
                   size: grid.AppControl.iconSize,
                 ),
-                label: const Text('New grid'),
+                label: const Text('New provider'),
               ),
             ],
           ),
@@ -670,7 +707,7 @@ class _Failed extends StatelessWidget {
                 const SizedBox(width: 9),
                 Flexible(
                   child: Text(
-                    'Could not load your grids',
+                    'Could not load your providers',
                     style: TextStyle(
                       color: grid.AppPalette.textPrimary,
                       fontSize: 12.5,
@@ -846,7 +883,7 @@ class _AccountMismatch extends StatelessWidget {
           const SizedBox(width: 9),
           Expanded(
             child: Text(
-              'These are $gridEmail\'s grids. Harness is signed in as '
+              'These are $gridEmail\'s providers. Harness is signed in as '
               '$harnessEmail. Run `harness grid logout`, then `harness grid '
               'login`, to use the Harness account here.',
               style: TextStyle(

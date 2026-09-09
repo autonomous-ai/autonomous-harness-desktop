@@ -17,7 +17,9 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../analytics/analytics.dart';
+import '../grid/grid_network.dart';
 import '../grid/grid_networks_controller.dart';
+import '../grid/provider_enablement_store.dart';
 import '../grid/grid_selection_store.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_section.dart';
@@ -45,19 +47,29 @@ class GridTargetOption {
 
 /// The picker's rows, from whatever the shared controller has so far.
 ///
-/// "No grid" comes FIRST and unconditionally — it is the only choice that needs no network call,
-/// so it must not be a row that appears once a fetch lands. Pure, so the states a menu is hard to open
-/// in (mid-load, failed, an account on no grids) are covered by a test rather than by hand.
-List<GridTargetOption> gridTargetMenuOptions(GridNetworksState state) => [
+/// "No provider" comes FIRST and unconditionally — it is the only choice that needs no network
+/// call, so it must not be a row that appears once a fetch lands. Pure, so the states a menu is
+/// hard to open in (mid-load, failed, an account on no providers) are covered by a test rather
+/// than by hand.
+///
+/// [isEnabled] is Settings ▸ Providers' switch, and it filters this menu because that is what the
+/// switch MEANS — "do not offer me this one". Defaulted to admitting everything so a caller that
+/// has no store (a test, a pure call) gets the whole list rather than an empty menu. A provider
+/// switched off is dropped rather than dimmed: a disabled row here would be a second, unexplained
+/// place to discover a choice made on another screen.
+List<GridTargetOption> gridTargetMenuOptions(
+  GridNetworksState state, {
+  bool Function(String)? isEnabled,
+}) => [
   const GridTargetOption(label: kNoGridTargetLabel),
   ...switch (state) {
     GridNetworksIdle() || GridNetworksLoading() => const [
-      GridTargetOption(label: 'Loading grids…', enabled: false),
+      GridTargetOption(label: 'Loading providers…', enabled: false),
     ],
     // No Grid sign-in on this computer. Said as a disabled row rather than
     // offered as one: signing in is a real action with a real failure mode, and
     // a menu that opens upward off a pill at the window's edge is the wrong
-    // place to run it. Settings ▸ Grid has the button.
+    // place to run it. Settings ▸ Providers has the button.
     GridNetworksSignedOut() => const [
       GridTargetOption(label: 'Sign in to Grid in Settings', enabled: false),
     ],
@@ -65,31 +77,52 @@ List<GridTargetOption> gridTargetMenuOptions(GridNetworksState state) => [
     GridNetworksFailed(:final message) => [
       GridTargetOption(label: message, enabled: false),
     ],
-    GridNetworksReady(:final me) =>
-      me.networks.isEmpty
-          ? const [
-              GridTargetOption(
-                label: 'This account is on no grids',
-                enabled: false,
-              ),
-            ]
-          : [
-              for (final network in me.networks)
-                GridTargetOption(
-                  label: network.displayName,
-                  networkId: network.networkId,
-                ),
-            ],
+    GridNetworksReady(:final me) => _readyOptions(me.networks, isEnabled),
   },
 ];
 
-/// The rail's grid row: what new agents use, and a menu to change it.
+/// The rows for an account whose providers have landed.
+///
+/// Three outcomes, and they are deliberately worded apart: an account on no providers at all, an
+/// account whose providers are all switched off here, and the list. The middle one used to render
+/// identically to the first, which told somebody who had switched everything off that they were on
+/// no providers — a statement about their account, and untrue.
+List<GridTargetOption> _readyOptions(
+  List<GridNetwork> networks,
+  bool Function(String)? isEnabled,
+) {
+  if (networks.isEmpty) {
+    return const [
+      GridTargetOption(label: 'This account is on no providers', enabled: false),
+    ];
+  }
+  final offered = [
+    for (final network in networks)
+      if (isEnabled == null || isEnabled(network.networkId))
+        GridTargetOption(
+          label: network.displayName,
+          networkId: network.networkId,
+        ),
+  ];
+  if (offered.isEmpty) {
+    return const [
+      GridTargetOption(
+        label: 'Every provider is off — turn one on in Settings',
+        enabled: false,
+      ),
+    ];
+  }
+  return offered;
+}
+
+/// The rail's provider row: what new agents use, and a menu to change it.
 class GridTargetPill extends StatefulWidget {
   const GridTargetPill({
     super.key,
     required this.notifier,
     this.networks,
     this.selection,
+    this.enablement,
   });
 
   final AppNotifier notifier;
@@ -98,6 +131,10 @@ class GridTargetPill extends StatefulWidget {
   /// Settings pane and the New agent dialog change — and see — the same choice.
   final GridNetworksController? networks;
   final GridSelectionStore? selection;
+
+  /// Which providers this computer will offer. Injected by tests; the app uses
+  /// the singleton Settings ▸ Providers writes.
+  final ProviderEnablementStore? enablement;
 
   @override
   State<GridTargetPill> createState() => _GridTargetPillState();
@@ -109,6 +146,9 @@ class _GridTargetPillState extends State<GridTargetPill> {
 
   GridNetworksController get _networks =>
       widget.networks ?? gridNetworksController;
+
+  ProviderEnablementStore get _enablement =>
+      widget.enablement ?? providerEnablementStore;
   GridSelectionStore get _selection => widget.selection ?? gridSelectionStore;
 
   @override
@@ -118,8 +158,10 @@ class _GridTargetPillState extends State<GridTargetPill> {
       valueListenable: _selection,
       builder: (context, chosen, _) => ListenableBuilder(
         // Keeps an ALREADY-OPEN menu's rows current as the controller moves Idle → Loading → Ready,
-        // rather than freezing them at the moment it was opened.
-        listenable: _networks,
+        // rather than freezing them at the moment it was opened. The enablement store is in here
+        // too: a provider switched off in Settings has to leave this menu, and Settings can be open
+        // behind it.
+        listenable: Listenable.merge([_networks, _enablement]),
         builder: (context, _) => MenuAnchor(
           controller: _menu,
           alignmentOffset: const Offset(8, -8),
@@ -153,13 +195,16 @@ class _GridTargetPillState extends State<GridTargetPill> {
 
   List<Widget> _rows(GridSelection chosen) => [
     const AppMenuNote(
-      'New agents only. Agents already running keep the grid they started on.',
+      'New agents only. Agents already running keep the provider they started on.',
       // The same 304 handed to [AppMenu.style] below. A sentence this long has
       // to be told the panel's width or it is clipped rather than wrapped.
       panelWidth: _panelMaxWidth,
     ),
     const AppMenuDivider(),
-    for (final option in gridTargetMenuOptions(_networks.state))
+    for (final option in gridTargetMenuOptions(
+      _networks.state,
+      isEnabled: _enablement.isEnabled,
+    ))
       if (option.enabled)
         AppMenuItem(
           label: option.label,
@@ -184,7 +229,7 @@ class _GridTargetPillState extends State<GridTargetPill> {
     AppMenuItem(
       key: const Key('rail-grid-settings-item'),
       icon: LucideIcons.settings300,
-      label: 'Grid settings…',
+      label: 'Provider settings…',
       onPressed: () {
         _menu.close();
         unawaited(
@@ -235,7 +280,7 @@ class _PillState extends State<_Pill> {
     return Tooltip(
       message: on
           ? 'New agents run on ${widget.chosen.label}'
-          : 'New agents run on each engine’s own account, not on a grid',
+          : 'New agents run on each engine’s own account, not on a provider',
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),

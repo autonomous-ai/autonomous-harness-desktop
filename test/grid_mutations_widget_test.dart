@@ -1,7 +1,9 @@
-// The two surfaces that CHANGE a grid: the create dialog, and the delete inside
-// a row's drawer. What they guard is who may see them at all — a non-owner has
+// The two surfaces that CHANGE a provider: the create dialog, and the delete in
+// the detail panel. What they guard is who may see them at all — a non-owner has
 // no delete, and an account whose email provider is public is not offered the
 // domain rule — so those are what these pin.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -11,6 +13,7 @@ import 'package:harness/grid/grid_mutations_controller.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
+import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/share/grid_cli.dart';
 import 'package:harness/shared/theme/app_theme.dart';
@@ -122,6 +125,14 @@ void main() {
                     storage: _MemoryStore(),
                   ),
                   mutations: mutations,
+                  // Its own, pointed at a temp file: the singleton writes the
+                  // developer's real ~/.harness, and a test run must not.
+                  enablement: ProviderEnablementStore(
+                    file: File(
+                      '${Directory.systemTemp.createTempSync('providers').path}'
+                      '/providers_config.json',
+                    ),
+                  ),
                 ),
               ),
             );
@@ -142,7 +153,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('grid-create-button')));
       await tester.pumpAndSettle();
-      expect(find.text('Create grid'), findsOneWidget);
+      expect(find.text('Create provider'), findsOneWidget);
 
       await tester.enterText(
         find.byKey(const Key('create-grid-name-field')),
@@ -153,8 +164,8 @@ void main() {
 
       expect(api.created.single.name, 'new grid');
       // The dialog closes itself and the pane says what happened.
-      expect(find.text('Create grid'), findsNothing);
-      expect(find.text('Grid “new grid” created.'), findsOneWidget);
+      expect(find.text('Create provider'), findsNothing);
+      expect(find.text('Provider “new grid” created.'), findsOneWidget);
     });
 
     testWidgets('reopening after a success shows a usable form', (
@@ -177,7 +188,7 @@ void main() {
       // Reopening must not slam shut on the state left from last time.
       await tester.tap(find.byKey(const Key('grid-create-button')));
       await tester.pumpAndSettle();
-      expect(find.text('Create grid'), findsOneWidget,
+      expect(find.text('Create provider'), findsOneWidget,
           reason: 'the form stays open on a stale Done state');
 
       await tester.enterText(
@@ -207,9 +218,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.created, isEmpty);
-      expect(find.textContaining('already have a grid'), findsOneWidget);
+      expect(find.textContaining('already have a provider'), findsOneWidget);
       // The form stays open, with the name still in it to correct.
-      expect(find.text('Create grid'), findsOneWidget);
+      expect(find.text('Create provider'), findsOneWidget);
     });
 
     testWidgets('the domain rule is offered only when the account may use it', (
@@ -245,17 +256,21 @@ void main() {
       final api = _Api();
       await pump(tester, api);
 
-      // The owned grid is the first row; its drawer is where the action lives.
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      // The owned provider is the first row; selecting it puts its actions in
+      // the detail panel beside the rail. Keyed rather than found by text:
+      // the panel prints the same name, so the text is not unique.
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('Delete grid'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
 
-      await tester.tap(find.text('Delete grid'));
+      await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
       // The confirm names what is lost rather than asking "are you sure?".
       expect(find.textContaining('removes everyone on it'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('grid-delete-confirm')));
+      await tester.tap(find.byKey(const Key('provider-delete-confirm')));
       await tester.pumpAndSettle();
       expect(api.deleted, ['grid-aaf6a46ced4f42f9']);
       expect(find.text('Deleted "hp-1-1".'), findsOneWidget);
@@ -265,9 +280,11 @@ void main() {
       final api = _Api();
       await pump(tester, api);
 
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete grid'));
+      await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -280,9 +297,11 @@ void main() {
     testWidgets('a grid somebody else owns offers no delete', (tester) async {
       await pump(tester, _Api());
 
-      await tester.tap(find.byTooltip('Details for Water Grid'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-e3b210eacc5b4cdf')),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('Delete grid'), findsNothing);
+      expect(find.text('Delete'), findsNothing);
     });
   });
 
@@ -294,7 +313,9 @@ void main() {
       final api = _Api();
       await pump(tester, api);
 
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rename'));
       await tester.pumpAndSettle();
@@ -313,7 +334,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.renamed.single.name, 'hp-2');
-      expect(find.text('Rename grid'), findsNothing);
+      expect(find.text('Rename provider'), findsNothing);
       expect(find.text('Renamed to "hp-2".'), findsOneWidget);
     });
 
@@ -322,7 +343,9 @@ void main() {
       final api = _Api();
       await pump(tester, api);
 
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rename'));
       await tester.pumpAndSettle();
@@ -330,7 +353,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.renamed, isEmpty);
-      expect(find.text('Rename grid'), findsNothing);
+      expect(find.text('Rename provider'), findsNothing);
       // Nothing happened, so nothing is announced.
       expect(find.textContaining('Renamed to'), findsNothing);
     });
@@ -341,7 +364,9 @@ void main() {
       final api = _Api();
       await pump(tester, api);
 
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rename'));
       await tester.pumpAndSettle();
@@ -353,14 +378,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.renamed, isEmpty);
-      expect(find.textContaining('already have a grid'), findsOneWidget);
-      expect(find.text('Rename grid'), findsOneWidget);
+      expect(find.textContaining('already have a provider'), findsOneWidget);
+      expect(find.text('Rename provider'), findsOneWidget);
     });
 
     testWidgets('a grid somebody else owns offers no rename', (tester) async {
       await pump(tester, _Api());
 
-      await tester.tap(find.byTooltip('Details for Water Grid'));
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-e3b210eacc5b4cdf')),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Rename'), findsNothing);
     });

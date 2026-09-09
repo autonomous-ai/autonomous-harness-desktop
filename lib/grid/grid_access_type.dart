@@ -8,19 +8,19 @@ enum GridAccessType {
   restricted(
     'permissioned-public',
     'Invite only',
-    'Only people you invite can use this grid, or start an AI node to '
+    'Only people you invite can use this provider, or start an AI node to '
         'power it.',
   ),
   domain(
     'domain-restricted',
     'My domain',
-    'Anyone with an email on your domain can use this grid, or start an AI '
+    'Anyone with an email on your domain can use this provider, or start an AI '
         'node to power it, as well as the people you invite.',
   ),
   anyone(
     'permissionless',
     'Public',
-    'Anyone can use this grid, or start an AI node to power it.',
+    'Anyone can use this provider, or start an AI node to power it.',
   );
 
   const GridAccessType(this.wire, this.label, this.description);
@@ -78,6 +78,6 @@ String accessDescriptionFor(GridAccessType type, {String? domain}) {
   if (type != GridAccessType.domain) return type.description;
   final named = (domain ?? '').trim();
   if (named.isEmpty) return type.description;
-  return 'Anyone with an @$named email can use this grid, or start an AI '
+  return 'Anyone with an @$named email can use this provider, or start an AI '
       'node to power it, as well as the people you invite.';
 }

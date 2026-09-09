@@ -55,6 +55,38 @@ void main() {
       }
     });
 
+    // The switch in Settings ▸ Providers MEANS "do not offer me this one", and
+    // this menu is what it acts on. Dropped rather than dimmed: a disabled row
+    // here would be a second, unexplained place to discover a choice made on
+    // another screen.
+    test('a provider switched off is not offered', () {
+      final options = gridTargetMenuOptions(
+        _ready(),
+        isEnabled: (id) => id != 'grid-e3b210eacc5b4cdf',
+      );
+      expect(options.map((o) => o.label), [kNoGridTargetLabel, 'hp-1-1']);
+    });
+
+    // "Every provider is off" and "this account is on no providers" are
+    // different facts, and one of them is a statement about the account that
+    // would be untrue.
+    test('every provider off says so, apart from having none at all', () {
+      final allOff = gridTargetMenuOptions(_ready(), isEnabled: (_) => false);
+      expect(allOff.length, 2);
+      expect(allOff.last.label, contains('Every provider is off'));
+      expect(allOff.last.enabled, isFalse);
+
+      final none = gridTargetMenuOptions(
+        GridNetworksReady(
+          GridMe(
+            user: GridMe.fromJson(kGridMePayload).user,
+            networks: const [],
+          ),
+        ),
+      );
+      expect(none.last.label, 'This account is on no providers');
+    });
+
     test('every grid on the account is a pick', () {
       final options = gridTargetMenuOptions(_ready());
       expect(options.map((o) => o.label), [
@@ -71,13 +103,13 @@ void main() {
       'waiting, failing and having none each say so, and none is a pick',
       () {
         for (final (state, text) in [
-          (const GridNetworksLoading(), 'Loading grids…'),
+          (const GridNetworksLoading(), 'Loading providers…'),
           (const GridNetworksFailed('token expired'), 'token expired'),
           (
             GridNetworksReady(
               GridMe.fromJson(const {'user': {}, 'networks': []}),
             ),
-            'This account is on no grids',
+            'This account is on no providers',
           ),
         ]) {
           final rest = gridTargetMenuOptions(state).skip(1).toList();

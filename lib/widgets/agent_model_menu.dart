@@ -36,7 +36,7 @@ import '../state/app_state.dart';
 
 /// The three states an agent can be in, as the header prints them.
 String agentModelLabel(AgentGrid? grid) {
-  if (grid == null) return 'No grid';
+  if (grid == null) return 'No provider';
   return grid.model ?? 'Auto';
 }
 
@@ -84,7 +84,7 @@ class AgentModelOption {
 /// gained an entry.
 List<AgentModelOption> agentModelMenuOptions(GridModelsState state) {
   final options = <AgentModelOption>[
-    const AgentModelOption(label: 'No grid', value: kNoGridModelOption),
+    const AgentModelOption(label: 'No provider', value: kNoGridModelOption),
     const AgentModelOption(label: 'Auto', value: null),
   ];
   switch (state) {

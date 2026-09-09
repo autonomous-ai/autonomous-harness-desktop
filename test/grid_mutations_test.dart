@@ -112,7 +112,7 @@ void main() {
     });
 
     test('refuses an empty name', () {
-      expect(gridNameError('   '), 'Enter a name for your grid.');
+      expect(gridNameError('   '), 'Enter a name for your provider.');
     });
 
     test('refuses one past the length the control plane accepts', () {
@@ -130,7 +130,7 @@ void main() {
     test('refuses a duplicate, ignoring case and surrounding space', () {
       expect(
         gridNameError('Water Grid', takenNames: const ['  water grid ']),
-        'You already have a grid called "Water Grid".',
+        'You already have a provider called "Water Grid".',
       );
       expect(gridNameError('other', takenNames: const ['water grid']), isNull);
     });
@@ -480,7 +480,7 @@ void main() {
         name: 'Water Grid',
       );
 
-      expect(error, contains('already have a grid'));
+      expect(error, contains('already have a provider'));
       expect(api.renamed, isEmpty);
       expect(cli.ran, isEmpty);
       expect(controller.renameState, isA<RenameGridFailed>());

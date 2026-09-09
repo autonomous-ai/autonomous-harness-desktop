@@ -195,14 +195,32 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   real credential in the repo, and every build made from that branch read one person's grids.
   Response fields were read off the live API, not the OpenAPI spec, whose `/v1/grid/me` response
   schema is empty.
-- **Picking a grid retargets NEW agents only.** `gridSelectionStore` (`lib/grid/`, persisted like
-  `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid, and only the grid —
-  **two** controls write it and they are the same store: the sidebar's grid pill
-  (`widgets/grid_target_pill.dart`, above the account footer — one menu, where the answer is already
-  on screen) and Settings ▸ Grid, which keeps the table because that is where a grid is *compared*
-  rather than merely picked. Both list `gridNetworksController`, the shared singleton, so neither
-  holds a half-stale copy. The label for "no grid" is `kNoGridTargetLabel` beside the store — four
-  places print it. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
+- **The surface is called PROVIDERS, and a "grid" is what the code still calls one.** Settings ▸
+  Providers, `New provider`, `Filter providers` — the rename is copy and rail labels only; every
+  type, store, controller and API path is still `Grid*`/`grid_*`, because the control plane's
+  vocabulary is `grid` and a half-renamed data layer is worse than an honestly split one. **"Grid"
+  survives in the copy wherever it names the PRODUCT** — the sign-in card, `harness grid login`,
+  "Join one from the Grid app" — since that is a real, separate account a person signs into.
+- **Picking a provider retargets NEW agents only, and ENABLED is a second, separate question.**
+  `gridSelectionStore` (`lib/grid/`, persisted like `themeModeStore`, loaded in
+  `loadPersistedSettings`) holds the DEFAULT — the one provider new agents launch against — and
+  `providerEnablementStore` (`grid/provider_enablement_store.dart`) holds which providers this
+  computer will offer at all, of which many can be on. They were one radio before, which made "stop
+  offering me this provider" impossible to say without also moving every new agent. **Turning the
+  default OFF hands the default to the next enabled provider** rather than refusing the click, and
+  clears it when there is none left — `ProviderAllOffBanner` is what then says so, because the
+  consequence lands on agents launched later and nothing on screen would otherwise look wrong.
+  **Enablement is a CLIENT-side filter and calls no API**: the grid keeps running, this account stays
+  a member, and only the pickers skip it. Its file is its OWN — `~/.harness/desktop-app/
+  providers_config.json`, not `state.json` — because it is a *set* whose membership is the point, and
+  it stores only the **disabled** ids, so a provider it has never heard of is enabled and a fresh
+  install needs no file. Both stores are read by the sidebar's provider pill
+  (`widgets/grid_target_pill.dart` — `gridTargetMenuOptions` takes `isEnabled` and DROPS a
+  switched-off provider rather than dimming it) and by Settings ▸ Providers. Both list
+  `gridNetworksController`, the shared singleton, so neither holds a half-stale copy. The label for
+  "no provider" is `kNoGridTargetLabel` beside the selection store — **the pill still prints it, and
+  Settings no longer does**: a picker may offer "use nothing", but a roster of providers must not
+  carry a row that is not one. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
   `grid/grid_surface.dart` — `kDebugMode` or `--dart-define=HARNESS_GRID_SURFACE=true`): it is a
   feature still being built, so its own flag rather than `kDebugSurfaceEnabled`, which is developer
   furniture and must be switchable apart from it. Four places read it — the two Settings rows
@@ -389,6 +407,18 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   in memory and never written to disk — a stream that measures the app must not become a second
   thing the app writes on every click — which is also why recording is right even for a user who
   opted out: their choice is about what we *send*, and this sends nothing.
+- **Settings ▸ Providers is a SPLIT, not a table** (`settings/sections/provider_split_pane.dart`,
+  framed by `grid_section.dart`): a rail of every provider on the left, and on the right everything
+  about whichever one the rail has selected. Selecting a row READS a provider; `Make default` is
+  what changes where agents launch — separated because the table's row-as-radio made looking at a
+  provider indistinguishable from moving every new agent onto it. The panel prints what the old
+  per-row drawer hid (id, signaling, owner, the router's models **by name**, created) with one
+  deliberate omission: **`Provider type` is gone**, since it is the control plane's wire spelling
+  (`permissioned-public`) of the rule "Who can join" states two rows above in words. Under 820px the
+  two halves stack. ⚠️ **`GridHero` and `GridNetworkTable` are the pane this replaced and nothing
+  builds them any more** — kept, not deleted, so the design can come back without being rewritten
+  from the log; `grid_hero_test.dart` builds `GridHero` directly, which is the only way left to
+  reach it, and is what stops it rotting silently.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `settingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
