@@ -45,6 +45,39 @@ void main() {
     expect(utf8.decode(decoded!.bytes), 'xin chào\r');
   });
 
+  test('a paste carries far past the ordinary local frame ceiling', () {
+    // Comfortably over the 512 KiB ceiling every other kind still has — this is the exact size
+    // class that used to make a real paste fail to even reach the daemon locally.
+    final bytes = Uint8List.fromList(
+      List<int>.filled(1 * 1024 * 1024, 0x79), // 'y'
+    );
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.paste,
+      streamId: streamId,
+      seq: 0,
+      bytes: bytes,
+      compressed: false,
+    );
+    final encoded = encodeTerminalLocal(frame);
+    expect(encoded, isNotNull);
+    final decoded = decodeTerminalLocal(encoded!);
+    expect(decoded?.kind, TerminalBinaryKind.paste);
+    expect(decoded?.bytes, bytes);
+
+    expect(
+      encodeTerminalLocal(
+        TerminalBinaryFrame(
+          kind: TerminalBinaryKind.output,
+          streamId: streamId,
+          seq: 0,
+          bytes: bytes,
+          compressed: false,
+        ),
+      ),
+      isNull,
+    );
+  });
+
   test('local HTRL framing rejects truncation and reserved bytes', () {
     final encoded = encodeTerminalLocal(
       TerminalBinaryFrame(

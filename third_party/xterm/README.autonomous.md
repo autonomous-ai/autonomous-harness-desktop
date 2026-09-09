@@ -55,3 +55,30 @@ it if one is dropped.
    the same way `_consumeOsc` does. Regression: the two string-sequence tests in
    `test/terminal_session_test.dart`.
 
+6. **The selection/highlight rectangle is painted at the render box's own paint
+   offset, not at (0,0)** (`lib/src/ui/render.dart`). `_paintHighlights`/
+   `_paintSelection`/`_paintSegment` never received the `offset` `paint()` is
+   handed — unlike the line-glyph and cursor paints right above them, which
+   both add it — so whenever this box has a non-zero paint offset (the pane's
+   own padding, in this app) the highlighted rectangle was drawn shifted away
+   from the glyphs it was supposed to cover, leaving trailing selected
+   characters rendered outside the box instead of inside it. No regression
+   test (would need a golden/paint-offset test harness this repo doesn't
+   have yet) — verify visually: drag-select text ending near the right edge
+   of a padded pane and confirm the highlight covers every selected glyph.
+
+7. **`BufferLine.getText` renders a blank cell as a literal space instead of
+   dropping it** (`lib/src/core/buffer/line.dart`). A cell whose stored
+   codePoint is 0 — never written, or erased — was skipped outright rather
+   than emitting anything, so a gap laid out with cursor-forward (CSI `C`)
+   instead of literal space bytes (the normal way TUI output from Claude Code,
+   Codex, etc. positions text and indentation) copied as nothing: two words
+   glued together with no separator, leading indentation gone. Only the
+   second half of a wide character also stores codePoint 0 and must still be
+   skipped (checked via the preceding cell's width being 2), and only
+   *trailing* blank cells stay trimmed — a wholly blank line still copies as
+   empty, not as columns of padding. Regression: `test/terminal_session_test.dart`
+   (`'copied text keeps cursor-positioned gaps as spaces...'` and the
+   erase-left test, which now expects a leading space where the erased cell
+   is).
+

@@ -10,7 +10,11 @@ import 'package:xterm/xterm.dart';
 /// it deliberately emits.
 const darkTerminalTheme = TerminalTheme(
   cursor: Color(0xffaeafad),
-  selection: Color(0xffaeafad),
+  // Translucent, not opaque: this is painted over the glyphs after they're drawn (see
+  // render.dart's _paint), so an opaque fill here erased the selected text instead of
+  // highlighting it, unlike every native terminal's selection. ~40% of the theme's own
+  // brightBlue below, matching the tinted-overlay look those terminals use.
+  selection: Color(0x663B8EEA),
   foreground: Color(0xffffffff),
   background: Color(0xff181818),
   black: Color(0xff000000),

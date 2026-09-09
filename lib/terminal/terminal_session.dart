@@ -603,19 +603,34 @@ class TerminalSession extends ChangeNotifier {
   /// A big paste run through that pipeline gets sliced into ≤8 KiB binary frames client-side and then
   /// into 2 KiB `send-keys -H` bursts on the daemon — each burst arrives far enough apart that the
   /// engine's own paste-detector (readline/Ink) can register it as a SEPARATE paste, which is why a
-  /// large paste read as dozens of `[Pasted text #N]` markers instead of one. `terminal_paste` routes
-  /// through the daemon's `tmux paste-buffer` instead, the same single-shot mechanism composer
-  /// messages already use — see `pasteRawIntoTmux` in the harness CLI.
+  /// large paste read as dozens of `[Pasted text #N]` markers instead of one. A [TerminalBinaryKind.paste]
+  /// frame routes through the daemon's `tmux paste-buffer` instead, the same single-shot mechanism
+  /// composer messages already use — see `pasteRawIntoTmux` in the harness CLI.
+  ///
+  /// Binary, not JSON: unlike a JSON frame type, a new binary `kind` needs no entry in the E2EE
+  /// allowlist (`ENCRYPTED_DOWN_TYPES`) three OTHER codebases also pin a hash of — the AEAD wrapping
+  /// that already covers `input`/`output` covers this too, with nothing extra to keep in sync. That is
+  /// what lets this work over a relayed machine, not just a local one.
   ///
   /// The caller must check [MachineState.terminalPasteRawAvailable] first: an older CLI does not know
-  /// this frame type at all, so sending it there would silently go nowhere.
+  /// this binary kind at all, so sending it there would silently go nowhere.
   Future<bool> pasteText(String text) async {
     if (!acceptsInput) return false;
+    // Forwarded verbatim, including a stray 0x03 — same as _onTerminalOutput/sendComposerText.
     if (text.isEmpty) return false;
-    final sent = await send('terminal_paste', {
-      'streamId': streamId,
-      'text': text,
-    });
+    final currentStreamId = streamId;
+    if (currentStreamId == null) return false;
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.paste,
+      streamId: currentStreamId,
+      // Unused server-side (a paste is one self-contained unit, not part of the ordered keystroke
+      // stream `input`'s seq guards) — kept at 0 rather than threading a second counter for a field
+      // nothing reads.
+      seq: 0,
+      bytes: Uint8List.fromList(utf8.encode(text)),
+      compressed: false,
+    );
+    final sent = await sendBinary(frame);
     if (!sent) transportLost('Terminal paste was not sent');
     return sent;
   }

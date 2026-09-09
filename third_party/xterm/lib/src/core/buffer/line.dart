@@ -331,11 +331,36 @@ class BufferLine with IndexedItem {
       to = _length;
     }
 
+    // The second half of a wide character stores codePoint 0 by design (see writeChar in
+    // buffer.dart, which recurses with codePoint 0 to fill the cell after a width-2 write) — it is
+    // not blank, it is half of the character written into the cell before it.
+    bool isWideContinuation(int i) => i > 0 && getWidth(i - 1) == 2;
+
+    // Trailing blank cells — never written, or erased (both store codePoint 0) — must not become
+    // trailing spaces, the same way a blank line must not copy as a run of padding. Only the gap
+    // *before* the last real content on the line, below, becomes literal spaces.
+    var end = to;
+    while (end > from &&
+        getCodePoint(end - 1) == 0 &&
+        !isWideContinuation(end - 1)) {
+      end--;
+    }
+
     final builder = StringBuffer();
-    for (var i = from; i < to; i++) {
+    for (var i = from; i < end; i++) {
       final codePoint = getCodePoint(i);
+      if (codePoint == 0) {
+        if (!isWideContinuation(i)) {
+          // A gap left by cursor-forward/erase rather than a literal space byte — TUI output
+          // (Claude Code, Codex, …) positions the cursor instead of printing spaces for
+          // layout/indentation, so treating this as "nothing" glued adjacent words together and
+          // ate leading indentation when the pane was copied.
+          builder.writeCharCode(0x20);
+        }
+        continue;
+      }
       final width = getWidth(i);
-      if (codePoint != 0 && i + width <= to) {
+      if (i + width <= to) {
         builder.writeCharCode(codePoint);
       }
     }
