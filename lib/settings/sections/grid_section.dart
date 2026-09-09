@@ -4,17 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../analytics/analytics.dart';
+import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
 import '../../grid/provider_enablement_store.dart';
 import '../../grid/grid_session.dart';
+import '../../share/share_target_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/section_scaffold.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../widgets/share_grid/share_grid_dialog.dart';
+import '../settings_section.dart';
 import 'create_grid_dialog.dart';
 import 'provider_split_pane.dart';
 import 'rename_grid_dialog.dart';
@@ -42,6 +45,9 @@ class GridSection extends StatefulWidget {
     this.harnessEmail,
     this.mutations,
     this.enablement,
+    this.shareTarget,
+    this.models,
+    this.onShowSection,
   });
 
   final GridNetworksController controller;
@@ -68,6 +74,24 @@ class GridSection extends StatefulWidget {
   /// — it holds only what is in flight right now.
   final GridMutationsController? mutations;
 
+  /// Which grid this computer serves, injected by tests. `Add model` pins it,
+  /// so the Share Intelligence pane opens on the provider that was asked about
+  /// rather than on whatever it was showing last.
+  final ShareTargetStore? shareTarget;
+
+  /// The models each provider serves, injected by tests. The app uses the
+  /// singleton the model picker fills.
+  final GridModelsController? models;
+
+  /// Take the reader to another Settings pane.
+  ///
+  /// Only [SettingsScreen] can do this — the rail and the pane are siblings —
+  /// so it is passed down rather than reached for. Null in a test that is not
+  /// asserting about navigation, which leaves `Add model` off the panel
+  /// entirely: a button that pins a setting and then goes nowhere would be a
+  /// worse lie than no button.
+  final ValueChanged<SettingsSection>? onShowSection;
+
   @override
   State<GridSection> createState() => _GridSectionState();
 }
@@ -85,6 +109,26 @@ class _GridSectionState extends State<GridSection> {
 
   ProviderEnablementStore get _enablement =>
       widget.enablement ?? providerEnablementStore;
+
+  ShareTargetStore get _shareTarget => widget.shareTarget ?? shareTargetStore;
+
+  GridModelsController get _models => widget.models ?? gridModelsController;
+
+  /// Everything this pane shows, asked again.
+  ///
+  /// Both halves, not just the roster: the models each provider serves are on
+  /// screen here too, and a Refresh that left them alone would answer half the
+  /// question it appears to answer — most obviously right after somebody put a
+  /// node on a grid, which is the moment they reach for it.
+  void _reload() {
+    unawaited(widget.controller.refresh());
+    final state = widget.controller.state;
+    if (state is! GridNetworksReady) return;
+    for (final network in state.me.networks) {
+      if (network.networkId.isEmpty) continue;
+      unawaited(_models.refresh(network.networkId, keepPrevious: true));
+    }
+  }
 
   @override
   void initState() {
@@ -247,7 +291,7 @@ class _GridSectionState extends State<GridSection> {
                 email: email,
                 onQuery: (value) => setState(() => _query = value),
                 onFilter: (value) => setState(() => _filter = value),
-                onReload: () => unawaited(widget.controller.refresh()),
+                onReload: _reload,
                 onCreate: user == null ? null : () => unawaited(_create(user)),
               ),
               const SizedBox(height: 10),
@@ -268,6 +312,10 @@ class _GridSectionState extends State<GridSection> {
                         onShare: _share,
                         onRename: _rename,
                         onDelete: _confirmDelete,
+                        onAddModel: widget.onShowSection == null
+                            ? null
+                            : _addModel,
+                        models: widget.models,
                         isDeleting: _mutations.isDeleting,
                       ),
               ),
@@ -331,6 +379,32 @@ class _GridSectionState extends State<GridSection> {
     // Nothing left to hand it to.
     analytics.gridPicked(source: 'settings', networkId: null);
     unawaited(_selection.clear());
+  }
+
+  /// Put a model on [network] — which happens on the OTHER pane.
+  ///
+  /// Serving a model is the Grid CLI's job and Share Intelligence is the only
+  /// screen that drives it, so this button pins that pane's grid to the
+  /// provider the reader was looking at and takes them there. Pinning first,
+  /// then navigating: the pane resolves its target as it mounts, so the other
+  /// order would open it on the previous grid and then move it under the
+  /// reader.
+  ///
+  /// ⚠️ The pin is a real setting, not a hint — it decides which grid this
+  /// computer serves, and it does NOT expire when the reader wanders off. That
+  /// is the same store the picker on that page writes, so this is the picker's
+  /// action performed from here. **It bypasses that picker's lock**: an engine
+  /// already serving another grid keeps running, on a grid the page no longer
+  /// names. Share Intelligence has no Stop for a grid it is not showing, so a
+  /// reader in that position has to pin the old grid back to reach it.
+  void _addModel(GridNetwork network) {
+    unawaited(
+      _shareTarget.pin(
+        networkId: network.networkId,
+        networkName: network.displayName,
+      ),
+    );
+    widget.onShowSection?.call(SettingsSection.shareIntelligence);
   }
 
   /// Invite people to a provider.
@@ -433,12 +507,12 @@ class _GridSectionState extends State<GridSection> {
 /// heading's `N enabled` still answers the question it asked.
 enum _GridFilter {
   all('All'),
-  owned('You own'),
-  // "Has a router", not "Router on": the second reads as a state this control
-  // puts the provider INTO, which is the same misreading `Enabled` caused —
-  // and the panel a few hundred pixels away really does print `router on` as a
-  // fact about the provider. A filter's label should name what it keeps.
-  router('Has a router');
+  owned('You own');
+
+  // ⚠️ `Has a router` was the third of these and went with the panel's Router
+  // row. A facet has to filter on something the reader can SEE — otherwise the
+  // list silently loses providers for a reason nothing on the page states, and
+  // the only way back is to notice which chip is lit.
 
   const _GridFilter(this.label);
 
@@ -447,7 +521,6 @@ enum _GridFilter {
   bool admits(GridNetwork network, String email) => switch (this) {
     _GridFilter.all => true,
     _GridFilter.owned => network.isOwnedBy(email),
-    _GridFilter.router => network.routerEnabled,
   };
 }
 

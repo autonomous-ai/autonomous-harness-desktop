@@ -81,8 +81,19 @@ class GridModelsController extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh(String networkId) async {
-    _set(networkId, const GridModelsLoading());
+  /// Asks [networkId] again, whatever is already known about it.
+  ///
+  /// [keepPrevious] holds the list that is on screen while the new one is
+  /// fetched, instead of blanking it to a skeleton. That is what a *refresh*
+  /// means — the models shown are still the ones the relay last said it had,
+  /// and a pane that emptied itself every time somebody came back to it would
+  /// flicker for a second on every visit to say nothing new. The first load
+  /// passes it false: there, nothing is on screen and a skeleton is the honest
+  /// answer.
+  Future<void> refresh(String networkId, {bool keepPrevious = false}) async {
+    if (!keepPrevious || _states[networkId] is! GridModelsReady) {
+      _set(networkId, const GridModelsLoading());
+    }
     try {
       final credentials = await _client.credentials(networkId);
       final models = await _client.models(

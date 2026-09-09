@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../grid/grid_access.dart';
+import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/skeleton.dart';
@@ -46,6 +49,8 @@ class ProviderSplitPane extends StatefulWidget {
     this.onDelete,
     this.onRename,
     this.onShare,
+    this.onAddModel,
+    this.models,
     this.isDeleting,
     this.filtered = false,
   });
@@ -82,6 +87,19 @@ class ProviderSplitPane extends StatefulWidget {
   /// Invite people to a provider. Null leaves the button off.
   final ValueChanged<GridNetwork>? onShare;
 
+  /// Put a model ON this provider — which this pane cannot do, because serving
+  /// a model is the Grid CLI's job and Share Intelligence is where that is
+  /// driven. The button is a door, not an action: the caller pins the share
+  /// target to this provider and opens that pane, so the reader lands on the
+  /// page they wanted with the grid already chosen instead of having to know
+  /// that the two screens are related. Null leaves the button off.
+  final ValueChanged<GridNetwork>? onAddModel;
+
+  /// The models each provider serves. The app passes nothing and gets the
+  /// singleton the model picker already fills, so opening this pane after
+  /// opening that picker costs no second round trip; tests pass their own.
+  final GridModelsController? models;
+
   /// Whether a delete is in flight for this id, so its row can say so.
   final bool Function(String)? isDeleting;
 
@@ -109,6 +127,56 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
   /// into each other, which costs more than the scroll a stack adds.
   static const _splitBreakpoint = 820.0;
 
+  GridModelsController get _models => widget.models ?? gridModelsController;
+
+  /// The providers this pane has already asked about.
+  ///
+  /// ⚠️ Load-bearing, and not an optimisation. [GridModelsController.
+  /// ensureLoadedFor] returns early for an answer that is ready or in flight
+  /// but NOT for one that failed — so asking from `build`, or on every change
+  /// to the filtered list, would re-fetch a failed provider on every keystroke
+  /// and (since this pane rebuilds on the controller's own notification) spin
+  /// forever. Asked once per provider; the failure carries its own Try again.
+  final _asked = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    // Every provider, even one already answered for: the controller's cache
+    // lives as long as the app, and the whole point of coming back to this
+    // pane is usually that something changed. The reader who just joined a
+    // node on Share Intelligence and returned here to look at it must not be
+    // shown the list from before they did — which is exactly what a cache
+    // consulted and never re-asked gives them. `keepPrevious` is what stops
+    // that costing a skeleton flash on every visit.
+    _ask(force: true);
+  }
+
+  @override
+  void didUpdateWidget(ProviderSplitPane old) {
+    super.didUpdateWidget(old);
+    // The list is refiltered under this pane and refreshed behind it, so a
+    // provider can arrive after the first frame. NOT forced: this runs on every
+    // keystroke in the filter field.
+    _ask();
+  }
+
+  void _ask({bool force = false}) {
+    for (final network in widget.networks) {
+      final networkId = network.networkId;
+      if (networkId.isEmpty) continue;
+      final first = _asked.add(networkId);
+      if (force) {
+        unawaited(_models.refresh(networkId, keepPrevious: true));
+      } else if (first) {
+        _models.ensureLoadedFor(networkId);
+      }
+    }
+  }
+
+  /// Ask again for one provider — the Try again beside a failed list.
+  void _retry(String networkId) => unawaited(_models.refresh(networkId));
+
   GridNetwork? get _selected {
     if (widget.networks.isEmpty) return null;
     for (final network in widget.networks) {
@@ -130,14 +198,25 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
       return _EmptyProviders(filtered: widget.filtered);
     }
     final selected = _selected!;
+    // Both halves read the models — the rail counts them, the panel names them
+    // — so the listen happens once, here, rather than in each of them.
+    return ListenableBuilder(
+      listenable: _models,
+      builder: (context, _) => _split(selected),
+    );
+  }
+
+  Widget _split(GridNetwork selected) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final stacked = constraints.maxWidth < _splitBreakpoint;
         final rail = _ProviderRail(
           networks: widget.networks,
           selectedId: selected.networkId,
           defaultId: widget.defaultId,
           signedInEmail: widget.signedInEmail,
           isEnabled: widget.isEnabled,
+          modelsFor: (network) => _models.stateFor(network.networkId),
           onToggleEnabled: widget.onToggleEnabled,
           onSelect: (network) =>
               setState(() => _selectedId = network.networkId),
@@ -148,8 +227,8 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
           enabled: widget.isEnabled(selected),
           isDefault: selected.networkId == widget.defaultId,
           deleting: widget.isDeleting?.call(selected.networkId) ?? false,
-          onToggleEnabled: (value) =>
-              widget.onToggleEnabled(selected, value),
+          models: _models.stateFor(selected.networkId),
+          onRetryModels: () => _retry(selected.networkId),
           onMakeDefault: () => widget.onMakeDefault(selected),
           onRename: widget.onRename == null
               ? null
@@ -160,8 +239,14 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
           onShare: widget.onShare == null
               ? null
               : () => widget.onShare!(selected),
+          onAddModel: widget.onAddModel == null
+              ? null
+              : () => widget.onAddModel!(selected),
+          // Stacked, the panel is one card inside the page's own scroll view
+          // and has no bottom of its own to pin anything to.
+          pinActions: !stacked,
         );
-        if (constraints.maxWidth < _splitBreakpoint) {
+        if (stacked) {
           // Stacked: the rail keeps its own height rather than expanding, so
           // the detail below it is reachable by one scroll of the whole pane
           // instead of two scrolls that fight each other.
@@ -181,11 +266,10 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
           children: [
             SizedBox(width: _railWidth, child: _Framed(child: rail)),
             const SizedBox(width: 12),
-            Expanded(
-              child: _Framed(
-                child: SingleChildScrollView(child: detail),
-              ),
-            ),
+            // The panel owns its own scrolling now — see [_ProviderDetail],
+            // which keeps the actions on the floor of the card while the facts
+            // above them scroll.
+            Expanded(child: _Framed(child: detail)),
           ],
         );
       },
@@ -223,6 +307,7 @@ class _ProviderRail extends StatelessWidget {
     required this.defaultId,
     required this.signedInEmail,
     required this.isEnabled,
+    required this.modelsFor,
     required this.onToggleEnabled,
     required this.onSelect,
   });
@@ -232,6 +317,7 @@ class _ProviderRail extends StatelessWidget {
   final String? defaultId;
   final String signedInEmail;
   final bool Function(GridNetwork) isEnabled;
+  final GridModelsState Function(GridNetwork) modelsFor;
   final void Function(GridNetwork, bool) onToggleEnabled;
   final ValueChanged<GridNetwork> onSelect;
 
@@ -254,6 +340,7 @@ class _ProviderRail extends StatelessWidget {
           isDefault: network.networkId == defaultId,
           owned: gridIsOwnedBy(network, signedInEmail),
           enabled: isEnabled(network),
+          models: modelsFor(network),
           last: index == networks.length - 1,
           onSelect: () => onSelect(network),
           onToggleEnabled: (value) => onToggleEnabled(network, value),
@@ -277,6 +364,7 @@ class _ProviderRow extends StatefulWidget {
     required this.isDefault,
     required this.owned,
     required this.enabled,
+    required this.models,
     required this.last,
     required this.onSelect,
     required this.onToggleEnabled,
@@ -287,6 +375,7 @@ class _ProviderRow extends StatefulWidget {
   final bool isDefault;
   final bool owned;
   final bool enabled;
+  final GridModelsState models;
   final bool last;
   final VoidCallback onSelect;
   final ValueChanged<bool> onToggleEnabled;
@@ -311,7 +400,11 @@ class _ProviderRowState extends State<_ProviderRow> {
     // reaching the screen at that. Who can join is a real fact and it is still
     // one row of the panel, in the sentence `gridAccessRule` writes; the rail's
     // one line goes to the models instead.
-    final meta = _routerSummary(widget.network);
+    // ⚠️ The models it counts are the ones the provider SERVES, read off the
+    // relay. It used to count `router_advisors` — the models the router may
+    // consult when choosing where to send a request — which is a different set,
+    // usually a smaller one, printed under the same word.
+    final meta = providerModelsMeta(widget.models);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -493,11 +586,14 @@ class _ProviderDetail extends StatelessWidget {
     required this.enabled,
     required this.isDefault,
     required this.deleting,
-    required this.onToggleEnabled,
+    required this.models,
+    required this.onRetryModels,
     required this.onMakeDefault,
     this.onRename,
     this.onDelete,
     this.onShare,
+    this.onAddModel,
+    this.pinActions = true,
   });
 
   final GridNetwork network;
@@ -505,102 +601,141 @@ class _ProviderDetail extends StatelessWidget {
   final bool enabled;
   final bool isDefault;
   final bool deleting;
-  final ValueChanged<bool> onToggleEnabled;
+
+  /// Whether the panel scrolls its own facts and keeps [_DetailActions] on the
+  /// floor of the card.
+  ///
+  /// False where the panel has no floor: stacked under the rail it is one card
+  /// inside the page's scroll view, given all the height it asks for, and an
+  /// [Expanded] there would be asked to fill an unbounded box.
+  final bool pinActions;
+  final GridModelsState models;
+  final VoidCallback onRetryModels;
   final VoidCallback onMakeDefault;
   final VoidCallback? onRename;
   final VoidCallback? onDelete;
   final VoidCallback? onShare;
+  final VoidCallback? onAddModel;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
     final rule = gridAccessRule(network);
     final description = network.description?.trim() ?? '';
+    // The facts, and under them what this provider serves. Everything above the
+    // footer — this is what scrolls.
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DetailHeader(
+          network: network,
+          owned: owned,
+          enabled: enabled,
+          isDefault: isDefault,
+          onMakeDefault: onMakeDefault,
+          onRename: onRename,
+          onShare: onShare,
+        ),
+        const SizedBox(height: 14),
+        Divider(height: 1, color: grid.AppPalette.divider),
+        const SizedBox(height: 4),
+        if (description.isNotEmpty)
+          _DetailRow(
+            label: 'Description',
+            child: _PlainText(description),
+          ),
+        _DetailRow(
+          label: 'Status',
+          child: _StatusValue(status: network.status),
+        ),
+        // The rule in the words the share sheet prints — never the control
+        // plane's own spelling. `gridAccessRule` answers null for a rule this
+        // app has no words for, and the honest thing to print then is that we
+        // do not know: a wire value like `permissioned-public` under the
+        // heading "Who can join" reads as a promise about who is already in,
+        // in a vocabulary nobody outside the control plane shares.
+        if (rule case final GridAccessRule rule)
+          _DetailRow(
+            label: 'Who can join',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _PlainText(rule.label),
+                const SizedBox(height: 3),
+                Text(
+                  rule.description,
+                  style: TextStyle(
+                    color: grid.AppPalette.textFaint,
+                    fontSize: 11.5,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        _DetailRow(
+          label: 'Owner',
+          child: _PlainText(owned ? 'You' : network.ownerEmail),
+        ),
+        _DetailRow(
+          label: 'Provider ID',
+          child: _CopyableText(value: network.networkId),
+        ),
+        _DetailRow(
+          label: 'Signaling',
+          child: network.lanSignalingUrl == null
+              ? const _PlainText('—')
+              : _CopyableText(value: network.lanSignalingUrl!),
+        ),
+        if (network.createdAt case final DateTime created)
+          _DetailRow(label: 'Created', child: _PlainText(_date(created))),
+        const SizedBox(height: 14),
+        Divider(height: 1, color: grid.AppPalette.divider),
+        const SizedBox(height: 14),
+        // What this provider actually serves, which is the question the facts
+        // above raise and none of them answers.
+        _ProviderModels(
+          models: models,
+          onRetry: onRetryModels,
+          onAddModel: onAddModel,
+        ),
+      ],
+    );
+    // ⚠️ The Align is what puts the button in the corner, not the Wrap's own
+    // `alignment`. A Column aligns its children to the START, so the Wrap is
+    // given a loose constraint and shrinks to fit its buttons — and aligning
+    // content inside a box exactly as wide as the content moves nothing. The
+    // Align takes the full width first.
+    final footer = Align(
+      alignment: Alignment.centerRight,
+      child: _DetailActions(
+        network: network,
+        owned: owned,
+        deleting: deleting,
+        onDelete: onDelete,
+      ),
+    );
+    final footerRule = Divider(height: 1, color: grid.AppPalette.divider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: pinActions ? MainAxisSize.max : MainAxisSize.min,
         children: [
-          _DetailHeader(
-            network: network,
-            owned: owned,
-            enabled: enabled,
-            isDefault: isDefault,
-            onToggleEnabled: onToggleEnabled,
-          ),
+          // The facts scroll; the two consequential buttons do not. Somebody
+          // reading a provider with a long model list should not have to reach
+          // the end of it to find Delete — and, more to the point, should not
+          // meet Delete on the way past everything else.
+          if (pinActions)
+            Expanded(child: SingleChildScrollView(child: body))
+          else
+            body,
+          const SizedBox(height: 16),
+          footerRule,
           const SizedBox(height: 14),
-          Divider(height: 1, color: grid.AppPalette.divider),
-          const SizedBox(height: 4),
-          if (description.isNotEmpty)
-            _DetailRow(
-              label: 'Description',
-              child: _PlainText(description),
-            ),
-          _DetailRow(
-            label: 'Status',
-            child: _StatusValue(status: network.status),
-          ),
-          // The rule in the words the share sheet prints — never the control
-          // plane's own spelling. `gridAccessRule` answers null for a rule this
-          // app has no words for, and the honest thing to print then is that we
-          // do not know: a wire value like `permissioned-public` under the
-          // heading "Who can join" reads as a promise about who is already in,
-          // in a vocabulary nobody outside the control plane shares.
-          if (rule case final GridAccessRule rule)
-            _DetailRow(
-              label: 'Who can join',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PlainText(rule.label),
-                  const SizedBox(height: 3),
-                  Text(
-                    rule.description,
-                    style: TextStyle(
-                      color: grid.AppPalette.textFaint,
-                      fontSize: 11.5,
-                      height: 1.45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          _DetailRow(
-            label: 'Owner',
-            child: _PlainText(owned ? 'You' : network.ownerEmail),
-          ),
-          _DetailRow(
-            label: 'Router',
-            child: _RouterValue(network: network),
-          ),
-          _DetailRow(
-            label: 'Provider ID',
-            child: _CopyableText(value: network.networkId),
-          ),
-          _DetailRow(
-            label: 'Signaling',
-            child: network.lanSignalingUrl == null
-                ? const _PlainText('—')
-                : _CopyableText(value: network.lanSignalingUrl!),
-          ),
-          if (network.createdAt case final DateTime created)
-            _DetailRow(label: 'Created', child: _PlainText(_date(created))),
-          const SizedBox(height: 14),
-          Divider(height: 1, color: grid.AppPalette.divider),
-          const SizedBox(height: 14),
-          _DetailActions(
-            network: network,
-            owned: owned,
-            enabled: enabled,
-            isDefault: isDefault,
-            deleting: deleting,
-            onMakeDefault: onMakeDefault,
-            onRename: onRename,
-            onDelete: onDelete,
-            onShare: onShare,
-          ),
+          footer,
         ],
       ),
     );
@@ -617,84 +752,156 @@ class _ProviderDetail extends StatelessWidget {
   }
 }
 
-/// The provider's name, its id, and the one switch that decides whether this
-/// computer will use it at all.
+/// The provider's name, what is true of it, and the one action that is about
+/// people rather than about this computer.
+///
+/// **There is no switch here, and that is the point.** Every provider in the
+/// rail carries one, three feet to the left, and a second copy of the same
+/// control for the selected row put the same question on screen twice — one of
+/// them next to a name in 20px type, which reads as the more important of the
+/// two. The rail owns "will this Mac use it"; this panel describes the
+/// provider. What is left of that state here is a fact, not a control: a
+/// `DISABLED` badge, and only when it is.
 class _DetailHeader extends StatelessWidget {
   const _DetailHeader({
     required this.network,
     required this.owned,
     required this.enabled,
     required this.isDefault,
-    required this.onToggleEnabled,
+    required this.onMakeDefault,
+    this.onRename,
+    this.onShare,
   });
 
   final GridNetwork network;
   final bool owned;
   final bool enabled;
   final bool isDefault;
-  final ValueChanged<bool> onToggleEnabled;
+
+  /// Point new agents at this provider. In the header rather than at the foot
+  /// of the panel because it is a statement ABOUT this provider — the same
+  /// reason Share is here — and because the two of them together are what a
+  /// reader does after reading the name, not after reading the model list.
+  final VoidCallback onMakeDefault;
+
+  /// Renaming is a **double-click on the name**, not a button.
+  ///
+  /// It is the gesture the thing itself already suggests — a file in Finder, a
+  /// tab, a layer — and it costs the action row a button that was only ever
+  /// reachable by owners anyway. Null, or a provider this account does not own,
+  /// leaves the name inert.
+  final VoidCallback? onRename;
+
+  final VoidCallback? onShare;
+
+  bool get _renameable => owned && onRename != null;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final name = Text(
+      network.displayName,
+      style: TextStyle(
+        color: enabled
+            ? grid.AppPalette.textPrimary
+            : grid.AppPalette.textSecondary,
+        fontFamily: grid.AppFont.sans,
+        fontSize: 20,
+        fontWeight: grid.AppFont.semibold,
+        letterSpacing: -0.35,
+        height: 1.15,
+      ),
+    );
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
-              Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  Text(
-                    network.displayName,
-                    style: TextStyle(
-                      color: enabled
-                          ? grid.AppPalette.textPrimary
-                          : grid.AppPalette.textSecondary,
-                      fontFamily: grid.AppFont.sans,
-                      fontSize: 20,
-                      fontWeight: grid.AppFont.semibold,
-                      letterSpacing: -0.35,
-                      height: 1.15,
+              if (!_renameable)
+                name
+              else
+                // A gesture with no affordance is a gesture nobody finds, so
+                // the pointer changes and the tooltip says what it does. Both
+                // only where it works.
+                Tooltip(
+                  message: 'Double-click to rename',
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.text,
+                    child: GestureDetector(
+                      key: Key('provider-name-${network.networkId}'),
+                      onDoubleTap: onRename,
+                      behavior: HitTestBehavior.opaque,
+                      child: name,
                     ),
                   ),
-                  if (owned) const _OwnedBadge(),
-                  if (isDefault) const _DefaultBadge(),
-                ],
-              ),
+                ),
+              if (owned) const _OwnedBadge(),
+              if (isDefault) const _DefaultBadge(),
+              if (!enabled) const _DisabledBadge(),
             ],
           ),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
+        // Wrapped, so a narrow panel drops Share under the default button
+        // instead of squeezing the name.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(
-              enabled ? 'ENABLED' : 'DISABLED',
-              style: TextStyle(
-                color: enabled
-                    ? grid.AppPalette.textSecondary
-                    : grid.AppPalette.textFaint,
-                fontSize: 9.5,
-                fontWeight: grid.AppFont.semibold,
-                letterSpacing: 0.8,
+            _MakeDefaultButton(
+              network: network,
+              enabled: enabled,
+              isDefault: isDefault,
+              onPressed: onMakeDefault,
+            ),
+            if (onShare != null)
+              _QuietButton(
+                key: Key('provider-share-${network.networkId}'),
+                label: 'Share',
+                icon: LucideIcons.userPlus300,
+                onPressed: onShare!,
               ),
-            ),
-            const SizedBox(height: 3),
-            _ProviderSwitch(
-              value: enabled,
-              semanticLabel: network.displayName,
-              onChanged: onToggleEnabled,
-            ),
           ],
         ),
       ],
+    );
+  }
+}
+
+/// `DISABLED` — this computer will not offer the provider to its agents.
+///
+/// Drawn only when it is true. There is no `ENABLED` twin: enabled is the
+/// resting state of every provider in the list, and a badge on all of them
+/// would say nothing while making the one that matters harder to spot.
+class _DisabledBadge extends StatelessWidget {
+  const _DisabledBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: grid.AppSurface.recess,
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: grid.AppPalette.divider),
+      ),
+      child: Text(
+        'DISABLED',
+        style: TextStyle(
+          color: grid.AppPalette.textFaint,
+          fontSize: 8.5,
+          fontWeight: grid.AppFont.semibold,
+          letterSpacing: 0.7,
+        ),
+      ),
     );
   }
 }
@@ -824,63 +1031,200 @@ class _StatusValue extends StatelessWidget {
   }
 }
 
-/// Whether the router is on, and the models it may consult — by name.
+/// The models this provider serves, and the way to put another one there.
 ///
-/// The names are the reason the panel exists: the table could only afford a
-/// count, and "on · 3 models" is not an answer to "which three".
-class _RouterValue extends StatelessWidget {
-  const _RouterValue({required this.network});
+/// **Not a `_DetailRow`.** The rows above are facts about the provider's
+/// registration — one line each, read once. This is a list that grows, carries
+/// its own action, and is the reason most people open the pane at all, so it
+/// gets a heading of its own under the divider instead of a 118px label with a
+/// paragraph of chips hanging off it.
+///
+/// ⚠️ These are the models the RELAY advertises, not the `router_advisors` the
+/// panel used to print under `Router`. That row is gone: it answered a question
+/// about how a request is dispatched inside the grid, in the vocabulary of the
+/// control plane, on a screen about which models a person can use.
+class _ProviderModels extends StatelessWidget {
+  const _ProviderModels({
+    required this.models,
+    required this.onRetry,
+    this.onAddModel,
+  });
 
-  final GridNetwork network;
+  final GridModelsState models;
+  final VoidCallback onRetry;
+  final VoidCallback? onAddModel;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    if (!network.routerEnabled) {
-      return const _PlainText(
-        'Off — requests go straight to this provider’s nodes',
-      );
-    }
-    if (network.routerAdvisors.isEmpty) {
-      return const _PlainText('On, with no models listed');
-    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _PlainText(_routerLabel(network)),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 5,
-          runSpacing: 5,
+        Row(
           children: [
-            for (final advisor in network.routerAdvisors)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 2,
+            Text(
+              'MODELS',
+              style: TextStyle(
+                color: grid.AppPalette.textFaint,
+                fontSize: 9.5,
+                fontWeight: grid.AppFont.semibold,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                providerModelsMeta(models),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: grid.AppPalette.textFaint,
+                  fontSize: 11.5,
                 ),
-                decoration: BoxDecoration(
-                  color: grid.AppSurface.recess,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: grid.AppPalette.divider),
-                ),
-                child: Text(
-                  advisor,
-                  style: TextStyle(
-                    color: grid.AppPalette.textSecondary,
-                    fontSize: 11,
-                    fontFamily: grid.AppFont.mono,
-                    fontFamilyFallback: grid.AppFont.monoFallback,
-                  ),
-                ),
+              ),
+            ),
+            if (onAddModel != null)
+              _QuietButton(
+                key: const Key('provider-add-model'),
+                label: 'Add model',
+                icon: LucideIcons.plus300,
+                onPressed: onAddModel!,
               ),
           ],
         ),
+        const SizedBox(height: 10),
+        _body(),
       ],
     );
   }
+
+  Widget _body() => switch (models) {
+    // Idle and Loading render the same on purpose: from the reader's side
+    // "not asked yet" and "asked, no answer" are one state — nothing to show
+    // and something on the way — and the pane asks for every provider as it
+    // opens, so Idle lasts a frame.
+    // Chip-shaped, chip-sized, and of unequal widths — a model id is not a
+    // fixed-width thing, and three identical bars read as one grey slab.
+    GridModelsIdle() || GridModelsLoading() => const Wrap(
+      key: Key('provider-models-skeleton'),
+      spacing: 5,
+      runSpacing: 5,
+      children: [
+        Skeleton(width: 104, height: _chipHeight, radius: 4),
+        Skeleton(width: 76, height: _chipHeight, radius: 4),
+        Skeleton(width: 132, height: _chipHeight, radius: 4),
+      ],
+    ),
+    GridModelsReady(:final models) when models.isEmpty => _PlainText(
+      'This provider serves no models yet.'
+      '${onAddModel == null ? '' : ' Add one to start sharing this computer.'}',
+    ),
+    GridModelsReady(:final models) => Wrap(
+      spacing: 5,
+      runSpacing: 5,
+      children: [for (final model in models) _ModelChip(model)],
+    ),
+    // The message, not a shrug: `GridApiClient` has already turned the failure
+    // into a sentence, and a provider that is merely asleep says something
+    // different from one this account may not read.
+    GridModelsFailed(:final message) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _PlainText(message),
+        const SizedBox(height: 6),
+        _LinkButton(
+          key: const Key('provider-models-retry'),
+          label: 'Try again',
+          onPressed: onRetry,
+        ),
+      ],
+    ),
+  };
 }
+
+/// A chip's outside height: 11px mono at 1.0 leading inside 2px of padding
+/// each way, plus the hairline. The loading placeholders are drawn at exactly
+/// this, so the list does not jump when the names land.
+const double _chipHeight = 20;
+
+/// One model id, in mono — these are strings people copy into a config, and a
+/// proportional face makes `gpt-4o-mini` and `gpt-40-mini` look alike.
+class _ModelChip extends StatelessWidget {
+  const _ModelChip(this.id);
+
+  final String id;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: grid.AppSurface.recess,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: grid.AppPalette.divider),
+      ),
+      child: Text(
+        id,
+        style: TextStyle(
+          color: grid.AppPalette.textSecondary,
+          fontSize: 11,
+          fontFamily: grid.AppFont.mono,
+          fontFamilyFallback: grid.AppFont.monoFallback,
+        ),
+      ),
+    );
+  }
+}
+
+/// A retry that reads as a link: it belongs to the sentence above it, and a
+/// bordered button beside a failure message competes with the panel's real
+/// actions at the bottom of the pane.
+class _LinkButton extends StatelessWidget {
+  const _LinkButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: grid.AppPalette.accentOnSurface,
+        overlayColor: grid.AppSurface.hoverFill,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: TextStyle(fontFamily: grid.AppFont.sans, fontSize: 12),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+/// The rail's one line under a provider's name: how many models it serves, or
+/// what is happening instead.
+///
+/// Pure and shared with the panel's heading, so the count in the list and the
+/// list of names beside it can never disagree about how many there are.
+String providerModelsMeta(GridModelsState state) => switch (state) {
+  GridModelsIdle() || GridModelsLoading() => 'Loading models…',
+  GridModelsReady(:final models) when models.isEmpty => 'No models',
+  GridModelsReady(:final models) =>
+    '${models.length} model${models.length == 1 ? '' : 's'}',
+  // Deliberately not the failure's own sentence: this is a 292px line under a
+  // name, and the panel prints the reason in full for whichever provider the
+  // reader selects.
+  GridModelsFailed() => 'Models unavailable',
+};
 
 /// A mono value with a copy affordance that appears under the pointer.
 ///
@@ -947,97 +1291,93 @@ class _CopyableTextState extends State<_CopyableText> {
   }
 }
 
-/// What can be done to the provider on screen.
+/// The one irreversible thing, in the corner a reader ends on.
 ///
-/// "Make default" leads because it is the question the pane exists to answer;
-/// Delete is last and in danger ink because it is the one thing here nobody can
-/// undo. Rename and Delete are owner-only, checked here rather than left to the
-/// server: a provider somebody else owns answers 403, and an action that can
-/// only fail is worse than one that was never offered.
+/// **Bottom right, past everything there is to read.** Delete is the only
+/// action that cannot be undone, and it earns the corner a dialog puts its
+/// buttons in rather than a place somebody scrolling past the models meets by
+/// accident. Everything else that was in this row has gone up to the header,
+/// where it sits beside the name it acts on: Share, Make default, and Rename —
+/// which stopped being a button at all and became a double-click on the name.
+///
+/// Owner-only, checked here rather than left to the server: a provider somebody
+/// else owns answers 403, and an action that can only fail is worse than one
+/// that was never offered.
 class _DetailActions extends StatelessWidget {
   const _DetailActions({
     required this.network,
     required this.owned,
-    required this.enabled,
-    required this.isDefault,
     required this.deleting,
-    required this.onMakeDefault,
-    this.onRename,
     this.onDelete,
-    this.onShare,
   });
 
   final GridNetwork network;
   final bool owned;
-  final bool enabled;
-  final bool isDefault;
   final bool deleting;
-  final VoidCallback onMakeDefault;
-  final VoidCallback? onRename;
   final VoidCallback? onDelete;
-  final VoidCallback? onShare;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        // A disabled button has to say WHY, or it reads as broken. The tooltip
-        // is the whole reason this is wrapped: `Make default` greys out on a
-        // provider the switch has turned off, and nothing else on the row
-        // connects those two facts for somebody who did it a minute ago.
-        Tooltip(
-          message: !enabled
-              ? 'Turn ${network.displayName} on before making it the default'
-              : (isDefault
-                    ? 'New agents already launch on ${network.displayName}'
-                    : 'New agents will launch on ${network.displayName}'),
-          child: FilledButton(
-            key: Key('provider-default-${network.networkId}'),
-            // Disabled on a provider this computer has switched off: new agents
-            // cannot launch against something the pickers do not offer, and a
-            // button that quietly turns the switch back on would undo a choice
-            // the user made two clicks ago without saying so.
-            onPressed: isDefault || !enabled ? null : onMakeDefault,
-            style: FilledButton.styleFrom(
-              backgroundColor: grid.AppPalette.accentOnSurface,
-              disabledBackgroundColor: grid.AppSurface.recess,
-              disabledForegroundColor: grid.AppPalette.textFaint,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              textStyle: TextStyle(
-                fontFamily: grid.AppFont.sans,
-                fontSize: 12.5,
-                fontWeight: grid.AppFont.semibold,
-              ),
-            ),
-            child: Text(isDefault ? 'Current default' : 'Make default'),
+    if (!owned || onDelete == null) return const SizedBox.shrink();
+    return _DeleteProviderButton(
+      name: network.displayName,
+      deleting: deleting,
+      onDelete: onDelete!,
+    );
+  }
+}
+
+/// `Make default` — the pane's own answer to "which provider do new agents
+/// launch against", in the header beside the name it would apply to.
+class _MakeDefaultButton extends StatelessWidget {
+  const _MakeDefaultButton({
+    required this.network,
+    required this.enabled,
+    required this.isDefault,
+    required this.onPressed,
+  });
+
+  final GridNetwork network;
+  final bool enabled;
+  final bool isDefault;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    // A disabled button has to say WHY, or it reads as broken. The tooltip is
+    // the whole reason this is wrapped: `Make default` greys out on a provider
+    // the RAIL's switch has turned off, and nothing beside it connects those
+    // two facts for somebody who did it a minute ago.
+    return Tooltip(
+      message: !enabled
+          ? 'Turn ${network.displayName} on before making it the default'
+          : (isDefault
+                ? 'New agents already launch on ${network.displayName}'
+                : 'New agents will launch on ${network.displayName}'),
+      child: FilledButton(
+        key: Key('provider-default-${network.networkId}'),
+        // Disabled on a provider this computer has switched off: new agents
+        // cannot launch against something the pickers do not offer, and a
+        // button that quietly turned the switch back on would undo a choice the
+        // user made two clicks ago without saying so.
+        onPressed: isDefault || !enabled ? null : onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: grid.AppPalette.accentOnSurface,
+          disabledBackgroundColor: grid.AppSurface.recess,
+          disabledForegroundColor: grid.AppPalette.textFaint,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: TextStyle(
+            fontFamily: grid.AppFont.sans,
+            fontSize: 12.5,
+            fontWeight: grid.AppFont.semibold,
           ),
         ),
-        if (onShare != null)
-          _QuietButton(
-            label: 'Share',
-            icon: LucideIcons.userPlus300,
-            onPressed: onShare!,
-          ),
-        if (owned && onRename != null)
-          _QuietButton(
-            key: Key('provider-rename-${network.networkId}'),
-            label: 'Rename',
-            icon: LucideIcons.pencil300,
-            onPressed: onRename!,
-          ),
-        if (owned && onDelete != null)
-          _DeleteProviderButton(
-            name: network.displayName,
-            deleting: deleting,
-            onDelete: onDelete!,
-          ),
-      ],
+        child: Text(isDefault ? 'Current default' : 'Make default'),
+      ),
     );
   }
 }
@@ -1357,22 +1697,3 @@ class ProviderSplitPaneSkeleton extends StatelessWidget {
   }
 }
 
-/// `router on · 3 models`, or `router off` — the panel's wording, where it sits
-/// beside the label `Router` and has room to be a sentence.
-String _routerLabel(GridNetwork network) {
-  if (!network.routerEnabled) return 'router off';
-  final count = network.routerAdvisors.length;
-  return count == 0
-      ? 'router on'
-      : 'router on · $count model${count == 1 ? '' : 's'}';
-}
-
-/// The rail's whole meta line: `3 models`, `router on` when there are none to
-/// count, `router off`. Built beside [_routerLabel] rather than by trimming it
-/// at the call site, so the two cannot drift into wording the same state
-/// differently.
-String _routerSummary(GridNetwork network) {
-  if (!network.routerEnabled) return 'router off';
-  final count = network.routerAdvisors.length;
-  return count == 0 ? 'router on' : '$count model${count == 1 ? '' : 's'}';
-}

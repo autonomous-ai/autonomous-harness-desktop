@@ -1,21 +1,59 @@
 // The Grid pane is the one screen that talks to a backend the `harness` CLI
 // knows nothing about, so what it parses is not covered by anything else. The
 // payload it reads lives in `support/fake_grid_api.dart`.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:harness/core/local_key_value_store.dart';
+import 'package:harness/grid/grid_models_controller.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/settings/sections/grid_hero.dart';
+import 'package:harness/settings/settings_section.dart';
+import 'package:harness/share/share_target_store.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
+
+/// A relay that serves a different list per grid.
+///
+/// Needed because the pane re-asks on mount — a state poked in with
+/// `debugSetState` is replaced by whatever the client answers, which is the
+/// behaviour that makes a model added on another screen show up here.
+class _ModelsApi extends FakeGridApi {
+  _ModelsApi(this.byNetwork);
+
+  /// network id → what its relay advertises.
+  final Map<String, List<String>> byNetwork;
+
+  @override
+  Future<List<String>> models({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    // `FakeGridApi.credentials` builds the URL from the id, which is the only
+    // thing tying an answer back to the grid it was asked about.
+    for (final entry in byNetwork.entries) {
+      if (baseUrl.contains(entry.key)) return entry.value;
+    }
+    return const [];
+  }
+}
+
+/// A relay that never answers, so a provider stays in Loading.
+class _HangingApi extends FakeGridApi {
+  @override
+  Future<List<String>> models({
+    required String baseUrl,
+    required String apiKey,
+  }) => Completer<List<String>>().future;
+}
 
 /// The pane writes the pick straight through to disk; tests keep it in memory.
 class _MemoryStore implements LocalKeyValueStore {
@@ -133,10 +171,23 @@ void main() {
       );
     });
 
+    /// A controller over the fake payload, disposed with the test.
+    GridNetworksController newController() {
+      final controller = GridNetworksController(client: FakeGridApi());
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
     Future<void> pump(
       WidgetTester tester,
       GridNetworksController c, {
       String? harnessEmail,
+      GridModelsController? models,
+      ShareTargetStore? shareTarget,
+      ValueChanged<SettingsSection>? onShowSection,
+      // A skeleton breathes forever ([Pulse]), so a pane with one on it never
+      // settles. A test that puts a provider in Loading pumps instead.
+      bool settle = true,
     }) async {
       // A window the size the app actually opens at. At the 800x600 default the
       // table's viewport is one row tall, so a lazy list never builds the
@@ -144,6 +195,19 @@ void main() {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
+      // ⚠️ Built HERE and not in the tree below. A controller made inside
+      // `builder` is a new one on every rebuild, and the pane asks each
+      // provider for its models exactly once — so every answer would land in
+      // an instance already thrown away and the list would load forever.
+      //
+      // Its own instance either way, never the singleton: that one holds a real
+      // client, and a pane that asked it for models would reach for the
+      // developer's own Grid session.
+      final modelsController =
+          models ?? GridModelsController(client: FakeGridApi());
+      // Only the one made here — an injected controller belongs to the test
+      // that passed it, which disposes it itself.
+      if (models == null) addTearDown(modelsController.dispose);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildAppTheme(brightness: Brightness.light),
@@ -157,6 +221,9 @@ void main() {
                     selection: selection,
                     harnessEmail: harnessEmail,
                     enablement: enablement,
+                    models: modelsController,
+                    shareTarget: shareTarget,
+                    onShowSection: onShowSection,
                   ),
                 ),
               );
@@ -164,7 +231,12 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+        await tester.pump();
+      }
     }
 
     Future<GridNetworksController> ready(WidgetTester tester) async {
@@ -237,10 +309,10 @@ void main() {
       expect(find.text('permissioned-public'), findsNothing);
       expect(find.text('permissioned-providers'), findsNothing);
       expect(find.text('admin'), findsNothing);
-      // The rail's one line is the models; the panel labels the same fact.
-      expect(find.text('1 model'), findsWidgets);
-      expect(find.textContaining('router on · 1 model'), findsOneWidget);
-      expect(find.textContaining('router off'), findsOneWidget);
+      // The rail's one line is the models the provider SERVES — read off the
+      // relay, not the `router_advisors` it used to count.
+      expect(find.text('2 models'), findsWidgets);
+      expect(find.textContaining('router'), findsNothing);
       expect(find.byKey(const Key('grid-refresh-button')), findsOneWidget);
     });
 
@@ -302,7 +374,7 @@ void main() {
     testWidgets('every provider off says so, and there is no "No provider" row',
         (tester) async {
       await ready(tester);
-      expect(find.text('No provider enabled'), findsNothing);
+      expect(find.text('Running on subscriptions'), findsNothing);
 
       for (final id in ['grid-aaf6a46ced4f42f9', 'grid-e3b210eacc5b4cdf']) {
         await tester.tap(
@@ -314,7 +386,7 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      expect(find.text('No provider enabled'), findsOneWidget);
+      expect(find.text('Running on subscriptions'), findsOneWidget);
       expect(selection.value.hasGrid, isFalse);
       // The row that used to name this state is gone: a state is not a
       // provider, and the list is a list of providers.
@@ -384,12 +456,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('openai/gpt-5-mini'), findsOneWidget);
       expect(find.text('Provider ID'), findsOneWidget);
       expect(find.text('Signaling'), findsOneWidget);
       expect(find.text('Who can join'), findsOneWidget);
       expect(find.text('Owner'), findsOneWidget);
-      expect(find.text('Router'), findsOneWidget);
+      // The router is gone from the panel: it answered a question about how a
+      // request is dispatched INSIDE the grid, in the control plane's own
+      // vocabulary, on a screen about which models a person can use. What the
+      // provider serves is under MODELS instead.
+      expect(find.text('Router'), findsNothing);
+      expect(find.text('openai/gpt-5-mini'), findsNothing);
+      expect(find.text('MODELS'), findsOneWidget);
       // Deliberately NOT among them: it is the control plane's wire spelling of
       // the rule "Who can join" states two rows above, and printing both asks
       // the reader to reconcile two spellings of one thing.
@@ -397,6 +474,178 @@ void main() {
       expect(find.text('permissioned-public'), findsNothing);
       // Reading a provider is not asking to launch agents on it.
       expect(selection.value.hasGrid, isFalse);
+    });
+
+    // What the provider SERVES — the question the panel's facts raise and none
+    // of them answers. The names are the point: a count is what the rail
+    // affords, and "3 models" is not an answer to "which three".
+    testWidgets('the panel names the models, the rail counts them', (
+      tester,
+    ) async {
+      final models = GridModelsController(
+        client: _ModelsApi({
+          'grid-aaf6a46ced4f42f9': ['qwen3-coder-30b', 'gpt-oss-120b'],
+          'grid-e3b210eacc5b4cdf': [],
+        }),
+      );
+      addTearDown(models.dispose);
+      await pump(tester, newController(), models: models);
+
+      expect(find.text('qwen3-coder-30b'), findsOneWidget);
+      expect(find.text('gpt-oss-120b'), findsOneWidget);
+      expect(find.text('2 models'), findsWidgets);
+      // Singular and plural are both spelled, and an empty list is not a
+      // failure — it is a provider nobody has put a model on yet.
+      expect(find.text('No models'), findsOneWidget);
+    });
+
+    // The models arrive over two round trips against a relay that may be
+    // asleep, so the pane has to be honest about all four states rather than
+    // rendering "nothing yet" and "nothing at all" the same.
+    testWidgets('a provider still being asked does not read as an empty one', (
+      tester,
+    ) async {
+      final models = GridModelsController(client: _HangingApi());
+      addTearDown(models.dispose);
+      await pump(tester, newController(), models: models, settle: false);
+
+      expect(find.byKey(const Key('provider-models-skeleton')), findsOneWidget);
+      expect(find.text('No models'), findsNothing);
+      expect(find.text('Loading models…'), findsWidgets);
+
+      // And a failure keeps its sentence, plus the one thing that can fix it.
+      models.debugSetState(
+        'grid-aaf6a46ced4f42f9',
+        const GridModelsFailed('This provider is asleep.'),
+      );
+      await tester.pump();
+      expect(find.text('This provider is asleep.'), findsOneWidget);
+      expect(find.byKey(const Key('provider-models-retry')), findsOneWidget);
+    });
+
+    // Putting a model on a provider happens on the OTHER pane, so the button
+    // is a door: it pins that pane's grid to this provider and goes there.
+    // Without the pin the reader would land on whatever grid the share page
+    // was last pointed at and have to find this one again in its picker.
+    testWidgets('Add model pins the share target and opens Share Intelligence',
+        (tester) async {
+      final models = GridModelsController(client: FakeGridApi());
+      addTearDown(models.dispose);
+      final target = ShareTargetStore(storage: _MemoryStore());
+      final opened = <SettingsSection>[];
+      await pump(
+        tester,
+        newController(),
+        models: models,
+        shareTarget: target,
+        onShowSection: opened.add,
+      );
+
+      await tester.tap(find.byKey(const Key('provider-add-model')));
+      await tester.pumpAndSettle();
+
+      expect(target.value.networkId, 'grid-aaf6a46ced4f42f9');
+      expect(
+        target.value.networkName,
+        'hp-1-1',
+        reason: 'the share page names the grid before /v1/grid/me answers',
+      );
+      expect(opened, [SettingsSection.shareIntelligence]);
+    });
+
+    // A button that pinned a real setting and then went nowhere would be a
+    // worse lie than no button.
+    testWidgets('with nowhere to send the reader there is no Add model', (
+      tester,
+    ) async {
+      await ready(tester);
+
+      expect(find.byKey(const Key('provider-add-model')), findsNothing);
+    });
+
+    // The panel describes a provider; the rail decides whether this computer
+    // uses one. A second switch beside a name in 20px type read as the more
+    // important of the two copies of one question.
+    testWidgets('the panel carries no switch of its own', (tester) async {
+      await ready(tester);
+
+      expect(find.byType(Switch), findsNWidgets(2));
+      expect(find.text('ENABLED'), findsNothing);
+      // Switched off is still a FACT about the provider, so it is still said —
+      // as a badge, which nobody can click.
+      expect(find.text('DISABLED'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+          matching: find.byType(Switch),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('DISABLED'), findsOneWidget);
+    });
+
+    // Rename left the action row for the gesture the name itself suggests.
+    testWidgets('the name renames on a double-click, and only if you own it', (
+      tester,
+    ) async {
+      await ready(tester);
+      expect(find.text('Rename'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-e3b210eacc5b4cdf')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('provider-name-grid-e3b210eacc5b4cdf')),
+        findsNothing,
+        reason: 'a provider somebody else owns answers 403 to a rename',
+      );
+
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+      );
+      await tester.pumpAndSettle();
+      final name = find.byKey(const Key('provider-name-grid-aaf6a46ced4f42f9'));
+      expect(name, findsOneWidget);
+
+      // One click reads it, two open the form.
+      //
+      // ⚠️ The wait is `pump`, not `pumpAndSettle`. Settling stops as soon as
+      // no frame is scheduled — a few milliseconds here — so a single tap
+      // followed by the first tap of the double-tap below lands INSIDE
+      // kDoubleTapTimeout and the two are read as one double-click, which is
+      // how this test first "passed" a dialog it then dismissed with its own
+      // third tap.
+      await tester.tap(name);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Rename provider'), findsNothing);
+
+      await tester.tap(name);
+      // kDoubleTapMinTime (40ms) < this < kDoubleTapTimeout (300ms).
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.tap(name);
+      await tester.pumpAndSettle();
+      expect(find.text('Rename provider'), findsOneWidget);
+    });
+
+    // Share sits with the name because it is about PEOPLE — who else may use
+    // this provider — and not about what this Mac does with it.
+    testWidgets('Share sits in the header, not in the action row', (
+      tester,
+    ) async {
+      await ready(tester);
+
+      final share = find.byKey(
+        const Key('provider-share-grid-aaf6a46ced4f42f9'),
+      );
+      expect(share, findsOneWidget);
+      // Both header buttons sit above the facts they act on…
+      final ownerY = tester.getCenter(find.text('Owner')).dy;
+      expect(tester.getCenter(share).dy, lessThan(ownerY));
+      expect(tester.getCenter(find.text('Make default')).dy, lessThan(ownerY));
+      // …and the one thing nobody can undo is alone at the bottom, past the
+      // model list, where it cannot be met on the way to anything else.
+      expect(tester.getCenter(find.text('Delete')).dy, greaterThan(ownerY));
     });
 
     testWidgets('a filter narrows the rail and says so', (tester) async {

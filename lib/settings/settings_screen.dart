@@ -147,6 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     section: _section,
                     notifier: widget.notifier,
                     gridNetworks: _gridNetworks,
+                    onShowSection: _show,
                   ),
                 ),
               ],
@@ -167,11 +168,18 @@ class _SettingsBody extends StatelessWidget {
     required this.section,
     required this.notifier,
     required this.gridNetworks,
+    required this.onShowSection,
   });
 
   final SettingsSection section;
   final AppNotifier notifier;
   final GridNetworksController gridNetworks;
+
+  /// How a pane sends the reader to another one — the rail's own `onSelect`,
+  /// handed down. Providers' `Add model` is the only user of it: putting a
+  /// model on a provider happens on Share Intelligence, and the button pins
+  /// that pane to the provider before switching to it.
+  final ValueChanged<SettingsSection> onShowSection;
 
   @override
   Widget build(BuildContext context) {
@@ -179,6 +187,7 @@ class _SettingsBody extends StatelessWidget {
       SettingsSection.grid => GridSection(
         controller: gridNetworks,
         harnessEmail: notifier.currentUser?.email,
+        onShowSection: onShowSection,
       ),
       SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),

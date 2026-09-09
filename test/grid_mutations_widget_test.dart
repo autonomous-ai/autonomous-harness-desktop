@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/grid/grid_access_type.dart';
+import 'package:harness/grid/grid_models_controller.dart';
 import 'package:harness/grid/grid_mutations_controller.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
@@ -125,6 +126,9 @@ void main() {
                     storage: _MemoryStore(),
                   ),
                   mutations: mutations,
+                  // Its own, never the singleton: that one holds a real client
+                  // and would reach for the developer's own Grid session.
+                  models: GridModelsController(client: api),
                   // Its own, pointed at a temp file: the singleton writes the
                   // developer's real ~/.harness, and a test run must not.
                   enablement: ProviderEnablementStore(
@@ -306,6 +310,20 @@ void main() {
   });
 
 
+  /// Renaming is a double-click on the provider's name — there is no button.
+  ///
+  /// ⚠️ `pump`, never `pumpAndSettle`, between the two taps: settling stops as
+  /// soon as no frame is scheduled, which is a few milliseconds, so a settle
+  /// here would still be inside kDoubleTapTimeout and the NEXT tap in a test
+  /// would pair with this one instead.
+  Future<void> doubleClickName(WidgetTester tester, String networkId) async {
+    final name = find.byKey(Key('provider-name-$networkId'));
+    await tester.tap(name);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(name);
+    await tester.pumpAndSettle();
+  }
+
   group('rename', () {
     testWidgets('opens on the current name and saves a new one', (
       tester,
@@ -317,8 +335,7 @@ void main() {
         find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Rename'));
-      await tester.pumpAndSettle();
+      await doubleClickName(tester, 'grid-aaf6a46ced4f42f9');
 
       // The field arrives holding the name it is about to replace.
       final field = tester.widget<TextField>(
@@ -347,8 +364,7 @@ void main() {
         find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Rename'));
-      await tester.pumpAndSettle();
+      await doubleClickName(tester, 'grid-aaf6a46ced4f42f9');
       await tester.tap(find.byKey(const Key('rename-grid-submit')));
       await tester.pumpAndSettle();
 
@@ -368,8 +384,7 @@ void main() {
         find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Rename'));
-      await tester.pumpAndSettle();
+      await doubleClickName(tester, 'grid-aaf6a46ced4f42f9');
       await tester.enterText(
         find.byKey(const Key('rename-grid-name-field')),
         'Water Grid',
@@ -389,6 +404,12 @@ void main() {
         find.byKey(const Key('provider-row-grid-e3b210eacc5b4cdf')),
       );
       await tester.pumpAndSettle();
+      // No name to double-click, and no button either: a provider somebody
+      // else owns answers 403 to a rename.
+      expect(
+        find.byKey(const Key('provider-name-grid-e3b210eacc5b4cdf')),
+        findsNothing,
+      );
       expect(find.text('Rename'), findsNothing);
     });
   });
