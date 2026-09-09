@@ -137,6 +137,19 @@ void main() {
   });
 
   group('the declared set', () {
+    test('the model picker is ⇧⌘M, never plain ⌘M', () {
+      // ⌘M is Minimize, and AppKit matches it in `performKeyEquivalent:` —
+      // before the keystroke reaches Flutter at all. A binding on it would look
+      // right in this list and do nothing but minimise the window, which is the
+      // same trap that once ate ⌘V in a terminal pane.
+      final model = kAppShortcuts.firstWhere(
+        (s) => s.action == ShortcutAction.changeModel,
+      );
+      expect(model.activator.trigger, LogicalKeyboardKey.keyM);
+      expect(model.activator.meta, isTrue);
+      expect(model.activator.shift, isTrue);
+    });
+
     test('no two shortcuts claim the same chord', () {
       final seen = <String>{};
       for (final shortcut in appShortcuts()) {
@@ -290,7 +303,8 @@ void main() {
       expect(rows[digits].group, ShortcutGroup.panes);
       // Last of its group, so it does not split the group it belongs to.
       expect(
-        digits == rows.length - 1 || rows[digits + 1].group != ShortcutGroup.panes,
+        digits == rows.length - 1 ||
+            rows[digits + 1].group != ShortcutGroup.panes,
         isTrue,
       );
     });

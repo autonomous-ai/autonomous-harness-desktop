@@ -92,6 +92,132 @@ List<GridNetwork> accountProviders([GridNetworksController? controller]) {
   return state is GridNetworksReady ? state.me.networks : const [];
 }
 
+/// The agents whose model is being changed right now, keyed `machineId/agentId`.
+///
+/// Module-level, and it is not tidiness: there are TWO doors onto the same
+/// restart — the pill below and ⌘⇧M — so the guard that stops a second one
+/// landing on top of the first has to hold across both. It is also what draws
+/// the pill's skeleton, which means a restart started from the keyboard looks
+/// exactly like one started with the mouse, on the control that is about to
+/// report the new model.
+final ValueNotifier<Set<String>> retargetingAgents = ValueNotifier<Set<String>>(
+  const {},
+);
+
+String _retargetKey(String machineId, String agentId) => '$machineId/$agentId';
+
+/// Open the model picker for one agent and apply what it hands back.
+///
+/// The whole transaction — what the agent is on now, the panel, the mint, the
+/// retarget, the refusal worth naming and the Recent entry — lives here rather
+/// than in the pill, because ⌘⇧M does exactly the same thing to the focused
+/// pane and a second copy of this is a second place for the refusals to drift.
+///
+/// Returns silently when there is nothing to do: no such agent, one already
+/// mid-restart, a dismissed panel, or the row the agent is already on — a
+/// re-applied model costs a restart and buys nothing.
+Future<void> pickAgentModel(
+  BuildContext context,
+  AppNotifier notifier, {
+  required String machineId,
+  required String agentId,
+  required String engine,
+}) async {
+  final key = _retargetKey(machineId, agentId);
+  if (retargetingAgents.value.contains(key)) return;
+  // The pill is already disabled for both of these, so they only ever fire from
+  // the keyboard — where there is no tooltip to have read first, and a shortcut
+  // that answers with nothing is indistinguishable from one that is not bound.
+  if (!kGridCapableEngines.contains(engine)) {
+    _say(context, '$engine cannot use a grid');
+    return;
+  }
+  if (notifier.agentIsProcessing(machineId, agentId)) {
+    _say(context, 'It is running a turn. Change the model when it finishes.');
+    return;
+  }
+
+  final current = currentModelChoice(
+    agentGridOf(notifier, machineId, agentId),
+    accountProviders(),
+  );
+  final choice = await showModelPickerDialog(context, current: current);
+  if (choice == null || choice == current) return;
+  if (!context.mounted) return;
+  await applyAgentModel(
+    context,
+    notifier,
+    machineId: machineId,
+    agentId: agentId,
+    choice: choice,
+  );
+}
+
+/// Move [agentId] onto [choice] — a fresh relay key, then `agent_retarget`.
+///
+/// Split from [pickAgentModel] so a caller that already knows the answer (a
+/// test, a future "repeat last model") does not have to open a panel to use it.
+@visibleForTesting
+Future<void> applyAgentModel(
+  BuildContext context,
+  AppNotifier notifier, {
+  required String machineId,
+  required String agentId,
+  required ModelChoice choice,
+}) async {
+  final key = _retargetKey(machineId, agentId);
+  if (retargetingAgents.value.contains(key)) return;
+  retargetingAgents.value = {...retargetingAgents.value, key};
+  try {
+    GridAgentOverride? override;
+    if (choice.hasProvider) {
+      try {
+        // The picker's provider, not the sidebar's: a pick can move the agent
+        // to a grid this computer does not launch NEW agents against, and the
+        // default is not touched by moving one agent.
+        override = await resolveGridAgentOverride(
+          selection: GridSelection(
+            networkId: choice.networkId,
+            networkName: choice.networkName,
+          ),
+          model: choice.model,
+        );
+      } catch (error) {
+        if (context.mounted) _say(context, '$error');
+        return;
+      }
+    }
+
+    final message = await notifier.moveAgentToGrid(
+      machineId,
+      agentId,
+      override,
+    );
+    // Remembered only once the CLI has actually moved the agent: a Recent list
+    // that filled up with refusals would offer, at the top, exactly the picks
+    // that did not work.
+    if (message == null) {
+      unawaited(modelRecentsStore.remember(choice));
+      return;
+    }
+    if (message != AppNotifier.agentVanished && context.mounted) {
+      _say(context, message);
+    }
+  } finally {
+    retargetingAgents.value = {...retargetingAgents.value}..remove(key);
+  }
+}
+
+/// A refusal, where the reader is looking.
+///
+/// ⚠️ Callers past an `await` check `context.mounted` FIRST — the pane can close
+/// under an open dialog, since a machine going offline takes its panes with it.
+/// The check is theirs rather than this function's so the analyzer can see it:
+/// `use_build_context_synchronously` does not follow a guard through a call.
+void _say(BuildContext context, String message) =>
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+
 /// The header's per-agent model control. Looks its own value up at build time — see the library doc
 /// for why it takes no `grid` parameter.
 ///
@@ -128,9 +254,11 @@ class AgentModelMenu extends StatefulWidget {
 /// Public only for [debugSetPending] — a widget test cannot reach a private State to put this
 /// control in flight, and driving it there for real means an HTTP round trip.
 class AgentModelMenuState extends State<AgentModelMenu> {
-  // True while a pick is in flight, so a second tap cannot fire a second restart on top of the
-  // first one before the CLI has answered.
-  bool _pending = false;
+  /// Whether THIS agent's restart is in flight — read from [retargetingAgents]
+  /// rather than held here, so the skeleton shows whichever door started it.
+  bool get _pending => retargetingAgents.value.contains(
+    _retargetKey(widget.machineId, widget.agentId),
+  );
 
   /// Puts the control into its in-flight state without a network round trip.
   ///
@@ -139,7 +267,12 @@ class AgentModelMenuState extends State<AgentModelMenu> {
   /// what the header draws. This is the same seam the app's other widgets expose for exactly this
   /// (see `AppNotifier.handleEventForTest`).
   @visibleForTesting
-  void debugSetPending(bool value) => setState(() => _pending = value);
+  void debugSetPending(bool value) {
+    final key = _retargetKey(widget.machineId, widget.agentId);
+    retargetingAgents.value = value
+        ? {...retargetingAgents.value, key}
+        : ({...retargetingAgents.value}..remove(key));
+  }
 
   // Drawn as hovered while the picker is open, so the control does not go quiet under its own
   // dialog — the pointer leaves the pill the moment the panel appears.
@@ -158,46 +291,56 @@ class AgentModelMenuState extends State<AgentModelMenu> {
     // people who had not found the sidebar's picker.
     if (!widget.gridSurface) return const SizedBox.shrink();
     final capable = kGridCapableEngines.contains(widget.engine);
-    // Listens to the NOTIFIER: `busy` below is turn state, and nothing else in this subtree
-    // rebuilds when a turn starts or ends (the pane header holds no listener of its own). Without
-    // this the pill would latch at whatever it was built with and stay disabled after the turn it
-    // was disabled for had finished. It is also what repaints the label when the CLI's next
-    // discovery pass reports the agent on its new model.
-    return ListenableBuilder(
-      listenable: widget.notifier,
-      builder: (context, _) {
-        // Qualified by the standing condition, not raw turn state: `busy` is what earns the
-        // forbidden cursor and the sentence that promises the control comes back, and neither
-        // is true of an agent that is also mid-turn on an engine with no grid to move to. That
-        // one does not clear when the turn ends, so it is named first and this stays false.
-        final busy =
-            capable &&
-            widget.notifier.agentIsProcessing(widget.machineId, widget.agentId);
-        final enabled = capable && !_pending && !busy;
-        // Ordered by what the user can do about it: the standing condition first, then the one
-        // that clears on its own. Busy sits last because it outranks nothing — an engine that
-        // cannot use a grid says so whether or not it is mid-turn.
-        // The model the pill no longer has room to print. It leads every
-        // sentence below because it is the thing a reader hovers to find out —
-        // the caveat after it is what happens if they act on it.
-        final current = agentModelLabel(
-          agentGridOf(widget.notifier, widget.machineId, widget.agentId),
-        );
-        final tooltip = !capable
-            ? '$current · ${widget.engine} cannot use a grid'
-            : busy
-            ? '$current · the agent is running a turn — changing the model '
-                  'would restart it and lose the turn. This unlocks when the '
-                  'turn finishes.'
-            : '$current · changing the model restarts the agent';
-        return _buildPill(
-          context,
-          capable: capable,
-          enabled: enabled,
-          busy: busy,
-          tooltip: tooltip,
-        );
-      },
+    // Two listeners, two facts, neither of which anything else in this subtree
+    // would repaint for:
+    //
+    //  * [retargetingAgents] — whether THIS agent's restart is in flight, which
+    //    ⌘⇧M can start without the pill being touched at all. Without it the
+    //    skeleton would only ever appear for a restart begun by a click.
+    //  * the NOTIFIER — turn state for `busy` below, and the agent's model for
+    //    the tooltip. The pane header holds no listener of its own, so a pill
+    //    built mid-turn would stay disabled after that turn had finished.
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: retargetingAgents,
+      builder: (context, _, _) => ListenableBuilder(
+        listenable: widget.notifier,
+        builder: (context, _) {
+          // Qualified by the standing condition, not raw turn state: `busy` is what earns the
+          // forbidden cursor and the sentence that promises the control comes back, and neither
+          // is true of an agent that is also mid-turn on an engine with no grid to move to. That
+          // one does not clear when the turn ends, so it is named first and this stays false.
+          final busy =
+              capable &&
+              widget.notifier.agentIsProcessing(
+                widget.machineId,
+                widget.agentId,
+              );
+          final enabled = capable && !_pending && !busy;
+          // Ordered by what the user can do about it: the standing condition first, then the one
+          // that clears on its own. Busy sits last because it outranks nothing — an engine that
+          // cannot use a grid says so whether or not it is mid-turn.
+          // The model the pill no longer has room to print. It leads every
+          // sentence below because it is the thing a reader hovers to find out —
+          // the caveat after it is what happens if they act on it.
+          final current = agentModelLabel(
+            agentGridOf(widget.notifier, widget.machineId, widget.agentId),
+          );
+          final tooltip = !capable
+              ? '$current · ${widget.engine} cannot use a grid'
+              : busy
+              ? '$current · the agent is running a turn — changing the model '
+                    'would restart it and lose the turn. This unlocks when the '
+                    'turn finishes.'
+              : '$current · changing the model restarts the agent';
+          return _buildPill(
+            context,
+            capable: capable,
+            enabled: enabled,
+            busy: busy,
+            tooltip: tooltip,
+          );
+        },
+      ),
     );
   }
 
@@ -334,65 +477,19 @@ class AgentModelMenuState extends State<AgentModelMenu> {
     return width;
   }
 
-  /// Open the picker, and apply what it hands back.
+  /// Open the picker, and apply what it hands back — the same call ⌘⇧M makes.
+  /// All this adds is the pill's own lit state while the panel is up.
   Future<void> _pick(BuildContext context) async {
     setState(() => _open = true);
-    final current = currentModelChoice(
-      agentGridOf(widget.notifier, widget.machineId, widget.agentId),
-      accountProviders(),
+    await pickAgentModel(
+      context,
+      widget.notifier,
+      machineId: widget.machineId,
+      agentId: widget.agentId,
+      engine: widget.engine,
     );
-    final choice = await showModelPickerDialog(context, current: current);
     // Guarded: the pane can close under an open dialog — a machine going
     // offline takes its panes with it.
-    if (!mounted) return;
-    setState(() => _open = false);
-    // Dismissed, or the row the agent is already on. Neither is worth a restart:
-    // re-applying the model it is running would cost the turn's scrollback for
-    // nothing.
-    if (choice == null || choice == current) return;
-    await _apply(choice);
-  }
-
-  Future<void> _apply(ModelChoice choice) async {
-    if (_pending) return;
-    setState(() => _pending = true);
-
-    GridAgentOverride? override;
-    if (choice.hasProvider) {
-      try {
-        // The picker's provider, not the sidebar's: a pick can move the agent
-        // to a grid this computer does not launch NEW agents against, and the
-        // default is not touched by moving one agent.
-        override = await resolveGridAgentOverride(
-          selection: GridSelection(
-            networkId: choice.networkId,
-            networkName: choice.networkName,
-          ),
-          model: choice.model,
-        );
-      } catch (error) {
-        if (!mounted) return;
-        setState(() => _pending = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
-        return;
-      }
-    }
-
-    final message = await widget.notifier.moveAgentToGrid(
-      widget.machineId,
-      widget.agentId,
-      override,
-    );
-    // Remembered only once the CLI has actually moved the agent: a Recent list
-    // that filled up with refusals would offer, at the top, exactly the picks
-    // that did not work.
-    if (message == null) unawaited(modelRecentsStore.remember(choice));
-    if (!mounted) return;
-    setState(() => _pending = false);
-    if (message != null && message != AppNotifier.agentVanished) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
-    }
+    if (mounted) setState(() => _open = false);
   }
 }

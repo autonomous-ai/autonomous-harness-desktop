@@ -8,6 +8,7 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
 import '../widgets/layout_palette.dart';
 import '../widgets/link_machine_screen.dart';
+import '../widgets/agent_model_menu.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/machine_rail_mini.dart';
 import '../settings/settings_screen.dart';
@@ -84,8 +85,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return result;
   }
 
-
-
   void _stepAgent(int delta) {
     final agents = _visibleAgents();
     if (agents.isEmpty) return;
@@ -104,14 +103,42 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(widget.notifier.selectAgent(target.machineId, target.agentId));
   }
 
-
-
   void _closeFocusedPane() {
     final pane = widget.notifier.focusedPane;
     // No pane to close: leave ⌘W alone so macOS closes the window with it, the
     // way it does in every other app.
     if (pane == null) return;
     unawaited(widget.notifier.closePane(pane.id));
+  }
+
+  /// ⌘⇧M — the pane header's Model pill, without the mouse.
+  ///
+  /// The pill is the same call (`pickAgentModel`), so the refusals, the mint,
+  /// the restart and the Recent entry are one implementation. The engine comes
+  /// from the agent the pane is showing, not from the pane: a pane is an
+  /// intent, and it can be sitting on a machine that has not answered yet.
+  void _changeModel() {
+    final pane = widget.notifier.focusedPane;
+    // A pane is an INTENT: it exists before its machine has answered, and a
+    // tile with no agent yet has no model to change.
+    final agentId = pane?.agentId;
+    if (pane == null || agentId == null) return;
+    final engine = widget.notifier
+        .stateOf(pane.machineId)
+        ?.agents
+        .where((agent) => agent.id == agentId)
+        .map((agent) => agent.engine)
+        .firstOrNull;
+    if (engine == null) return;
+    unawaited(
+      pickAgentModel(
+        context,
+        widget.notifier,
+        machineId: pane.machineId,
+        agentId: agentId,
+        engine: engine,
+      ),
+    );
   }
 
   void _newAgent() {
@@ -154,6 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
+              ShortcutAction.changeModel: _changeModel,
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
               ShortcutAction.pinPane: () {
                 final id = notifier.focusedPaneId;

@@ -17,6 +17,12 @@ const kRelay = 'https://grid.autonomous.ai/grid-abc/relay';
 const kNetworkId = 'grid-live';
 
 void main() {
+  // The in-flight set is module-level, because ⌘⇧M and the pill share it (see
+  // `retargetingAgents`). A test that leaves an agent in it hands the next one a
+  // pill stuck showing its restart skeleton.
+  setUp(() => retargetingAgents.value = const {});
+  tearDown(() => retargetingAgents.value = const {});
+
   /// A machine with one claude agent pinned to a model, which is the fixture
   /// every test here needs and none of them is about.
   AppNotifier notifierOf(WidgetTester tester, {String engine = 'claude'}) {
@@ -120,6 +126,42 @@ void main() {
       Size.zero,
       reason: 'nothing left behind for the header to space around',
     );
+  });
+
+  testWidgets('a restart started from the keyboard shows on the pill', (
+    tester,
+  ) async {
+    // ⌘⇧M runs the same `pickAgentModel` the pill does, and the in-flight state
+    // is shared (`retargetingAgents`) rather than private to this widget — so a
+    // restart nobody clicked for still wears the skeleton on the control that
+    // is about to report the new model.
+    final notifier = notifierOf(tester);
+    await pumpPill(tester, notifier);
+    expect(find.text(kModelPillLabel), findsOneWidget);
+
+    retargetingAgents.value = const {'m1/a1'};
+    await tester.pump();
+
+    expect(find.byType(SkeletonText), findsOneWidget);
+    expect(find.byIcon(Icons.expand_more_rounded), findsNothing);
+
+    // The skeleton breathes on a repeating animation, so the tree has to come
+    // down inside the test — the binding asserts on a live ticker once the tree
+    // is gone.
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('another agent\'s restart leaves this pill alone', (
+    tester,
+  ) async {
+    final notifier = notifierOf(tester);
+    await pumpPill(tester, notifier);
+
+    retargetingAgents.value = const {'m1/somebody-else'};
+    await tester.pump();
+
+    expect(find.text(kModelPillLabel), findsOneWidget);
+    expect(find.byType(SkeletonText), findsNothing);
   });
 
   group('the picker it opens', () {

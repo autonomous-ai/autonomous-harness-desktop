@@ -57,6 +57,7 @@ enum ShortcutAction {
 
   closePane,
   newAgent,
+  changeModel,
   reload,
   showLayout,
   pinPane,
@@ -235,6 +236,22 @@ const List<AppShortcut> kAppShortcuts = [
     action: ShortcutAction.newAgent,
     activator: SingleActivator(LogicalKeyboardKey.keyN, meta: true),
     label: 'New agent',
+    group: ShortcutGroup.actions,
+  ),
+  AppShortcut(
+    action: ShortcutAction.changeModel,
+    // ⇧, because plain ⌘M is Minimize — AppKit owns it in `MainMenu.xib` and
+    // matches it in `performKeyEquivalent:`, which runs BEFORE the keystroke
+    // reaches Flutter at all (the same trap the note at the top of this file
+    // tells about ⌘C/⌘V/⌘A). The M is worth keeping through the shift: it is
+    // the letter of the thing being changed, and every other action here is
+    // named by its own initial.
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyM,
+      meta: true,
+      shift: true,
+    ),
+    label: "Change the focused agent's model",
     group: ShortcutGroup.actions,
   ),
   AppShortcut(

@@ -241,8 +241,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   badge and the pane's own buttons, so four panes side by side leave it ~150px and a real id
   ellipsized to `DeepSeek-V4-F…`, which answers nothing and costs the width anyway. The answer is
   on hover, where the tooltip leads with the model and follows with the caveat, and in the picker,
-  where the row the agent is on is ticked. It draws **nothing at all** only where there are no
-  providers in the build (`kGridSurfaceEnabled`, taken as a `@visibleForTesting` argument so the
+  where the row the agent is on is ticked. **⇧⌘M opens the same picker for the focused pane** — never plain ⌘M, which is
+  Minimize and is matched by AppKit before the keystroke reaches Flutter (the trap that once ate
+  ⌘V in a terminal pane). Both doors run one function, `pickAgentModel`, and share one in-flight
+  set, `retargetingAgents` (keyed `machineId/agentId`): it is what stops a second restart landing
+  on the first, and what draws the pill's skeleton for a restart the keyboard started. It draws
+  **nothing at all** only where there are no providers in the build (`kGridSurfaceEnabled`, taken as a `@visibleForTesting` argument so the
   shipped shape can be asserted). It used to leave whenever the SIDEBAR had picked no default,
   which was right while the menu could only offer that one grid's models — with the picker listing
   every provider, that hid the door for exactly the people who had not found the sidebar's picker.
