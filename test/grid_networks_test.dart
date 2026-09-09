@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:harness/core/local_key_value_store.dart';
+import 'package:harness/grid/grid_access.dart';
 import 'package:harness/grid/grid_models_controller.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
@@ -20,6 +21,20 @@ import 'package:harness/share/share_target_store.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
+
+/// A grid whose name IS its access rule, and one whose name is just a name.
+final _domainGrid = GridNetwork.fromJson(const {
+  'network_id': 'grid-domain',
+  'name': 'clc.fitus.edu.vn',
+  'owner_email': 'huy@example.com',
+  'network_type': 'private-domain',
+});
+final _invitedGrid = GridNetwork.fromJson(const {
+  'network_id': 'grid-invited',
+  'name': 'hp-1-1',
+  'owner_email': 'huy@example.com',
+  'network_type': 'permissioned',
+});
 
 /// A relay that serves a different list per grid.
 ///
@@ -311,7 +326,9 @@ void main() {
       expect(find.text('admin'), findsNothing);
       // The rail's one line is the models the provider SERVES — read off the
       // relay, not the `router_advisors` it used to count.
-      expect(find.text('2 models'), findsWidgets);
+      // One, not two: the fake relay answers `Auto` + one real model, and the
+      // virtual router is not a model this provider serves.
+      expect(find.text('1 model'), findsWidgets);
       expect(find.textContaining('router'), findsNothing);
       expect(find.byKey(const Key('grid-refresh-button')), findsOneWidget);
     });
@@ -523,6 +540,60 @@ void main() {
       expect(find.byKey(const Key('provider-models-retry')), findsOneWidget);
     });
 
+    // ⚠️ The relay advertises its virtual `auto` router whether or not anybody
+    // is serving, so a grid nobody has joined a node to answers /models with
+    // one entry. Counted, that reads as "1 model" on a provider that can
+    // answer nothing — and hides the one state the pane most needs to shout
+    // about.
+    testWidgets('a provider serving only Auto is bare, and says what to do', (
+      tester,
+    ) async {
+      final models = GridModelsController(
+        client: _ModelsApi({
+          'grid-aaf6a46ced4f42f9': ['Auto'],
+          'grid-e3b210eacc5b4cdf': ['Auto', 'qwen3-coder-30b'],
+        }),
+      );
+      addTearDown(models.dispose);
+      await pump(
+        tester,
+        newController(),
+        models: models,
+        onShowSection: (_) {},
+      );
+
+      expect(find.text('Add a model to use this provider.'), findsOneWidget);
+      // Twice for the bare provider — its rail line and the panel's heading —
+      // while the other one's line counts the single real model it has.
+      expect(find.text('No models'), findsNWidgets(2));
+      expect(find.text('1 model'), findsOneWidget);
+      expect(find.text('Auto'), findsNothing);
+      // Loud here, because it is the only thing worth pressing on the panel.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('provider-add-model')),
+          matching: find.byType(FilledButton),
+        ),
+        findsOneWidget,
+      );
+
+      // The provider that HAS a model counts only the real one, and its
+      // button goes back to being one option among several.
+      await tester.tap(
+        find.byKey(const Key('provider-row-grid-e3b210eacc5b4cdf')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Add a model to use this provider.'), findsNothing);
+      expect(find.text('qwen3-coder-30b'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('provider-add-model')),
+          matching: find.byType(OutlinedButton),
+        ),
+        findsOneWidget,
+      );
+    });
+
     // Putting a model on a provider happens on the OTHER pane, so the button
     // is a door: it pins that pane's grid to this provider and goes there.
     // Without the pin the reader would land on whatever grid the share page
@@ -626,6 +697,34 @@ void main() {
       await tester.tap(name);
       await tester.pumpAndSettle();
       expect(find.text('Rename provider'), findsOneWidget);
+    });
+
+    // ⚠️ A `private-domain` grid's NAME is the email domain that may join it.
+    // The control plane refuses to create one under any other name and then
+    // lets any admin PATCH a new one straight in — so a rename here would
+    // change who can use the provider, silently.
+    testWidgets('a provider named after its domain cannot be renamed', (
+      tester,
+    ) async {
+      final models = GridModelsController(client: FakeGridApi());
+      addTearDown(models.dispose);
+      await pump(
+        tester,
+        newController(),
+        models: models,
+        harnessEmail: 'huy@example.com',
+      );
+
+      // The fixture's owned grid is `permissioned` — renameable.
+      expect(
+        find.byKey(const Key('provider-name-grid-aaf6a46ced4f42f9')),
+        findsOneWidget,
+      );
+
+      expect(gridCanBeRenamed(_domainGrid), isFalse);
+      expect(gridRenameRefusal(_domainGrid), contains('who can use'));
+      expect(gridCanBeRenamed(_invitedGrid), isTrue);
+      expect(gridRenameRefusal(_invitedGrid), isNull);
     });
 
     // Share sits with the name because it is about PEOPLE — who else may use
