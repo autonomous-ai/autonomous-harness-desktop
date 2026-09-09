@@ -274,11 +274,14 @@ class EnvironmentProvisioner {
     // a Node. Doing it there rather than here keeps ONE implementation of that,
     // shared with everyone who installs the CLI from a terminal.
     final install = await _shell(
-      // Served by the Harness web application; the retired top-level /install.sh is gone.
+      // Served off the CDN-fronted public bucket (autonomous-code: apps/web/scripts/cli-install.sh,
+      // published with `make upload-cli-install-sh`), not by the web app. The old web-app URL,
+      // https://harness.autonomous.ai/cli/install.sh, still redirects here, but pointing at the CDN
+      // URL directly avoids that extra hop.
       // A stale URL is worse here than anywhere else: a 404 piped into bash still exits 0 (measured),
       // so the `install.exitCode != 0` check below would pass and the failure would only surface as
       // the confusing "CLI did not start after installation" a few lines further down.
-      'set -e; curl -fsSL https://harness.autonomous.ai/cli/install.sh | /bin/sh',
+      'set -e; curl -fsSL https://cdn.autonomous.ai/harness/cli/install.sh | /bin/sh',
     );
     if (install.exitCode != 0) {
       throw StateError('Harness installer failed: ${_resultText(install)}');

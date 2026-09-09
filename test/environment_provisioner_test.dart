@@ -36,7 +36,7 @@ void main() {
         // Matched exactly, not on a bare `curl -fsSL`: the Grid CLI's installer
         // is one too, so a loose match would make this test depend on the Grid
         // probe happening to succeed first.
-        if (command.contains('harness.autonomous.ai/cli/install.sh')) {
+        if (command.contains('cdn.autonomous.ai/harness/cli/install.sh')) {
           installEnvironments.add(environment);
           return result(0, stdout: 'installed');
         }
