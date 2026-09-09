@@ -120,17 +120,24 @@ gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.zip
 gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.dmg
 ```
 
+The manifest is always read straight off the GCS origin (`CDN_ASSET_BASE_URL` in `upload-desktop.sh`/
+`upload-desktop-linux.sh` does not apply to it) — it's polled every ~60s by every running app, and this
+product's CDN caps any cacheable response at ~31 days regardless of origin headers, so it must never be
+CDN-fronted. The zip/dmg/AppImage it points at are the opposite: immutable once published, so their
+`url` fields point at `cdn.autonomous.ai` instead, and are uploaded with a long `Cache-Control` on
+purpose.
+
 ```json
 {
   "desktop-macos": {
     "version": "1.2.4",
-    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-macos.zip",
+    "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-macos.zip",
     "sha256": "<64 hex>",
     "size": 45231920
   },
   "desktop-macos-dmg": {
     "version": "1.2.4",
-    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-macos.dmg",
+    "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-macos.dmg",
     "sha256": "<64 hex>",
     "size": 47118336
   }
@@ -263,7 +270,7 @@ gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-linux-arm64.AppIm
 {
   "desktop-linux-x64": {
     "version": "1.2.4",
-    "url": "https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/1.2.4/Harness-linux-x64.AppImage",
+    "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-linux-x64.AppImage",
     "sha256": "<64 hex>",
     "size": 41230011
   }
