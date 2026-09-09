@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show exit, pid;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,6 +15,7 @@ import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/engine_availability.dart';
 import '../core/models.dart';
+import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
 import '../settings/config_store.dart';
@@ -184,13 +186,17 @@ class AppNotifier extends ChangeNotifier {
   // rare case a push event was dropped. Runs silently: see _syncAgentsIfChanged.
   final Map<String, Timer> _agentSyncTimers = {};
   // Keeps the local `harness` daemon alive for the whole app run — started once after the first
-  // successful bootstrap (see `_ensureCliDaemon`), cancelled on dispose. Cancelling only stops this
+  // successful bootstrap (see `ensureCliDaemonReady`), cancelled on dispose. Cancelling only stops this
   // Dart-side loop; the daemon itself self-daemonizes and must keep running after the app quits.
   Timer? _daemonSupervisionTimer;
   // Update checks do not depend on the daemon or SSO. A signed-out user should
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
   String? _skippedDesktopUpdateVersion;
+  // Set from the store on every `bootstrap()` (see `_prepareEnvironment`), never mutated except
+  // there or on the first successful environment check — a machine that has passed once skips
+  // re-probing CLI/tmux/Grid presence on every later launch.
+  bool _environmentConfirmed = false;
   UpdateInfo? availableUpdate;
   bool isCheckingForUpdate = false;
   bool isInstallingUpdate = false;
@@ -207,6 +213,9 @@ class AppNotifier extends ChangeNotifier {
   // finished (an agent's launch), where the only honest control is to
   // dismiss it.
   bool _lastErrorRetryable = true;
+  // Shown on the pre-navigation `bootstrapping` screen while [_finishBootstrapSignedIn] waits on the
+  // local daemon — null the rest of the time, including once [status] flips to `authenticated`.
+  String? _bootStatusMessage;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
@@ -300,6 +309,7 @@ class AppNotifier extends ChangeNotifier {
 
   String? get lastError => _lastError;
   bool get lastErrorRetryable => _lastErrorRetryable;
+  String? get bootStatusMessage => _bootStatusMessage;
 
   /// Clears the error strip without retrying anything, for a failure retrying
   /// cannot fix (see [_lastErrorRetryable]).
@@ -601,6 +611,7 @@ class AppNotifier extends ChangeNotifier {
         _autonomousEnv = 'prod';
         api = ApiClient(config: config, session: session);
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
+        _environmentConfirmed = _store.environmentConfirmed;
       }
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
@@ -652,6 +663,17 @@ class AppNotifier extends ChangeNotifier {
   /// first-run phase instead.
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
+    if (_environmentConfirmed) {
+      // CLI, tmux and Grid were all found ready on this machine before, and none of the three
+      // uninstall themselves — skip the three subprocess probes (and the screen they'd otherwise
+      // flash onto) on every later launch rather than re-verifying something already proven.
+      environmentReadiness = EnvironmentReadiness(
+        steps: {
+          for (final step in EnvironmentStep.values) step: EnvironmentStepStatus.ready,
+        },
+      );
+      return true;
+    }
     _environmentSetupInFlight = true;
     status = AppStatus.preparingEnvironment;
     environmentReadiness = EnvironmentReadiness.initial();
@@ -674,6 +696,8 @@ class AppNotifier extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+      _environmentConfirmed = true;
+      unawaited(_store?.saveEnvironmentConfirmed());
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -717,7 +741,13 @@ class AppNotifier extends ChangeNotifier {
   /// start on its own, and every call below is a local-CLI-proxied request that needs it), then fetch
   /// the profile and load the machine list over it.
   Future<void> _finishBootstrapSignedIn() async {
-    status = AppStatus.authenticated;
+    // Stays on the pre-navigation `bootstrapping` screen (main.dart) until the daemon is
+    // confirmed reachable — flipping to `authenticated` any earlier is what let the home UI
+    // race `harness start`'s own backend handshake and surface a bogus 30s "Could not load
+    // machines" timeout. A daemon that never comes up still gets a home screen below, with
+    // the failure shown there as before, since that's where the retry affordance lives.
+    _bootStatusMessage = 'Starting local service…';
+    notifyListeners();
     // Before the machines, deliberately: the tiles are intent, they render as
     // "waiting for that machine" on their own, and each attaches as its machine
     // answers. Waiting for the machine list first would leave the window empty
@@ -726,13 +756,20 @@ class AppNotifier extends ChangeNotifier {
     await _restorePaneLayout();
     _ensurePool();
     try {
-      await _ensureCliDaemon();
+      await ensureCliDaemonReady();
     } catch (error) {
+      _bootStatusMessage = null;
+      status = AppStatus.authenticated;
       _lastError = '$error';
       _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
+    _bootStatusMessage = null;
+    // `ensureCliDaemonReady` may have signed the app out instead of succeeding (daemon absent AND
+    // the saved session gone) — that already routed to the login screen, so don't clobber it.
+    if (status == AppStatus.unauthenticated) return;
+    status = AppStatus.authenticated;
     try {
       final me = await api.me();
       if (me != null) {
@@ -792,8 +829,9 @@ class AppNotifier extends ChangeNotifier {
 
   /// The local daemon (`harness start`) must be up before any local REST/WS call can work — unlike
   /// `harness login`, it does not start on its own. Sets [_cliEndpoint], the dial target every
-  /// machine's WsConn now uses.
-  Future<void> _ensureCliDaemon() async {
+  /// machine's WsConn now uses. Public (like [refreshMachines]) so a test subclass can stub it
+  /// without shelling out to a real `harness` binary.
+  Future<void> ensureCliDaemonReady() async {
     final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
     final endpoint = await discovery.ensureRunning();
     if (endpoint == null) {
@@ -1180,7 +1218,20 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<Machine>> _fetchMachines() => api.machines();
+  // The daemon reports `connected` only once its own backend socket is open, but
+  // `/api/machines` is a separate REST leg (fresh token refresh + fetch) that can still stall
+  // briefly right after that — a bounded retry absorbs that transient window without falling
+  // back to the 30s Dio timeout. Never retries an `ApiException` (a real HTTP error response);
+  // only a `DioException` (timeout/connection failure) is worth a second try.
+  // Capped at 2 attempts, not 3: `receiveTimeout` is 30s, so every retried attempt can cost
+  // another 30s on a genuine failure — one retry absorbs the transient window above without
+  // tripling how long a truly broken backend takes to surface its error.
+  Future<List<Machine>> _fetchMachines() => withRetry(
+    api.machines,
+    maxAttempts: 2,
+    initialDelay: const Duration(milliseconds: 500),
+    isRetryable: (error) => error is DioException,
+  );
 
   void _startOfflineRetry(MachineState machine) {
     final machineId = machine.machine.machineId;
@@ -1493,6 +1544,17 @@ class AppNotifier extends ChangeNotifier {
   }
 
   Future<void> _performRetryMachines() async {
+    // Re-verify the daemon first: a retry that skips straight to `refreshMachines()` can hit
+    // the exact same "daemon not connected yet" timeout the button was pressed to escape.
+    try {
+      await ensureCliDaemonReady();
+    } catch (error) {
+      _lastError = '$error';
+      _lastErrorRetryable = true;
+      notifyListeners();
+      return;
+    }
+    if (status == AppStatus.unauthenticated) return;
     try {
       await refreshMachines();
       _lastError = null;

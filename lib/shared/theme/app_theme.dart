@@ -3,17 +3,15 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 
 /// The app's live brightness — the single source of truth the color tokens below
-/// resolve against. It is *not* read from the platform directly: [_BrightnessSync]
-/// (in `grid_app.dart`) sets it from `Theme.of(context).brightness`, i.e. the
-/// brightness Material actually resolved after `ThemeMode.system` is applied, so
-/// the tokens always match what the framework rendered.
+/// resolve against. Harness Desktop is dark-only: `_GridTokenScope` (in
+/// `main.dart`) pins this to [Brightness.dark] once, at the top of the tree.
 ///
 /// Every `AppPalette`/`AppSurface`/`AppGlass`/`AppCard` member is a getter that
 /// switches on this, so a call site like `color: AppPalette.windowBg` follows the
 /// theme with no change to the call site.
 abstract final class AppTheme {
   static final BrightnessNotifier brightness = BrightnessNotifier(
-    Brightness.light,
+    Brightness.dark,
   );
 
   /// Fires when the user's type settings change. Separate from [brightness]

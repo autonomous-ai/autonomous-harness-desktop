@@ -2,16 +2,14 @@
 // dialog never had: a rail you pick a section from, a pane that follows it, a
 // filter over the rail, and a way back out.
 //
-// Deliberately never calls a mutating method on either real global singleton
-// (`terminalFontStore` or `themeModeStore`): both persist through the real
-// `HarnessFileStore` (the user's actual `~/.harness/desktop-app/state.json`),
-// the same reason `theme_mode_store_test.dart` never touches the real
-// `themeModeStore` either. This only reads each store's untouched default.
+// Deliberately never calls a mutating method on the real global
+// `terminalFontStore` singleton: it persists through the real
+// `HarnessFileStore` (the user's actual `~/.harness/desktop-app/state.json`).
+// This only reads the store's untouched default.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:harness/settings/appearance/theme_preview_tile.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:harness/auth/auth_session.dart';
@@ -95,7 +93,7 @@ void main() {
     expect(find.text('hp-1-1'), findsOneWidget);
   });
 
-  testWidgets('picking Appearance swaps the pane for the theme control', (
+  testWidgets('picking Appearance swaps the pane for the typography controls', (
     tester,
   ) async {
     await openSettings(tester);
@@ -105,27 +103,8 @@ void main() {
 
     expect(find.text('Appearance'), findsNWidgets(2));
 
-    // The theme choice, three tiles, defaulting to System.
-    //
-    // Scoped to the tiles: 'System' now appears twice on this pane, once as a
-    // theme and once as the UI font — two different senses of the same word,
-    // which is why the font control carries its face name beside it.
-    final tiles = find.byType(ThemePreviewTile);
-    expect(tiles, findsNWidgets(3));
-    expect(
-      find.descendant(of: tiles, matching: find.text('System')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: tiles, matching: find.text('Light')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: tiles, matching: find.text('Dark')),
-      findsOneWidget,
-    );
-
-    // Typography arrived with it.
+    // Typography is the whole pane now that there is no theme to choose —
+    // Harness Desktop is dark-only.
     expect(find.text('Typography'), findsOneWidget);
     expect(find.text('UI font'), findsOneWidget);
     expect(find.text('UI font size'), findsOneWidget);
@@ -168,7 +147,6 @@ void main() {
     // The Grid pane is gone with its section.
     expect(find.text('hp-1-1'), findsNothing);
     // The Appearance controls are gone with their pane.
-    expect(find.byType(ThemePreviewTile), findsNothing);
     expect(find.byKey(const Key('appearance-ui-size-field')), findsNothing);
   });
 

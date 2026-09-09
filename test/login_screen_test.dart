@@ -7,11 +7,8 @@ import 'package:harness/auth/cli_login.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/screens/login_screen.dart';
 import 'package:harness/shared/theme/app_theme.dart' as grid;
-import 'package:harness/shared/theme/theme_mode_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/login_relay_diagram.dart';
-import 'package:harness/widgets/theme_mode_switch.dart';
-import 'package:harness/widgets/window_chrome.dart';
 
 /// Wraps the screen in the same chrome `main.dart` gives it, at the app's
 /// minimum window size — 880×560 — because that is where a card gets cramped
@@ -170,41 +167,6 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Sign in'), findsOneWidget);
-  });
-
-  testWidgets('the theme switch offers all three modes and picks one', (
-    tester,
-  ) async {
-    addTearDown(() => themeModeStore.value = ThemeMode.system);
-    final app = _notifier(AppStatus.unauthenticated);
-    await tester.pumpWidget(_host(app));
-    await tester.pump(const Duration(milliseconds: 100));
-
-    expect(find.byType(ThemeModeSwitch), findsOneWidget);
-    // The theme is the one setting that means something before there is a
-    // session, which is why it is reachable from this screen at all.
-    expect(themeModeStore.value, ThemeMode.system);
-
-    await tester.tap(find.bySemanticsLabel('Dark'));
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(themeModeStore.value, ThemeMode.dark);
-
-    await tester.tap(find.bySemanticsLabel('Light'));
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(themeModeStore.value, ThemeMode.light);
-  });
-
-  testWidgets('the theme switch clears the window drag band', (tester) async {
-    final app = _notifier(AppStatus.unauthenticated);
-    await tester.pumpWidget(_host(app));
-    await tester.pump(const Duration(milliseconds: 100));
-
-    // ⚠️ The top 28px belong to AppKit: `TitleBarStyle.hidden` makes the title
-    // bar transparent rather than removing it, so a control drawn inside that
-    // band renders perfectly and never receives a click. This is the guard —
-    // it fails if anyone moves the switch up into the strip.
-    final top = tester.getTopLeft(find.byType(ThemeModeSwitch)).dy;
-    expect(top, greaterThanOrEqualTo(windowDragBandHeight));
   });
 
   test('the diagram\'s caption clears the body-text contrast floor', () {

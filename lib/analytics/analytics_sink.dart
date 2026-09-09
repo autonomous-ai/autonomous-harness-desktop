@@ -17,7 +17,7 @@ import 'analytics_service.dart';
 /// The app's one analytics sink.
 ///
 /// A lazily-built singleton rather than a Riverpod provider, for the same
-/// reason `themeModeStore` and `gridSelectionStore` are: the call sites have no
+/// reason `terminalFontStore` and `gridSelectionStore` are: the call sites have no
 /// common ancestor short of `MaterialApp` — `main`, `AppNotifier`, a settings
 /// pane, a menu item inside a pane header — and most of them are plain widgets
 /// that were handed a notifier, not a `Ref`.

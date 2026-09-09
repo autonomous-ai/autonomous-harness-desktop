@@ -1,7 +1,6 @@
 import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
 import '../shared/theme/appearance_prefs_store.dart';
-import '../shared/theme/theme_mode_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
 
@@ -18,14 +17,12 @@ import '../terminal/terminal_font_store.dart';
 ///
 /// The parameters exist for tests; the app passes nothing and gets the singletons the widgets read.
 Future<void> loadPersistedSettings({
-  ThemeModeStore? themeMode,
   TerminalFontStore? terminalFont,
   GridSelectionStore? gridSelection,
   GridSessionStore? gridSession,
   AppearancePrefsStore? appearance,
   HarnessStats? stats,
 }) async {
-  await (themeMode ?? themeModeStore).load();
   await (terminalFont ?? terminalFontStore).load();
   // The sidebar names the chosen grid in its first frame; loading this later
   // would show "No grid" and then snap to the real choice.

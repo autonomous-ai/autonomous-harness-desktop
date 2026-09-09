@@ -7,20 +7,8 @@ import FlutterMacOS
 /// means. Nothing about updating lives on this side.
 private let kMenuChannel = "harness/app_menu"
 
-/// Channel Dart uses to put AppKit into the same theme the app is wearing.
-///
-/// ⚠️ FLUTTER'S THEME DOES NOT REACH APPKIT, AND THAT IS THE WHOLE REASON THIS
-/// EXISTS. `MaterialApp.themeMode` paints what Flutter draws; every native
-/// surface — the standard About panel, the menu bar, the window's title bar and
-/// its traffic lights, any AppKit sheet — follows `NSApp.appearance`, which
-/// nothing in Dart touches. Choosing Light on a Mac set to Dark therefore left
-/// a white app wearing a black About panel and a black title bar, which reads
-/// as the theme being half-finished rather than as two systems disagreeing.
-private let kAppearanceChannel = "harness/appearance"
-
 class MainFlutterWindow: NSWindow {
   private var menuChannel: FlutterMethodChannel?
-  private var appearanceChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -34,25 +22,14 @@ class MainFlutterWindow: NSWindow {
       name: kMenuChannel,
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
-    appearanceChannel = FlutterMethodChannel(
-      name: kAppearanceChannel,
-      binaryMessenger: flutterViewController.engine.binaryMessenger
-    )
-    appearanceChannel?.setMethodCallHandler { call, result in
-      guard call.method == "set" else {
-        result(FlutterMethodNotImplemented)
-        return
-      }
-      // `nil` is not "no answer" here — it is the answer for System, and it is
-      // the only value that lets AppKit keep following the OS on its own when
-      // the user flips the Mac's own setting while this app is open.
-      switch call.arguments as? String {
-      case "light": NSApp.appearance = NSAppearance(named: .aqua)
-      case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-      default: NSApp.appearance = nil
-      }
-      result(nil)
-    }
+
+    // Harness Desktop is dark-only. Flutter's own theme does not reach AppKit —
+    // every native surface (the standard About panel, the menu bar, the
+    // window's title bar and its traffic lights, any AppKit sheet) follows
+    // `NSApp.appearance`, not `MaterialApp.theme` — so it is pinned here once
+    // rather than left to whatever the Mac's own Appearance setting is, which
+    // would otherwise paint a dark app with a light About panel and title bar.
+    NSApp.appearance = NSAppearance(named: .darkAqua)
 
     installAppMenuItems()
     installViewMenuItems()

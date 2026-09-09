@@ -2,6 +2,7 @@ import 'package:harness/auth/auth_session.dart';
 import 'package:harness/auth/cli_login.dart';
 import 'package:harness/bootstrap/environment_provisioner.dart';
 import 'package:harness/core/config.dart';
+import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/core/models.dart';
 import 'package:harness/main.dart';
 import 'package:harness/settings/config_store.dart';
@@ -59,12 +60,14 @@ class _BrokenConfigStore extends ConfigStore {
 }
 
 class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
+  bool called = false;
   _ReadyEnvironmentProvisioner() : super(isMacOS: true);
 
   @override
   Future<EnvironmentReadiness> ensureReady({
     required void Function(EnvironmentReadiness value) onProgress,
   }) async {
+    called = true;
     final ready = EnvironmentReadiness(
       steps: {
         for (final step in EnvironmentStep.values)
@@ -74,6 +77,21 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
     onProgress(ready);
     return ready;
   }
+}
+
+class _FakeKeyValueStore implements LocalKeyValueStore {
+  final Map<String, String> values = {};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async => values.remove(key);
 }
 
 void main() {
@@ -131,6 +149,49 @@ void main() {
       expect(app.config.apiBaseUrl, ConfigStore.defaultBaseUrl);
       expect(app.autonomousEnv, 'prod');
       expect(store.resetCalls, 0);
+    },
+  );
+
+  test(
+    'a machine confirmed once skips environment setup on the next launch',
+    () async {
+      final storage = _FakeKeyValueStore()
+        ..values['environment_confirmed_ready'] = 'true';
+      final provisioner = _ReadyEnvironmentProvisioner();
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+
+      expect(provisioner.called, isFalse);
+      expect(app.environmentReadiness.isReady, isTrue);
+      // Reached the login check rather than getting stuck on preparingEnvironment.
+      expect(app.status, AppStatus.unauthenticated);
+    },
+  );
+
+  test(
+    'environment setup, once it succeeds, is remembered for next time',
+    () async {
+      final storage = _FakeKeyValueStore();
+      final provisioner = _ReadyEnvironmentProvisioner();
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+
+      expect(provisioner.called, isTrue);
+      expect(storage.values['environment_confirmed_ready'], 'true');
     },
   );
 

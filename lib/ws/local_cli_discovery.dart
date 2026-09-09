@@ -230,6 +230,12 @@ class LocalCliDiscovery {
       // remains accepted for backward compatibility; false means the daemon is alive but not ready to
       // publish an authoritative empty/non-empty agent list yet.
       if (body?['discoveryReady'] == false) return null;
+      // `discoveryReady` is local-only (tmux/agent-process scanning) and can go true well before the
+      // daemon has actually connected to the backend — `/api/machines` and friends proxy straight to
+      // it, so treating discovery-ready as "ready" raced the handshake and surfaced as a bogus 30s
+      // receive-timeout right after boot. `connected` is the daemon's own backend-socket state
+      // (missing field ⇒ older CLI ⇒ accepted, same idiom as above).
+      if (body?['connected'] == false) return null;
       final advertisedComputerId = _normalizeComputerId(body?['computerId']);
       final advertised = body?['localWs'];
       if (advertisedComputerId != localComputerId || advertised is! Map) {
