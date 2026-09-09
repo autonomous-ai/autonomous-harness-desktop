@@ -91,7 +91,10 @@ void main() {
         keyProviders: const ['OpenAI', 'Anthropic'],
         backends: const [],
       );
-      expect(offers.first.line, contains('OpenAI or Anthropic'));
+      // Last, not first: the key route is the one that spends money, so it
+      // sits under the two the machine can already do for nothing.
+      expect(offers.last.route, ShareRoute.key);
+      expect(offers.last.line, contains('OpenAI or Anthropic'));
     });
 
     test('a machine with the engine but no model still gets the route', () {
@@ -130,11 +133,18 @@ void main() {
         keyProviders: const ['OpenAI'],
         backends: const [],
       );
-      // Three appealing sentences cannot be compared; two units can.
+      // Three appealing sentences cannot be compared; two units can. Read
+      // down, they also give the order: a download this machine can do for
+      // free, then an engine it already has, then somebody's bill.
+      expect(offers.map((offer) => offer.route), [
+        ShareRoute.local,
+        ShareRoute.server,
+        ShareRoute.key,
+      ]);
       expect(offers[0].cost, contains('One download'));
       expect(offers[0].cost, contains('nothing to pay'));
-      expect(offers[1].cost, contains('billed to your key'));
-      expect(offers[2].cost, contains('No download'));
+      expect(offers[1].cost, contains('No download'));
+      expect(offers[2].cost, contains('billed to your key'));
     });
   });
 
