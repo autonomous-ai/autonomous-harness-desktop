@@ -886,4 +886,88 @@ void main() {
       expect(messages(), isEmpty);
     });
   });
+
+  group('pasteText', () {
+    /// The `terminal_paste` frames this session put on the wire.
+    List<Map<String, dynamic>> pastes() => [
+      for (final frame in sent)
+        if (frame.type == 'terminal_paste') frame.payload,
+    ];
+
+    Future<void> live() async {
+      await ready();
+      await session.handleBinary(
+        output(0, utf8.encode(r'$ '), keyframe: true, cols: 100, rows: 30),
+      );
+      sent.clear();
+    }
+
+    test('sends the whole clipboard as one frame, not chunked', () async {
+      await live();
+      final big = List.generate(200, (i) => 'line $i').join('\n');
+
+      expect(await session.pasteText(big), isTrue);
+
+      expect(pastes(), hasLength(1));
+      expect(pastes().single['text'], big);
+      expect(pastes().single['streamId'], streamId);
+      // Never through the keystroke/binary pipeline this feature exists to avoid.
+      expect(binarySent, isEmpty);
+    });
+
+    test('strips Ctrl+C, which would be a SIGINT once pasted into the pane', () async {
+      await live();
+
+      expect(await session.pasteText('a\x03b'), isTrue);
+
+      expect(pastes().single['text'], 'ab');
+    });
+
+    test('sends nothing while the stream is not accepting input', () async {
+      expect(session.acceptsInput, isFalse);
+      expect(await session.pasteText('should not go'), isFalse);
+      expect(pastes(), isEmpty);
+    });
+
+    test('sends nothing for an empty paste', () async {
+      await live();
+
+      expect(await session.pasteText(''), isFalse);
+      expect(pastes(), isEmpty);
+    });
+
+    test(
+      'a rejected paste (too large/empty) leaves the stream alive, unlike every other terminal_error',
+      () async {
+        await live();
+
+        final handled = await session.handleFrame('terminal_error', {
+          'streamId': streamId,
+          'code': 'TERMINAL_PASTE_INVALID',
+          'message': 'paste too large',
+        });
+
+        expect(handled, isTrue);
+        expect(session.status, TerminalSessionStatus.controlling);
+        expect(session.streamId, streamId);
+        expect(session.errorCode, isNull);
+      },
+    );
+
+    test(
+      'a real paste delivery failure still freezes the stream, like resize/input failures do',
+      () async {
+        await live();
+
+        await session.handleFrame('terminal_error', {
+          'streamId': streamId,
+          'code': 'TERMINAL_PASTE_FAILED',
+          'message': 'tmux paste-buffer could not be sent',
+        });
+
+        expect(session.status, TerminalSessionStatus.error);
+        expect(session.errorCode, 'TERMINAL_PASTE_FAILED');
+      },
+    );
+  });
 }

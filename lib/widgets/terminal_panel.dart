@@ -426,7 +426,18 @@ class _TerminalPanelState extends State<TerminalPanel>
     if (widget.readOnly || !widget.session.acceptsInput) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     if (text != null && text.isNotEmpty) {
-      widget.session.terminal.paste(text);
+      // `terminal_paste` only exists on the LOCAL loopback transport for now — routing it through the
+      // cloud relay needs its own pairwise-E2EE allowlisting (a change shared with the browser client
+      // and the paired hardware device, done separately). A remote machine keeps using the ordinary
+      // keystroke pipeline, same as before this existed.
+      final machine = widget.notifier.stateOf(widget.session.machineId);
+      if (machine != null &&
+          machine.isLocalMachine &&
+          machine.terminalPasteRawAvailable) {
+        await widget.session.pasteText(text);
+      } else {
+        widget.session.terminal.paste(text);
+      }
       return;
     }
     widget.session.terminal.keyInput(TerminalKey.keyV, ctrl: true);

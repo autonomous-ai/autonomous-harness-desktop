@@ -330,10 +330,18 @@ class TerminalSession extends ChangeNotifier {
         final errorRequest = payload['requestId'];
         if (errorStream != null && errorStream != streamId) return true;
         if (errorRequest != null && errorRequest != _openRequestId) return true;
-        _fail(
-          payload['code']?.toString() ?? 'TERMINAL_ERROR',
-          payload['message']?.toString(),
-        );
+        final errorCode = payload['code']?.toString() ?? 'TERMINAL_ERROR';
+        // A rejected paste (empty, or over the daemon's sanity ceiling) never touched tmux — the
+        // stream itself is completely fine, so this must not freeze it the way a real transport/
+        // protocol failure does. `debugPrint` only: there is no dedicated per-action failure surface
+        // to show the user something better than silence, and silence beats losing the terminal.
+        if (errorCode == 'TERMINAL_PASTE_INVALID') {
+          debugPrint(
+            'TerminalSession: paste rejected: ${payload['message'] ?? errorCode}',
+          );
+          return true;
+        }
+        _fail(errorCode, payload['message']?.toString());
         return true;
       case 'terminal_transport_error':
         transportLost(
@@ -590,6 +598,32 @@ class TerminalSession extends ChangeNotifier {
       'agentId': agentId,
       'mode': 'auto',
     });
+  }
+
+  /// A clipboard paste made directly into this pane, delivered as one atomic unit instead of going
+  /// through the same chunked pipeline as ordinary typing ([_onTerminalOutput]/[_flushInput]).
+  ///
+  /// A big paste run through that pipeline gets sliced into ≤8 KiB binary frames client-side and then
+  /// into 2 KiB `send-keys -H` bursts on the daemon — each burst arrives far enough apart that the
+  /// engine's own paste-detector (readline/Ink) can register it as a SEPARATE paste, which is why a
+  /// large paste read as dozens of `[Pasted text #N]` markers instead of one. `terminal_paste` routes
+  /// through the daemon's `tmux paste-buffer` instead, the same single-shot mechanism composer
+  /// messages already use — see `pasteRawIntoTmux` in the harness CLI.
+  ///
+  /// The caller must check [MachineState.terminalPasteRawAvailable] first: an older CLI does not know
+  /// this frame type at all, so sending it there would silently go nowhere.
+  Future<bool> pasteText(String text) async {
+    if (!acceptsInput) return false;
+    // Same reason as sendComposerText/_onTerminalOutput: the engine in the pane has no job-control
+    // fallback for an uncaught SIGINT, so a stray 0x03 pasted alongside real content must not reach it.
+    final content = text.replaceAll('\x03', '');
+    if (content.isEmpty) return false;
+    final sent = await send('terminal_paste', {
+      'streamId': streamId,
+      'text': content,
+    });
+    if (!sent) transportLost('Terminal paste was not sent');
+    return sent;
   }
 
   void _onTerminalOutput(String data) {

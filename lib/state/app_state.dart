@@ -112,6 +112,10 @@ class MachineState {
   bool terminalCapabilityLoaded = false;
   bool terminalCapabilityAvailable = false;
   String? terminalCapabilityError;
+  // Whether this machine's CLI daemon understands `terminal_paste` (a clipboard paste delivered as
+  // one atomic tmux paste-buffer, not chunked like ordinary keystrokes — see TerminalSession.pasteText).
+  // False for any CLI published before this existed; the panel falls back to the old chunked path.
+  bool terminalPasteRawAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -1903,10 +1907,14 @@ class AppNotifier extends ChangeNotifier {
       machine.terminalCapabilityError = machine.terminalCapabilityAvailable
           ? null
           : 'tmux terminal streaming is unavailable';
+      final features = result['features'];
+      machine.terminalPasteRawAvailable =
+          features is Map && features['pasteRaw'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
       machine.terminalCapabilityError = 'Could not negotiate terminal protocol';
+      machine.terminalPasteRawAvailable = false;
     }
   }
 
@@ -2642,8 +2650,12 @@ class AppNotifier extends ChangeNotifier {
       machineStates[machineId]?.activeAgentId = agentId;
       focusPane(existing.id);
       final terminal = existing.session;
-      if (terminal != null &&
-          terminal.status != TerminalSessionStatus.opening &&
+      if (terminal == null) {
+        // The pane wanted this agent before `_attachSession` could actually attach it (the agent's
+        // terminal wasn't verified yet, the machine was briefly offline, ...). Nothing else retries a
+        // null session on its own — see `_attachPendingPanes` — so a click here has to.
+        await _attachSession(existing);
+      } else if (terminal.status != TerminalSessionStatus.opening &&
           terminal.status != TerminalSessionStatus.controlling &&
           terminal.status != TerminalSessionStatus.resyncing) {
         // A healthy pane is focus-only: opening the same daemon controller a
@@ -3279,6 +3291,10 @@ class AppNotifier extends ChangeNotifier {
             final agent = Agent.fromJson(Map<String, dynamic>.from(raw));
             if (agent.terminalAvailable) {
               _upsertAgent(machine, agent);
+              // A pane created before this agent's terminal was verified is still sitting on
+              // "Attaching…" with no session — nothing else re-checks it once agentLoadStatus is
+              // already `loaded`, so this push is the only signal that it can attach now.
+              _attachPendingPanes(machine);
             } else {
               await _removeAgent(machine, agent.id);
             }
@@ -3293,10 +3309,11 @@ class AppNotifier extends ChangeNotifier {
         final raw = payload['agent'];
         if (raw is Map && raw['terminal'] is Map) {
           try {
-            _upsertAgent(
-              machine,
-              Agent.fromJson(Map<String, dynamic>.from(raw)),
-            );
+            final agent = Agent.fromJson(Map<String, dynamic>.from(raw));
+            _upsertAgent(machine, agent);
+            // Same reattach as `agent_synced` above — a pane can be waiting on this exact agent
+            // (e.g. one this window's own New Agent dialog just opened) with no session yet.
+            _attachPendingPanes(machine);
           } catch (_) {
             unawaited(_loadMachineData(machine, force: true));
           }
