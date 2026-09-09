@@ -29,20 +29,28 @@ class KeyCap extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(minWidth: _minWidth),
       height: height,
-      alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
         color: grid.AppSurface.wellFill,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: grid.AppPalette.textPrimary,
-          fontSize: 11.5,
-          height: 1,
-          // Tabular so ⌘1 – ⌘9 and ⌘W keep the same cap width.
-          fontFeatures: const [FontFeature.tabularFigures()],
+      // `Center(widthFactor: 1)`, never `Container(alignment:)` — a cap has to
+      // be the width of the glyph on it, and an Align given a bounded width
+      // FILLS it (`shrinkWrapWidth` is false unless a factor is set or the
+      // constraint is infinite). The chord's Wrap bounds its children, so the
+      // plain alignment blew every cap out to the whole row: one cap per line,
+      // and a label squeezed to a character per line beside it.
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: grid.AppPalette.textPrimary,
+            fontSize: 11.5,
+            height: 1,
+            // Tabular so ⌘1 – ⌘9 and ⌘W keep the same cap width.
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ),
     );
