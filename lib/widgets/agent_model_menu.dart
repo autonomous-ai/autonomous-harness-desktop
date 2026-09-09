@@ -95,7 +95,7 @@ List<GridNetwork> accountProviders([GridNetworksController? controller]) {
 /// The header's per-agent model control. Looks its own value up at build time — see the library doc
 /// for why it takes no `grid` parameter.
 ///
-/// The pill opens [showModelPickerDialog] and applies whatever it returns. It offers "No provider"
+/// The pill opens [showModelPickerDialog] and applies whatever it returns. It offers the subscription row
 /// as a peer of Auto and every model, on every provider this computer will offer — so one pick can
 /// move an agent to another provider AND pin a model on it, which is one restart rather than two.
 class AgentModelMenu extends StatefulWidget {

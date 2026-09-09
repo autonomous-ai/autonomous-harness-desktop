@@ -139,7 +139,10 @@ List<ModelPickerItem> modelPickerItems({
     items.add(
       const ModelPickerRow(
         choice: ModelChoice.none,
-        note: "the engine's own login",
+        // Same words the rail's picker puts beside this row: the label names
+        // a kind of account, so the note says whose. "The engine's own login"
+        // made a reader work out which engine and whose login.
+        note: 'on this computer',
       ),
     );
   }

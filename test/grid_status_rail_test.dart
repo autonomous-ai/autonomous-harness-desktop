@@ -1,12 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/local_key_value_store.dart';
+import 'package:harness/auth/auth_session.dart';
+import 'package:harness/core/config.dart';
 import 'package:harness/grid/grid_api_client.dart';
+import 'package:harness/state/app_state.dart';
 import 'package:harness/grid/grid_credentials.dart';
 import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
+import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/grid/managed_network_member.dart';
 import 'package:harness/grid/member_usage.dart';
 import 'package:harness/usage/usage_controller.dart';
@@ -142,13 +148,34 @@ Future<GridOverviewController> _pump(
     // Long enough that no test ever races its own timer.
     interval: const Duration(hours: 1),
   );
+  // The rail's provider pill needs one for its settings row; nothing in these
+  // tests opens Settings, so a bare notifier is enough.
+  final notifier = AppNotifier(
+    config: AppConfig.dev,
+    authSession: AuthSession(),
+    configStore: null,
+  );
+  addTearDown(notifier.dispose);
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: Column(
           children: [
             const Spacer(),
-            GridStatusRail(controller: controller, usage: usage),
+            GridStatusRail(
+              notifier: notifier,
+              controller: controller,
+              usage: usage,
+              // The same store the controller reads, or the pill would name a
+              // provider whose figures the rail is not showing.
+              selection: selection,
+              enablement: ProviderEnablementStore(
+                file: File(
+                  '${Directory.systemTemp.createTempSync('providers').path}'
+                  '/providers_config.json',
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -283,6 +310,48 @@ void main() {
     controller.dispose();
   });
 
+  // The bug this pins: the work figure is `Flexible`, and a flex child is given
+  // the free space as its constraint. Without an `Align` inside it the figure
+  // centres itself in that space, and `93.9M tokens / 24h` drifts out to the
+  // middle of the strip with a gap on either side — worse the wider the window,
+  // which is why this measures against the rail's own width rather than against
+  // a pixel count that happens to hold at one size.
+  testWidgets('the work figure stays left, beside the cluster it follows', (
+    tester,
+  ) async {
+    final controller = await _pump(tester);
+    // Wider than `_pump`'s default: free space is what a stretching child
+    // misuses, and the real window has far more of it than 1000px.
+    tester.view.physicalSize = const Size(1900, 460);
+    await tester.pumpAndSettle();
+
+    final memory = tester.getRect(find.text('1 / 1.7 TB'));
+    final work = tester.getRect(find.textContaining('92.4M'));
+    final counts = tester.getRect(find.text('33'));
+
+    // It sits against the block it follows, not adrift between that block and
+    // the counts at the far end. Measured as a share of the space between the
+    // two, so the assertion means the same at any window width: centred in the
+    // flex the figure lands near the middle of that span, and against the
+    // cluster it lands at the very start of it.
+    final span = counts.left - memory.right;
+    // The gap to the block before it is the SAME gap the counts keep between
+    // each other — `RailHoverTarget`'s own padding, twice, which is how every
+    // pair on this strip is spaced. That is the real assertion: not a pixel
+    // count, but that this figure is spaced like its neighbours rather than
+    // pushed out into the middle by the Spacer past it.
+    final nodes = tester.getRect(find.text('8'));
+    final betweenCounts = nodes.left - counts.right;
+    expect(
+      work.left - memory.right,
+      lessThan(betweenCounts * 2),
+      reason: 'the figure is spaced like a figure, not adrift mid-rail',
+    );
+    // And it is nowhere near the middle of the run to the counts.
+    expect((work.left - memory.right) / span, lessThan(0.35));
+    controller.dispose();
+  });
+
   testWidgets('a roster we may not read shows no member figure', (
     tester,
   ) async {
@@ -308,7 +377,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
@@ -338,7 +407,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
@@ -365,7 +434,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
@@ -383,10 +452,10 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('autonomous.ai').first);
+    await tester.tap(find.text('1 / 1.7 TB').first);
     await tester.pumpAndSettle();
 
     // Pointer well away, panel still up.
@@ -403,7 +472,9 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    // The memory reading, not the name: the name is the provider pill now, and
+    // a button that opens a menu must not also open a panel on hover.
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 

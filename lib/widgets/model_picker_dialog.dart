@@ -99,7 +99,7 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
   /// agent is actually running: that row does not exist on the frame the panel
   /// opens on, because its provider's models are still a round trip away, and a
   /// highlight placed once on the first build would leave the panel opening on
-  /// "No provider" every time. After they have, it is theirs — a late-arriving
+  /// the subscription row every time. After they have, it is theirs — a late-arriving
   /// provider must not yank the highlight out from under an arrow key.
   bool _touched = false;
 
@@ -230,7 +230,7 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
         itemBuilder: (context, index) => index < _items.length
             ? _row(_items[index], highlighted: index == highlighted)
             // The account's state, under the providers that did load: on a
-            // failed refresh the list still holds "No provider" and whatever
+            // failed refresh the list still holds the subscription row and whatever
             // was cached, and a panel that said nothing would look like an
             // account with one row.
             : AppMenuNote(note!, metrics: AppMenuRowMetrics.roomy),

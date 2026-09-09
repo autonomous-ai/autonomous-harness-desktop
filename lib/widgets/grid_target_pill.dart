@@ -48,7 +48,7 @@ class GridTargetOption {
 
 /// The picker's rows, from whatever the shared controller has so far.
 ///
-/// "No provider" comes FIRST and unconditionally — it is the only choice that needs no network
+/// [kNoGridTargetLabel] comes FIRST and unconditionally — it is the only choice that needs no network
 /// call, so it must not be a row that appears once a fetch lands. Pure, so the states a menu is
 /// hard to open in (mid-load, failed, an account on no providers) are covered by a test rather
 /// than by hand.
@@ -86,9 +86,12 @@ List<GridTargetOption> _readyOptions(
   bool Function(String)? isEnabled,
 ) {
   if (networks.isEmpty) {
+    // The one case that earns a pointer: nothing has been chosen here, so
+    // there is somewhere useful to go. Kept apart from "all switched off"
+    // below, which is a decision already made and needs no instruction.
     return const [
       GridTargetOption(
-        label: 'This account is on no providers',
+        label: 'This account is on no providers yet',
         enabled: false,
       ),
     ];
@@ -102,12 +105,17 @@ List<GridTargetOption> _readyOptions(
         ),
   ];
   if (offered.isEmpty) {
-    return const [
-      GridTargetOption(
-        label: 'Every provider is off — turn one on in Settings',
-        enabled: false,
-      ),
-    ];
+    // ⚠️ Deliberately says nothing. This used to read "Every provider is off —
+    // turn one on in Settings", printed under a ticked `Subscription` row, and
+    // it was wrong on two counts. It read as an ERROR for a setup that works:
+    // switching every provider off is supported, agents keep launching, and
+    // they bill the subscriptions on this computer — which the ticked row
+    // above already names. And it gave an ORDER for a state the person had
+    // just chosen on purpose, as though the choice needed undoing.
+    //
+    // The account that owns no providers at all still gets a line, above:
+    // that one has not chosen anything and has somewhere to be pointed.
+    return const <GridTargetOption>[];
   }
   return offered;
 }

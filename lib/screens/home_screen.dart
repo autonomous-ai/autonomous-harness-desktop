@@ -272,6 +272,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   // rail as well as the panes — a strip that started after the
                   // rail would put a step in the window's bottom edge.
                   GridStatusRail(
+                    // Two things need it, for one reason: the rail holds no
+                    // `AppNotifier` and both of these open Settings.
+                    notifier: notifier,
                     // The node dashboard's empty state offers to put THIS
                     // computer on the grid, and the screen that does it is a
                     // Settings pane — which needs the notifier the shell holds
