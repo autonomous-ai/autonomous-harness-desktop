@@ -17,6 +17,7 @@ import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/settings/sections/grid_hero.dart';
 import 'package:harness/settings/settings_section.dart';
+import 'package:harness/share/engine_run.dart';
 import 'package:harness/share/share_target_store.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
@@ -200,6 +201,7 @@ void main() {
       GridModelsController? models,
       ShareTargetStore? shareTarget,
       ValueChanged<SettingsSection>? onShowSection,
+      ({String gridId, EngineRunRecord run})? liveEngine,
       // A skeleton breathes forever ([Pulse]), so a pane with one on it never
       // settles. A test that puts a provider in Loading pumps instead.
       bool settle = true,
@@ -238,6 +240,10 @@ void main() {
                     enablement: enablement,
                     models: modelsController,
                     shareTarget: shareTarget,
+                    // A function, so the pane can re-read it — and so a test
+                    // that says nothing about sharing never touches the real
+                    // `~/.grid/run`.
+                    liveEngine: () => liveEngine,
                     onShowSection: onShowSection,
                   ),
                 ),
@@ -622,6 +628,70 @@ void main() {
         reason: 'the share page names the grid before /v1/grid/me answers',
       );
       expect(opened, [SettingsSection.shareIntelligence]);
+    });
+
+    // ⚠️ An engine is detached and joined to ONE grid. `Add model` pins the
+    // share target, so pressing it under a live engine would leave that engine
+    // serving a grid Share Intelligence no longer names — still answering,
+    // still costing whatever it costs, and with no Stop button anywhere for it.
+    // That page locks its own picker for exactly this reason; this is the same
+    // picker reached from here.
+    testWidgets('Add model is refused while this computer is sharing', (
+      tester,
+    ) async {
+      final models = GridModelsController(client: FakeGridApi());
+      addTearDown(models.dispose);
+      final target = ShareTargetStore(storage: _MemoryStore());
+      final opened = <SettingsSection>[];
+      await pump(
+        tester,
+        newController(),
+        models: models,
+        shareTarget: target,
+        onShowSection: opened.add,
+        liveEngine: (
+          gridId: 'grid-e3b210eacc5b4cdf',
+          run: const EngineRunRecord(
+            engineId: 'e1',
+            gridId: 'grid-e3b210eacc5b4cdf',
+            models: ['qwen3-coder-30b'],
+            pid: 42,
+          ),
+        ),
+      );
+
+      await tester.tap(
+        find.byKey(const Key('provider-add-model')),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+
+      // Neither half happened: no pin, and nowhere new.
+      expect(target.value.isPinned, isFalse);
+      expect(opened, isEmpty);
+      // Still on screen, and grey — a button that vanished would teach nobody
+      // why. It names the grid being served, since that is where the reader
+      // has to go to stop it.
+      final button = tester.widget<OutlinedButton>(
+        find.descendant(
+          of: find.byKey(const Key('provider-add-model')),
+          matching: find.byType(OutlinedButton),
+        ),
+      );
+      expect(button.onPressed, isNull);
+      expect(
+        tester
+            .widget<Tooltip>(
+              find
+                  .ancestor(
+                    of: find.byKey(const Key('provider-add-model')),
+                    matching: find.byType(Tooltip),
+                  )
+                  .first,
+            )
+            .message,
+        allOf(contains('Water Grid'), contains('Share Intelligence')),
+      );
     });
 
     // A button that pinned a real setting and then went nowhere would be a

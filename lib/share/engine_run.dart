@@ -185,5 +185,42 @@ EngineRunRecord? firstLiveRun(
   return null;
 }
 
+/// The grid this computer is serving right now, across every grid it has ever
+/// joined — or null when nothing of ours is running.
+///
+/// Answers the question Share Intelligence answers for ONE grid
+/// (`ShareController.reconcile`) for all of them at once, because the pane that
+/// needs it — Settings ▸ Providers — is looking at a list and has no grid in
+/// hand. Same source either way: the CLI's run records, never anything this app
+/// remembers, since the engine is detached and outlives the window that started
+/// it.
+///
+/// ⚠️ **Synchronous, and it spawns `kill -0` per record.** Cheap, but not free:
+/// call it when a pane mounts or refreshes, never from `build`.
+///
+/// One engine per machine is the shape this is for; where a machine somehow has
+/// several, the first live one is enough to answer "is it busy".
+({String gridId, EngineRunRecord run})? liveEngineAnywhere({
+  Directory? runsRoot,
+  bool Function(int? pid)? isAlive,
+}) {
+  final root = runsRoot ?? GridPaths.engineRunsRoot;
+  if (!root.existsSync()) return null;
+  for (final entity in root.listSync()) {
+    if (entity is! Directory) continue;
+    final gridId = entity.uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .last;
+    final run = firstLiveRun(
+      readEngineRuns(gridId, runDir: entity),
+      isAlive: isAlive,
+    );
+    // The record carries the grid it was written for; the directory name is
+    // only where it was filed.
+    if (run != null) return (gridId: run.gridId.isEmpty ? gridId : run.gridId, run: run);
+  }
+  return null;
+}
+
 List<String> _stringList(Object? value) =>
     value is List ? [for (final entry in value) '$entry'] : const [];

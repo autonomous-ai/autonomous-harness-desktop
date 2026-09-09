@@ -51,6 +51,7 @@ class ProviderSplitPane extends StatefulWidget {
     this.onRename,
     this.onShare,
     this.onAddModel,
+    this.addModelRefusal,
     this.models,
     this.isDeleting,
     this.filtered = false,
@@ -95,6 +96,13 @@ class ProviderSplitPane extends StatefulWidget {
   /// page they wanted with the grid already chosen instead of having to know
   /// that the two screens are related. Null leaves the button off.
   final ValueChanged<GridNetwork>? onAddModel;
+
+  /// Why `Add model` is refused, or null when it is available.
+  ///
+  /// A sentence rather than a bool: the button goes grey either way, and a
+  /// disabled control that cannot say why reads as broken. See
+  /// `GridSection._addModelRefusal` for the rule it states.
+  final String? addModelRefusal;
 
   /// The models each provider serves. The app passes nothing and gets the
   /// singleton the model picker already fills, so opening this pane after
@@ -243,6 +251,7 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
           onAddModel: widget.onAddModel == null
               ? null
               : () => widget.onAddModel!(selected),
+          addModelRefusal: widget.addModelRefusal,
           // Stacked, the panel is one card inside the page's own scroll view
           // and has no bottom of its own to pin anything to.
           pinActions: !stacked,
@@ -594,6 +603,7 @@ class _ProviderDetail extends StatelessWidget {
     this.onDelete,
     this.onShare,
     this.onAddModel,
+    this.addModelRefusal,
     this.pinActions = true,
   });
 
@@ -617,6 +627,9 @@ class _ProviderDetail extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onShare;
   final VoidCallback? onAddModel;
+
+  /// See [ProviderSplitPane.addModelRefusal].
+  final String? addModelRefusal;
 
   @override
   Widget build(BuildContext context) {
@@ -701,6 +714,7 @@ class _ProviderDetail extends StatelessWidget {
           models: models,
           onRetry: onRetryModels,
           onAddModel: onAddModel,
+          addModelRefusal: addModelRefusal,
         ),
       ],
     );
@@ -1065,11 +1079,20 @@ class _ProviderModels extends StatelessWidget {
     required this.models,
     required this.onRetry,
     this.onAddModel,
+    this.addModelRefusal,
   });
 
   final GridModelsState models;
   final VoidCallback onRetry;
   final VoidCallback? onAddModel;
+
+  /// See [ProviderSplitPane.addModelRefusal].
+  final String? addModelRefusal;
+
+  /// Refused, but still drawn. A button that vanishes while this computer is
+  /// sharing teaches nobody why it went; a grey one with a sentence on it says
+  /// what to do about it.
+  bool get _refused => addModelRefusal != null;
 
   @override
   Widget build(BuildContext context) {
@@ -1102,24 +1125,30 @@ class _ProviderModels extends StatelessWidget {
               ),
             ),
             if (onAddModel != null)
-              // Loud on a provider that serves nothing, quiet everywhere else.
-              // On a grid with models this is one more thing you could do; on a
-              // grid with none it is the ONLY thing that makes the provider
-              // worth having, and the panel around it is otherwise a list of
-              // registration facts with an empty section at the bottom.
-              _bare
-                  ? _LoudButton(
-                      key: const Key('provider-add-model'),
-                      label: 'Add model',
-                      icon: LucideIcons.plus300,
-                      onPressed: onAddModel!,
-                    )
-                  : _QuietButton(
-                      key: const Key('provider-add-model'),
-                      label: 'Add model',
-                      icon: LucideIcons.plus300,
-                      onPressed: onAddModel!,
-                    ),
+              Tooltip(
+                message: addModelRefusal ?? 'Lend this computer to it',
+                waitDuration: const Duration(milliseconds: 400),
+                // Loud on a provider that serves nothing, quiet everywhere
+                // else. On a grid with models this is one more thing you could
+                // do; on a grid with none it is the ONLY thing that makes the
+                // provider worth having, and the panel around it is otherwise a
+                // list of registration facts with an empty section at the
+                // bottom. Refused, it is quiet whatever the list says — nothing
+                // is gained by shouting an offer that cannot be taken.
+                child: _bare && !_refused
+                    ? _LoudButton(
+                        key: const Key('provider-add-model'),
+                        label: 'Add model',
+                        icon: LucideIcons.plus300,
+                        onPressed: onAddModel!,
+                      )
+                    : _QuietButton(
+                        key: const Key('provider-add-model'),
+                        label: 'Add model',
+                        icon: LucideIcons.plus300,
+                        onPressed: _refused ? null : onAddModel!,
+                      ),
+              ),
           ],
         ),
         const SizedBox(height: 10),
@@ -1533,7 +1562,9 @@ class _QuietButton extends StatelessWidget {
 
   final String label;
   final IconData icon;
-  final VoidCallback onPressed;
+
+  /// Null draws it disabled — see [_ProviderModels._refused] for the one case.
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1542,6 +1573,7 @@ class _QuietButton extends StatelessWidget {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: grid.AppPalette.textSecondary,
+        disabledForegroundColor: grid.AppPalette.textFaint,
         // Restated: `styleFrom` replaces the theme's style, and with NoSplash
         // app-wide a button without this has no hover state at all.
         overlayColor: grid.AppSurface.hoverFill,

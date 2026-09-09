@@ -31,7 +31,10 @@ abstract final class GridPaths {
   /// model at all" is answered without asking the CLI.
   static File get llamaServerBin => File('${home.path}/bin/llama-server');
 
+  /// One directory per grid this machine has ever joined an engine to.
+  static Directory get engineRunsRoot => Directory('${home.path}/run/engines');
+
   /// One `<engine_id>.json` per detached engine, per grid.
   static Directory engineRunDir(String gridId) =>
-      Directory('${home.path}/run/engines/$gridId');
+      Directory('${engineRunsRoot.path}/$gridId');
 }

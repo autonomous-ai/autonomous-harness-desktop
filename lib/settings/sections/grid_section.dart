@@ -11,6 +11,7 @@ import '../../grid/grid_networks_controller.dart';
 import '../../grid/grid_selection_store.dart';
 import '../../grid/provider_enablement_store.dart';
 import '../../grid/grid_session.dart';
+import '../../share/engine_run.dart';
 import '../../share/share_target_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/app_icon_button.dart';
@@ -47,6 +48,7 @@ class GridSection extends StatefulWidget {
     this.enablement,
     this.shareTarget,
     this.models,
+    this.liveEngine,
     this.onShowSection,
   });
 
@@ -83,6 +85,10 @@ class GridSection extends StatefulWidget {
   /// singleton the model picker fills.
   final GridModelsController? models;
 
+  /// What this computer is serving right now, injected by tests. Null in the
+  /// app, which reads the CLI's own run records.
+  final ({String gridId, EngineRunRecord run})? Function()? liveEngine;
+
   /// Take the reader to another Settings pane.
   ///
   /// Only [SettingsScreen] can do this — the rail and the pane are siblings —
@@ -114,6 +120,40 @@ class _GridSectionState extends State<GridSection> {
 
   GridModelsController get _models => widget.models ?? gridModelsController;
 
+  void _readLiveEngine() {
+    final live = (widget.liveEngine ?? liveEngineAnywhere)();
+    _servingGridId = live?.gridId;
+  }
+
+  /// Why `Add model` is refused right now, or null when it is not.
+  ///
+  /// ⚠️ **An engine is detached and joined to ONE grid.** `Add model` pins the
+  /// share target, and repinning under a live engine would leave it serving a
+  /// grid Share Intelligence no longer names — still answering, still costing
+  /// whatever it costs, with no Stop button anywhere for it, because Stop only
+  /// ever leaves the grid that page is currently on. That page locks its own
+  /// picker for exactly this reason; this button is the same picker reached
+  /// from here, so it locks on the same terms — for every provider, including
+  /// the one being served, since the page it opens is locked either way.
+  String? get _addModelRefusal {
+    final serving = _servingGridId;
+    if (serving == null) return null;
+    return 'This computer is already serving ${_nameFor(serving)}. Stop it '
+        'under Share Intelligence before pointing it at another provider.';
+  }
+
+  /// A grid's name if this pane has it, else its id — the refusal is read by
+  /// somebody who has to go and find that grid on another screen.
+  String _nameFor(String networkId) {
+    final state = widget.controller.state;
+    if (state is GridNetworksReady) {
+      for (final network in state.me.networks) {
+        if (network.networkId == networkId) return network.displayName;
+      }
+    }
+    return networkId;
+  }
+
   /// Everything this pane shows, asked again.
   ///
   /// Both halves, not just the roster: the models each provider serves are on
@@ -121,6 +161,7 @@ class _GridSectionState extends State<GridSection> {
   /// question it appears to answer — most obviously right after somebody put a
   /// node on a grid, which is the moment they reach for it.
   void _reload() {
+    setState(_readLiveEngine);
     unawaited(widget.controller.refresh());
     final state = widget.controller.state;
     if (state is! GridNetworksReady) return;
@@ -130,9 +171,18 @@ class _GridSectionState extends State<GridSection> {
     }
   }
 
+  /// The grid this computer is serving, read when the pane mounts.
+  ///
+  /// Read here rather than in `build`: the probe walks a directory and asks the
+  /// OS about a pid per record, and `build` runs on every keystroke in the
+  /// filter field. Re-read by [_reload], and fresh on every visit because the
+  /// settings rail unmounts this pane when you leave it.
+  String? _servingGridId;
+
   @override
   void initState() {
     super.initState();
+    _readLiveEngine();
     _ownsMutations = widget.mutations == null;
     _mutations =
         widget.mutations ??
@@ -315,6 +365,7 @@ class _GridSectionState extends State<GridSection> {
                         onAddModel: widget.onShowSection == null
                             ? null
                             : _addModel,
+                        addModelRefusal: _addModelRefusal,
                         models: widget.models,
                         isDeleting: _mutations.isDeleting,
                       ),
@@ -398,6 +449,9 @@ class _GridSectionState extends State<GridSection> {
   /// names. Share Intelligence has no Stop for a grid it is not showing, so a
   /// reader in that position has to pin the old grid back to reach it.
   void _addModel(GridNetwork network) {
+    // The button is already disabled while an engine is up; this is the same
+    // rule at the door it guards, so a future caller cannot route around it.
+    if (_addModelRefusal != null) return;
     unawaited(
       _shareTarget.pin(
         networkId: network.networkId,
