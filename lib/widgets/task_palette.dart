@@ -63,6 +63,9 @@ class _TaskPaletteState extends State<_TaskPalette> {
 
   _Stage _stage = _Stage.typing;
   String _note = '';
+
+  /// Which half of the wait is on screen — choosing an agent, or handing the task over.
+  bool _sending = false;
   List<RouteCandidate> _choices = const [];
   int _cursor = 0;
 
@@ -84,6 +87,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
     final mine = ++_generation;
     setState(() {
       _stage = _Stage.routing;
+      _sending = false;
       _note = '';
     });
 
@@ -110,7 +114,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
     }
 
     if (answer.confidence >= _confidentEnough) {
-      await _commit(answer.agentId, task);
+      await _commit(answer.agentId, answer.machineId, task);
       return;
     }
     setState(() {
@@ -120,12 +124,36 @@ class _TaskPaletteState extends State<_TaskPalette> {
     });
   }
 
-  Future<void> _commit(String agentId, String task) async {
-    final navigator = Navigator.of(context);
-    // Closed BEFORE the send, not after it: the pane behind this dialog is about to become the agent's,
-    // and holding a modal over the thing the person asked for makes a fast route look slow.
-    navigator.pop();
-    await widget.notifier.sendRoutedTask(agentId, task);
+  Future<void> _commit(String agentId, String machineId, String task) async {
+    // NOT closed before the send any more.
+    //
+    // It used to close first, so a fast route never showed a modal over the pane it was about to fill.
+    // But the delivery can fail — a machine that stopped answering takes the turn and nothing comes back
+    // — and closing first meant that failure had nowhere to appear: the palette was gone, the pane never
+    // changed, and the person was left with a task that had simply evaporated. Measured on the desk with
+    // a remote machine whose link was timing out.
+    //
+    // So it waits for the answer. A successful send is still quiet — the window closes and the pane
+    // becomes the agent's — it just closes a moment later than it did.
+    setState(() {
+      _stage = _Stage.routing;
+      _sending = true;
+      _note = '';
+    });
+    final failure = await widget.notifier.sendRoutedTask(
+      agentId,
+      machineId,
+      task,
+    );
+    if (!mounted) return;
+    if (failure == null) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() {
+      _stage = _Stage.empty;
+      _note = failure;
+    });
   }
 
   KeyEventResult _onFieldKey(FocusNode node, KeyEvent event) {
@@ -156,7 +184,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
     }
     if (isEnter && !shift) {
       final pick = _choices[_cursor.clamp(0, _choices.length - 1)];
-      unawaited(_commit(pick.agentId, _text.text.trim()));
+      unawaited(_commit(pick.agentId, pick.machineId, _text.text.trim()));
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -236,7 +264,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
               ),
               const SizedBox(width: 10),
               Text(
-                'choosing an agent…',
+                _sending ? 'sending…' : 'choosing an agent…',
                 style: TextStyle(
                   color: grid.AppPalette.textSecondary,
                   fontSize: 12.5,
@@ -274,20 +302,43 @@ class _TaskPaletteState extends State<_TaskPalette> {
 
   Widget _row(RouteCandidate candidate, bool active) {
     return InkWell(
-      onTap: () => unawaited(_commit(candidate.agentId, _text.text.trim())),
+      onTap: () => unawaited(
+        _commit(candidate.agentId, candidate.machineId, _text.text.trim()),
+      ),
       child: Container(
         padding: const EdgeInsets.fromLTRB(18, 9, 18, 9),
         color: active ? grid.AppGlass.surfaceHoverFill : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              candidate.name,
-              style: TextStyle(
-                color: grid.AppPalette.textPrimary,
-                fontSize: 13.5,
-                fontWeight: active ? grid.AppFont.medium : grid.AppFont.regular,
-              ),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    candidate.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: grid.AppPalette.textPrimary,
+                      fontSize: 13.5,
+                      fontWeight: active
+                          ? grid.AppFont.medium
+                          : grid.AppFont.regular,
+                    ),
+                  ),
+                ),
+                // Which computer, beside the name. The list spans every machine now, so two agents
+                // called the same thing on two of them are one row twice without it.
+                if (candidate.machine.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    candidate.machine,
+                    style: TextStyle(
+                      color: grid.AppPalette.textFaint,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
             ),
             if (candidate.recent.isNotEmpty) ...[
               const SizedBox(height: 2),

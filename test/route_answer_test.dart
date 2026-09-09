@@ -11,12 +11,13 @@ void main() {
   test('reads a full answer', () {
     final answer = RouteAnswer.fromJson({
       'agentId': 'a1',
+      'machineId': 'm-local',
       'name': 'auth-api',
       'confidence': 0.86,
       'reason': 'name matches the domain',
       'candidates': [
-        {'agentId': 'a1', 'name': 'auth-api', 'recent': 'token rotation'},
-        {'agentId': 'a2', 'name': 'payment-api', 'recent': 'webhook retries'},
+        {'agentId': 'a1', 'machineId': 'm-local', 'name': 'auth-api', 'machine': 'this computer', 'recent': 'token rotation'},
+        {'agentId': 'a2', 'machineId': 'm-mini', 'name': 'payment-api', 'machine': 'mac-mini', 'recent': 'webhook retries'},
       ],
     });
     expect(answer.agentId, 'a1');
@@ -24,6 +25,12 @@ void main() {
     expect(answer.isEmpty, isFalse);
     expect(answer.candidates.map((c) => c.name), ['auth-api', 'payment-api']);
     expect(answer.candidates.first.recent, 'token rotation');
+    // The machine travels with the name: the list spans every computer, so it is the only thing telling
+    // two agents called the same thing apart.
+    expect(answer.candidates.map((c) => c.machine), ['this computer', 'mac-mini']);
+    // …and the id beside it, which is what actually opens the pane on the right computer.
+    expect(answer.machineId, 'm-local');
+    expect(answer.candidates.map((c) => c.machineId), ['m-local', 'm-mini']);
   });
 
   test('an integer confidence is still a number', () {
@@ -51,5 +58,7 @@ void main() {
     expect(answer.confidence, 0);
     expect(answer.candidates.map((c) => c.name), ['ok']);
     expect(answer.candidates.single.recent, '');
+    expect(answer.candidates.single.machine, '');
+    expect(answer.candidates.single.machineId, '');
   });
 }

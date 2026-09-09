@@ -242,6 +242,7 @@ class Agent {
 class RouteAnswer {
   const RouteAnswer({
     required this.agentId,
+    required this.machineId,
     required this.name,
     required this.confidence,
     required this.reason,
@@ -249,6 +250,9 @@ class RouteAnswer {
   });
 
   final String agentId;
+
+  /// Which computer the pick lives on. Names are for reading; this is what opens the pane.
+  final String machineId;
   final String name;
   final double confidence;
   final String reason;
@@ -265,28 +269,49 @@ class RouteAnswer {
   /// has to read as "nobody was picked" instead.
   static RouteAnswer fromJson(Map<String, dynamic> json) => RouteAnswer(
     agentId: _str(json['agentId']),
+    machineId: _str(json['machineId']),
     name: _str(json['name']),
-    confidence: json['confidence'] is num ? (json['confidence'] as num).toDouble() : 0,
+    confidence: json['confidence'] is num
+        ? (json['confidence'] as num).toDouble()
+        : 0,
     reason: _str(json['reason']),
     candidates: [
-      for (final entry in (json['candidates'] is List ? json['candidates'] as List<dynamic> : const []))
+      for (final entry
+          in (json['candidates'] is List
+              ? json['candidates'] as List<dynamic>
+              : const []))
         if (entry is Map<String, dynamic>) RouteCandidate.fromJson(entry),
     ],
   );
 }
 
 class RouteCandidate {
-  const RouteCandidate({required this.agentId, required this.name, required this.recent});
+  const RouteCandidate({
+    required this.agentId,
+    required this.machineId,
+    required this.name,
+    required this.machine,
+    required this.recent,
+  });
 
   final String agentId;
+
+  /// Which computer to open the pane on. Names are for reading; this is for acting.
+  final String machineId;
   final String name;
+
+  /// Which computer it runs on. The candidate list spans every machine, so two agents named "api" on two
+  /// of them are the same row twice without this.
+  final String machine;
 
   /// What that agent was last doing — the line under its name when the window has to ask.
   final String recent;
 
   static RouteCandidate fromJson(Map<String, dynamic> json) => RouteCandidate(
     agentId: _str(json['agentId']),
+    machineId: _str(json['machineId']),
     name: _str(json['name']),
+    machine: _str(json['machine']),
     recent: _str(json['recent']),
   );
 }

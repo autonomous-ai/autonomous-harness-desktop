@@ -321,6 +321,7 @@ class AppNotifier extends ChangeNotifier {
     _lastError = null;
     notifyListeners();
   }
+
   String get autonomousEnv => _autonomousEnv;
   bool get hasAvailableUpdate => availableUpdate != null;
   bool get hasForcedUpdate => availableUpdate?.forced ?? false;
@@ -495,15 +496,15 @@ class AppNotifier extends ChangeNotifier {
 
   // ── ⌘K: a typed task, and which agent it belongs to ────────────────────────────────────────────
 
-  /// The machine this window is running ON. ⌘K routes over its agents and no others.
+  /// The machine this window is running ON — where the daemon that ANSWERS ⌘K lives.
   ///
-  /// Deliberately not "the machine in focus": the router lives in the local daemon, and reaching agents
-  /// on another computer would cost an RPC per agent just to read their recaps — most of the latency the
-  /// dial's cross-machine route pays. The cost of this choice is plain: an agent on another computer
-  /// cannot be reached from ⌘K, even while its pane is on screen.
+  /// It is not the scope of the search: the daemon weighs agents on every machine and answers with the
+  /// one each pick belongs to. This is only the socket the question travels on, because the router, the
+  /// registry and the recap mirror it reads are all on this computer.
   MachineState? get localMachineState {
     for (final state in machineStates.values) {
-      if (state.isLocalMachine) return state;   // the flag is the STATE's, not the machine row's
+      if (state.isLocalMachine)
+        return state; // the flag is the STATE's, not the machine row's
     }
     return null;
   }
@@ -521,10 +522,11 @@ class AppNotifier extends ChangeNotifier {
       final reply = await connection.request(
         'route_task',
         payload: {'text': text},
-        // Under the daemon's own 12s classification budget plus room for the round trip: a request that
-        // gives up BEFORE the router does would leave the person with nothing while the answer is on its
-        // way, which is the one outcome worse than waiting.
-        timeout: const Duration(seconds: 20),
+        // Over the daemon's own classification budget — which is 20s on this path — plus room for
+        // gathering the candidates and the round trip. A request that gives up BEFORE the router does
+        // leaves the person with nothing WHILE the answer is on its way, which is the one outcome worse
+        // than waiting; and at exactly 20s each it would be a coin toss which of the two fired first.
+        timeout: const Duration(seconds: 35),
       );
       return RouteAnswer.fromJson(reply);
     } catch (_) {
@@ -539,12 +541,49 @@ class AppNotifier extends ChangeNotifier {
   /// The daemon delivers it through the SAME door as the web's messages and the dial's — queueing,
   /// retries and the per-engine slash-command adaptation are not re-implemented for the caller that
   /// types instead of speaking.
-  Future<void> sendRoutedTask(String agentId, String text) async {
-    final machineId = localMachineState?.machine.machineId;
-    final connection = machineId == null ? null : _pool?[machineId];
-    if (connection == null || machineId == null) return;
-    connection.sendRaw('route_send', {'agentId': agentId, 'text': text});
-    await selectAgent(machineId, agentId);
+  /// Commit: deliver the task, then bring the agent onto the grid the way a rail click does.
+  ///
+  /// Returns null when it landed, or a sentence saying why it did not — which the palette shows instead
+  /// of closing. It ASKS rather than tells for a reason measured on the desk: the remote leg carries no
+  /// ack of its own, so a machine that has gone deaf takes the turn and nothing comes back. A confident
+  /// route closes this window silently, so without an answer that is a task that vanished with no mark
+  /// anywhere — the worst outcome this flow can produce.
+  ///
+  /// [agentMachineId] is the agent's OWN machine, which is not this one when the router reached across.
+  Future<String?> sendRoutedTask(
+    String agentId,
+    String agentMachineId,
+    String text,
+  ) async {
+    final localId = localMachineState?.machine.machineId;
+    if (localId == null) return 'No local machine is connected.';
+    final connection = _pool?[localId];
+    if (connection == null) return 'No local machine is connected.';
+    // The task goes to the LOCAL daemon whichever machine the agent is on: it owns the dispatch that
+    // knows the difference (its own registry, or the fleet link to the other computer). Sending it down
+    // the remote machine's own socket would be a second delivery path for the same thing.
+    try {
+      final reply = await connection.request(
+        'route_send',
+        payload: {'agentId': agentId, 'text': text},
+        timeout: const Duration(seconds: 15),
+      );
+      if (reply['ok'] != true) {
+        final machine = (reply['machine'] as String?) ?? '';
+        final reason =
+            (reply['reason'] as String?) ?? 'it could not be delivered';
+        return machine.isEmpty
+            ? 'Not sent — $reason.'
+            : 'Not sent to $machine — $reason.';
+      }
+    } catch (_) {
+      return 'The daemon did not answer. Nothing was sent.';
+    }
+    // …the PANE opens on the agent's machine. Falling back to this computer would open a tile for an
+    // agent it does not have and leave the person looking at an empty terminal.
+    final target = agentMachineId.isNotEmpty ? agentMachineId : localId;
+    await selectAgent(target, agentId);
+    return null;
   }
 
   MachineState? get activeMachineState {
@@ -2930,9 +2969,7 @@ class AppNotifier extends ChangeNotifier {
       final to = shape[i];
       // Below means below: its top edge is at or past ours, and the two overlap
       // horizontally, so a tile in the next COLUMN is never "down".
-      final vertical = delta > 0
-          ? to.top - from.top
-          : from.top - to.top;
+      final vertical = delta > 0 ? to.top - from.top : from.top - to.top;
       if (vertical <= 0.001) continue;
       final overlap =
           (from.right < to.left + 0.001) || (to.right < from.left + 0.001);
