@@ -23,7 +23,55 @@ import 'engine_identity.dart';
 /// CONFIDENT WORK IS SILENT, UNSURE WORK ASKS. Above the threshold the palette closes and the pane
 /// simply becomes that agent — the text arriving in the terminal is the receipt, and a toast on top of it
 /// would be a second one. Below it, nothing is sent and the runners-up are offered instead.
-Future<void> showTaskPalette(BuildContext context, AppNotifier notifier) {
+/// Words spoken into the dial, on their way into this palette instead of a person's typing.
+///
+/// The daemon asked THIS window to route them — see cable/windowRoute.ts — so the palette owes it an
+/// answer either way: [taken] the moment it is on screen, then exactly one of [sent] or [cancelled].
+/// Without the last one the dial holds its sending overlay until a watchdog it owns gives up, which is
+/// a minute of a screen saying work is in flight when a person has already closed the question.
+class SpokenTask {
+  SpokenTask({
+    required this.voiceId,
+    required this.text,
+    required this.cmd,
+    required this.report,
+  });
+
+  final String voiceId;
+
+  /// The transcript, verbatim. It lands in the field exactly as a person would have typed it.
+  final String text;
+
+  /// 'goal', 'loop', or empty — which of the dial's three buttons was held. The overview has all three,
+  /// so a spoken task can be a goal without naming an agent.
+  final String cmd;
+
+  final void Function(String voiceId, String state, String agentId) report;
+
+  bool _settled = false;
+
+  void taken() => report(voiceId, 'taken', '');
+
+  void sent(String agentId) {
+    if (_settled) return;
+    _settled = true;
+    report(voiceId, 'sent', agentId);
+  }
+
+  /// Idempotent, and called on EVERY way out of the palette — Esc, the barrier, a dead end, or a commit
+  /// that already answered (where it does nothing). One exit, one answer.
+  void cancelled() {
+    if (_settled) return;
+    _settled = true;
+    report(voiceId, 'cancelled', '');
+  }
+}
+
+Future<void> showTaskPalette(
+  BuildContext context,
+  AppNotifier notifier, {
+  SpokenTask? spoken,
+}) {
   // showGeneralDialog, not showDialog, and the barrier is BUILT rather than coloured: the design's veil
   // is `rgba(0,0,0,.74)` over `backdrop-filter: blur(3px)`, and `barrierColor` can only do the first
   // half. The blur is what makes the terminals behind read as *behind* instead of as text competing with
@@ -34,12 +82,16 @@ Future<void> showTaskPalette(BuildContext context, AppNotifier notifier) {
     barrierLabel: 'Dismiss',
     barrierColor: Colors.transparent,
     transitionDuration: const Duration(milliseconds: 160),
-    pageBuilder: (context, _, _) => _TaskPalette(notifier: notifier),
+    pageBuilder: (context, _, _) =>
+        _TaskPalette(notifier: notifier, spoken: spoken),
     transitionBuilder: (context, anim, _, child) => FadeTransition(
       opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
       child: child,
     ),
-  );
+    // Every exit lands here — Esc, a tap on the veil, and the self-close after a send. A commit has
+    // already answered by then and this does nothing; anything else is a person walking away, which the
+    // dial has to hear about or it keeps showing work that is not happening.
+  ).whenComplete(() => spoken?.cancelled());
 }
 
 /// The design's own values, lifted rather than approximated.
@@ -124,9 +176,12 @@ abstract final class _D {
 const double _confidentEnough = 0.85;
 
 class _TaskPalette extends StatefulWidget {
-  const _TaskPalette({required this.notifier});
+  const _TaskPalette({required this.notifier, this.spoken});
 
   final AppNotifier notifier;
+
+  /// Set when the words arrived from the dial rather than the keyboard.
+  final SpokenTask? spoken;
 
   @override
   State<_TaskPalette> createState() => _TaskPaletteState();
@@ -177,9 +232,43 @@ class _TaskPaletteState extends State<_TaskPalette> {
   List<RouteCandidate> _choices = const [];
   int _cursor = 0;
 
+  /// The picker scrolls now that it offers every agent that was weighed, so the arrow keys need
+  /// somewhere to scroll and each row needs to be findable to be scrolled TO.
+  final ScrollController _listScroll = ScrollController();
+  List<GlobalKey> _rowKeys = const [];
+
+  /// How tall the list is allowed to get before it scrolls.
+  ///
+  /// Fifteen rows is roughly eight hundred pixels — taller than the palette, taller than some screens,
+  /// and it would push the field it belongs to off the top. Six-ish rows keeps the whole sheet a sheet,
+  /// and the rest is one flick or one arrow key away.
+  static const double _listMaxHeight = 316;
+
   /// Which question is still ours. A second Enter — or an Esc and a re-open — must not let a slow first
   /// answer arrive and act: it belongs to a palette state nobody is looking at any more.
   int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final spoken = widget.spoken;
+    if (spoken == null) return;
+    // The transcript goes in the field rather than into a variable the person cannot see: this is the
+    // same palette, and what it is about to route has to be readable — and editable, if the STT heard
+    // "web hook" and meant "webhook".
+    _text.text = spoken.text;
+    _text.selection = TextSelection.collapsed(offset: _text.text.length);
+    // Acked BEFORE the first frame, not after the route: the daemon is deciding, on a two-second clock,
+    // whether any window is listening at all, and it must not fall back to routing on its own while this
+    // one is up. See cable/windowRoute.ts.
+    spoken.taken();
+    // Then run exactly what Enter runs. Posted after the frame so the palette is on screen while it
+    // works — routing takes up to twenty seconds, and a dialog that appears already-spinning reads as
+    // a hang rather than as an answer being worked out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_route());
+    });
+  }
 
   @override
   void dispose() {
@@ -187,6 +276,7 @@ class _TaskPaletteState extends State<_TaskPalette> {
     _ticker?.cancel();
     _text.dispose();
     _fieldFocus.dispose();
+    _listScroll.dispose();
     super.dispose();
   }
 
@@ -233,7 +323,32 @@ class _TaskPaletteState extends State<_TaskPalette> {
       _stage = _Stage.choosing;
       _answer = answer;
       _choices = answer.candidates;
+      _rowKeys = List.generate(answer.candidates.length, (_) => GlobalKey());
       _cursor = 0;
+    });
+  }
+
+  /// Move the highlight, and keep it on screen.
+  ///
+  /// Without the second half the arrow keys walk the selection straight out of the visible window: the
+  /// highlight is on row nine, the list is still showing rows one to six, and Enter sends to an agent
+  /// nobody can see. `ensureVisible` is posted after the frame because the row it scrolls to may not
+  /// have been laid out yet when the cursor moved onto it.
+  void _moveCursor(int delta) {
+    if (_choices.isEmpty) return;
+    setState(() => _cursor = (_cursor + delta).clamp(0, _choices.length - 1));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _cursor >= _rowKeys.length) return;
+      final target = _rowKeys[_cursor].currentContext;
+      if (target == null) return;
+      unawaited(
+        Scrollable.ensureVisible(
+          target,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        ),
+      );
     });
   }
 
@@ -269,10 +384,14 @@ class _TaskPaletteState extends State<_TaskPalette> {
       _note = '';
     });
     _startClock();
+    // The dial's Goal and Loop buttons live on the overview too, so a spoken task can carry a command
+    // word without naming an agent. It is applied HERE, at the one place that sends: routing reads the
+    // words a person actually said, and the agent receives the slash command they actually pressed.
+    final cmd = widget.spoken?.cmd ?? '';
     final failure = await widget.notifier.sendRoutedTask(
       agentId,
       machineId,
-      task,
+      cmd.isEmpty ? task : '/$cmd $task',
     );
     if (!mounted || mine != _generation) return;
     _stopClock();
@@ -283,7 +402,11 @@ class _TaskPaletteState extends State<_TaskPalette> {
       });
       return;
     }
-    // Landed. Light the row that took it, then close — see [_confirmBeat].
+    // Landed. Tell the daemon before the beat, not after: it is holding the dial's overlay open on this
+    // answer, and three quarters of a second is long enough to be seen as a stall on a device whose only
+    // feedback is that overlay.
+    widget.spoken?.sent(agentId);
+    // Light the row that took it, then close — see [_confirmBeat].
     setState(() {
       _stage = _Stage.sent;
       _committed = agentId;
@@ -322,11 +445,11 @@ class _TaskPaletteState extends State<_TaskPalette> {
     if (_stage != _Stage.choosing) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      setState(() => _cursor = (_cursor + 1).clamp(0, _choices.length - 1));
+      _moveCursor(1);
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      setState(() => _cursor = (_cursor - 1).clamp(0, _choices.length - 1));
+      _moveCursor(-1);
       return KeyEventResult.handled;
     }
     if (isEnter && !shift) {
@@ -573,8 +696,32 @@ class _TaskPaletteState extends State<_TaskPalette> {
       case _Stage.choosing:
         return _panel([
           _question(),
-          for (var i = 0; i < _choices.length; i++)
-            _row(_choices[i], active: i == _cursor, taken: false),
+          // Every agent that was weighed, scrolling past the sixth. The question above stays put: it is
+          // the explanation for the list, not a row in it.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: _listMaxHeight),
+            child: Scrollbar(
+              controller: _listScroll,
+              child: SingleChildScrollView(
+                controller: _listScroll,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < _choices.length; i++)
+                      KeyedSubtree(
+                        key: i < _rowKeys.length ? _rowKeys[i] : null,
+                        child: _row(
+                          _choices[i],
+                          active: i == _cursor,
+                          taken: false,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ]);
     }
   }
