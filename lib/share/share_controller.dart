@@ -96,13 +96,29 @@ class ShareController extends ChangeNotifier {
   }
 
   /// Probe the machine and adopt anything already serving [gridId].
-  Future<void> refresh(String gridId) async {
+  ///
+  /// [gridId] may be null, and that is not a degenerate case: the page has a
+  /// grid PICKER on it now, so it has to be able to draw itself before a grid
+  /// is chosen. What this machine can offer — a CLI, weights on disk, an engine
+  /// on a port — is a fact about the machine and not about any grid, so the
+  /// probe runs either way and only the "is something already serving" half is
+  /// skipped.
+  Future<void> refresh(String? gridId) async {
     _gridId = gridId;
     loading = true;
     _notify();
     capabilities = await discoverShareCapabilities(_cli);
     loading = false;
-    reconcile(gridId);
+    if (gridId != null) {
+      reconcile(gridId);
+    } else {
+      // No grid means nothing of ours can be serving one. Said explicitly
+      // rather than left alone: a status carried over from the grid that WAS
+      // chosen would claim this computer is sharing with a grid the page is no
+      // longer even naming.
+      liveRun = null;
+      status = ShareStatus.idle;
+    }
     _notify();
   }
 

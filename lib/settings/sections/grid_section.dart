@@ -214,79 +214,84 @@ class _GridSectionState extends State<GridSection> {
     // cause — and because they hold different types.
     return ValueListenableBuilder<GridSelection>(
       valueListenable: _selection,
-      builder: (context, chosen, _) =>
-          ValueListenableBuilder<Set<String>>(
-            valueListenable: _enablement,
-            builder: (context, _, _) {
-              final allOff =
-                  networks != null &&
-                  networks.isNotEmpty &&
-                  networks.every((n) => !_enablement.isEnabled(n.networkId));
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_mismatch(email) case final String gridEmail) ...[
-                    _AccountMismatch(
-                      gridEmail: gridEmail,
-                      harnessEmail: widget.harnessEmail!,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  // Above the split rather than inside it: the consequence is
-                  // about the pane as a whole, not about any one provider, and
-                  // a reader scanning down meets it before the switches that
-                  // caused it.
-                  if (allOff) ...[
-                    const ProviderAllOffBanner(),
-                    const SizedBox(height: 12),
-                  ],
-                  _FilterBar(
-                    query: _query,
-                    filter: _filter,
-                    shown: visible?.length,
-                    total: networks?.length,
-                    email: email,
-                    onQuery: (value) => setState(() => _query = value),
-                    onFilter: (value) => setState(() => _filter = value),
-                    onReload: () => unawaited(widget.controller.refresh()),
-                    onCreate: user == null
-                        ? null
-                        : () => unawaited(_create(user)),
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: visible == null
-                        ? const ProviderSplitPaneSkeleton(
-                            key: Key('provider-split-skeleton'),
-                          )
-                        : ProviderSplitPane(
-                            networks: visible,
-                            signedInEmail: email!,
-                            defaultId: chosen.networkId,
-                            filtered: visible.length != networks!.length,
-                            isEnabled: (network) =>
-                                _enablement.isEnabled(network.networkId),
-                            onToggleEnabled: _toggleEnabled,
-                            onMakeDefault: _makeDefault,
-                            onShare: _share,
-                            onRename: _rename,
-                            onDelete: _confirmDelete,
-                            isDeleting: _mutations.isDeleting,
-                          ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'A provider is where new agents get their credentials. '
-                    'Each agent picks its own model from its header.',
-                    style: TextStyle(
-                      color: grid.AppPalette.textFaint,
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+      builder: (context, chosen, _) => ValueListenableBuilder<Set<String>>(
+        valueListenable: _enablement,
+        builder: (context, _, _) {
+          final allOff =
+              networks != null &&
+              networks.isNotEmpty &&
+              networks.every((n) => !_enablement.isEnabled(n.networkId));
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_mismatch(email) case final String gridEmail) ...[
+                _AccountMismatch(
+                  gridEmail: gridEmail,
+                  harnessEmail: widget.harnessEmail!,
+                ),
+                const SizedBox(height: 12),
+              ],
+              // Above the split rather than inside it: the consequence is
+              // about the pane as a whole, not about any one provider, and
+              // a reader scanning down meets it before the switches that
+              // caused it.
+              if (allOff) ...[
+                const ProviderAllOffBanner(),
+                const SizedBox(height: 12),
+              ],
+              _FilterBar(
+                query: _query,
+                filter: _filter,
+                shown: visible?.length,
+                total: networks?.length,
+                email: email,
+                onQuery: (value) => setState(() => _query = value),
+                onFilter: (value) => setState(() => _filter = value),
+                onReload: () => unawaited(widget.controller.refresh()),
+                onCreate: user == null ? null : () => unawaited(_create(user)),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: visible == null
+                    ? const ProviderSplitPaneSkeleton(
+                        key: Key('provider-split-skeleton'),
+                      )
+                    : ProviderSplitPane(
+                        networks: visible,
+                        signedInEmail: email!,
+                        defaultId: chosen.networkId,
+                        filtered: visible.length != networks!.length,
+                        isEnabled: (network) =>
+                            _enablement.isEnabled(network.networkId),
+                        onToggleEnabled: _toggleEnabled,
+                        onMakeDefault: _makeDefault,
+                        onShare: _share,
+                        onRename: _rename,
+                        onDelete: _confirmDelete,
+                        isDeleting: _mutations.isDeleting,
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                // The third sentence closes a loop from this end. Someone
+                // who moves the DEFAULT here and finds their computer
+                // still serving the old grid has not hit a bug — the two
+                // are separate on purpose (see `share/share_target_store.dart`)
+                // — and this is the only screen where that expectation gets
+                // formed.
+                'A provider is where new agents get their credentials. '
+                'Each agent picks its own model from its header. '
+                'Which grid this computer SHARES with is chosen separately, '
+                'under Share Intelligence.',
+                style: TextStyle(
+                  color: grid.AppPalette.textFaint,
+                  fontSize: 11.5,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -388,11 +393,6 @@ class _GridSectionState extends State<GridSection> {
       SnackBar(content: Text(error ?? 'Deleted "$name".')),
     );
   }
-
-
-
-
-
 
   /// The grids the filter and the query leave standing.
   ///

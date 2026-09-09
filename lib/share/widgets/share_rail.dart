@@ -21,9 +21,20 @@ class ShareRail extends StatelessWidget {
     required this.route,
     required this.status,
     required this.onPick,
+    this.gridPicker,
   });
 
   final String gridName;
+
+  /// Which grid this computer serves — a [ShareTargetPicker] in the app.
+  ///
+  /// A slot rather than six more constructor arguments: the picker needs the
+  /// account's grid list, two stores and a lock, and threading all of that
+  /// through a widget whose job is to lay out a column would make the rail
+  /// depend on everything the page depends on. Nullable so the rail still
+  /// builds in a test that is asserting something else entirely.
+  final Widget? gridPicker;
+
   final List<ShareRouteOffer> offers;
   final ShareRoute route;
   final ShareStatus status;
@@ -54,6 +65,14 @@ class ShareRail extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _Header(gridName: gridName),
+                    // Above the status block, because the status is a statement
+                    // ABOUT this grid: "Sharing" over a picker the reader has
+                    // not reached yet is a claim about a grid they have not
+                    // been shown.
+                    if (gridPicker != null) ...[
+                      const SizedBox(height: ShareMetrics.railGap),
+                      gridPicker!,
+                    ],
                     const SizedBox(height: ShareMetrics.railGap),
                     _Status(status: status),
                     const SizedBox(height: ShareMetrics.railGap),
