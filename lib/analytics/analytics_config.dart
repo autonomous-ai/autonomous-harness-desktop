@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/test_run.dart';
+
 /// Where behavioural events go, whether they go at all, and under what limits.
 ///
 /// The destination is **Autonomous Analytics** — the same event stream the
@@ -113,11 +115,10 @@ class AnalyticsConfig {
     return value == '1' || value == 'true' || value == 'yes';
   }
 
-  /// The test runner sets `FLUTTER_TEST`. Tests here build a real `AppNotifier`
-  /// and drive real controllers, so one that happens to track an event must not
-  /// open a socket or touch `~/.harness` to do it.
-  static bool get _underTest =>
-      Platform.environment.containsKey('FLUTTER_TEST');
+  /// Tests here build a real `AppNotifier` and drive real controllers, so one
+  /// that happens to track an event must not open a socket or touch
+  /// `~/.harness` to do it. See [kUnderTest] for the whole of why.
+  static bool get _underTest => kUnderTest;
 
   /// [key]'s override — `--dart-define` first, then the process env — ignored
   /// in release so a shipped build can only ever report to production.

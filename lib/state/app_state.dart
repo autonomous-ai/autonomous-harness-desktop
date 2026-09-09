@@ -17,6 +17,7 @@ import '../core/models.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
 import '../settings/config_store.dart';
+import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
 import '../widgets/engine_identity.dart' show allEngines;
 import 'pane_layout_store.dart';
@@ -201,6 +202,11 @@ class AppNotifier extends ChangeNotifier {
   WsPool? _pool;
   late String _autonomousEnv;
   String? _lastError;
+  // Retrying re-runs `refreshMachines()` — a real fix for "could not load
+  // machines" or a daemon hiccup, but a no-op for a failure that already
+  // finished (an agent's launch), where the only honest control is to
+  // dismiss it.
+  bool _lastErrorRetryable = true;
   EnvironmentReadiness environmentReadiness = EnvironmentReadiness.initial();
   bool _environmentSetupInFlight = false;
   // The daemon's own advertised local-ws endpoint — the dial target for EVERY machine's data plane
@@ -293,6 +299,14 @@ class AppNotifier extends ChangeNotifier {
   }
 
   String? get lastError => _lastError;
+  bool get lastErrorRetryable => _lastErrorRetryable;
+
+  /// Clears the error strip without retrying anything, for a failure retrying
+  /// cannot fix (see [_lastErrorRetryable]).
+  void dismissError() {
+    _lastError = null;
+    notifyListeners();
+  }
   String get autonomousEnv => _autonomousEnv;
   bool get hasAvailableUpdate => availableUpdate != null;
   bool get hasForcedUpdate => availableUpdate?.forced ?? false;
@@ -661,6 +675,7 @@ class AppNotifier extends ChangeNotifier {
       await _ensureCliDaemon();
     } catch (error) {
       _lastError = '$error';
+      _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
@@ -684,6 +699,7 @@ class AppNotifier extends ChangeNotifier {
       await refreshMachines();
     } catch (error) {
       _lastError = 'Could not load machines: $error';
+      _lastErrorRetryable = true;
     }
     notifyListeners();
   }
@@ -770,6 +786,7 @@ class AppNotifier extends ChangeNotifier {
     unawaited(_pool?.closeAll());
     _pool = null;
     _lastError = message;
+    _lastErrorRetryable = true;
     status = AppStatus.unauthenticated;
     notifyListeners();
   }
@@ -890,6 +907,7 @@ class AppNotifier extends ChangeNotifier {
     } catch (error) {
       status = AppStatus.unauthenticated;
       _lastError = error.toString();
+      _lastErrorRetryable = true;
       // A short code, never `error.toString()` — a CLI failure carries paths
       // and host names, and this stream is not the place for them. Only the
       // two the TYPE can tell apart: a cancelled sign-in and a refused one both
@@ -1426,6 +1444,7 @@ class AppNotifier extends ChangeNotifier {
       _lastError = null;
     } catch (error) {
       _lastError = 'Could not load machines: $error';
+      _lastErrorRetryable = true;
       notifyListeners();
       return;
     }
@@ -1825,6 +1844,9 @@ class AppNotifier extends ChangeNotifier {
     machine.agentsLoadError = null;
     if (agent.launchState == 'failed' && previous?.launchState != 'failed') {
       _lastError = agent.launchDetail ?? 'Failed to start ${agent.name}';
+      // The launch already ran and failed (e.g. the engine's automatic
+      // install failed) — reloading the machine list will not install it.
+      _lastErrorRetryable = false;
     }
   }
 
@@ -1929,6 +1951,10 @@ class AppNotifier extends ChangeNotifier {
     _turnActivityWatchdogs.remove(key)?.cancel();
     _turnActivityWatchdogs[key] = Timer(turnActivityTimeout, () {
       _turnActivityWatchdogs.remove(key);
+      // Closed even when the machine has been replaced under us: this path is
+      // the only end a stalled turn ever gets, and a stats turn left open would
+      // sit there until quit and then bank every hour since as work.
+      harnessStats.onTurnEnded(key);
       final current = machineStates[machine.machine.machineId];
       if (!identical(current, machine)) return;
       if (machine.processingAgentIds.remove(agentId)) notifyListeners();
@@ -1958,9 +1984,13 @@ class AppNotifier extends ChangeNotifier {
       machineStates[machineId]?.blockedAgents[agentId];
 
   void _cancelTurnActivity(String machineId, String agentId) {
-    _turnActivityWatchdogs
-        .remove(_turnActivityKey(machineId, agentId))
-        ?.cancel();
+    final key = _turnActivityKey(machineId, agentId);
+    _turnActivityWatchdogs.remove(key)?.cancel();
+    // Every ordinary end of a turn comes through here — `turn_ended`, a
+    // disconnect, a deleted agent — so this is where the clock stops. An end for
+    // a turn this process never saw start contributes nothing (see
+    // `HarnessStats.onTurnEnded`), which is what makes the disconnect sweep safe.
+    harnessStats.onTurnEnded(key);
     final machine = machineStates[machineId];
     machine?.processingAgentIds.remove(agentId);
     // A question cannot outlive its own turn — the daemon's watcher says the
@@ -2062,6 +2092,10 @@ class AppNotifier extends ChangeNotifier {
     // Idempotent on agent.id — safe even if the CLI's own agent_synced push for this session
     // arrives separately (it's fire-and-forget on the CLI side and unordered relative to this reply).
     _upsertAgent(machine, agent);
+    // Counted HERE and not on the `agent_created` push, which also fires for
+    // agents another client made on the same machine. "Agents spawned" is a
+    // count of what this app launched.
+    harnessStats.onAgentSpawned();
     // Only when a grid was actually picked: an agent on the engine's own login
     // is the old behaviour, and counting it here would make the grid funnel
     // report every agent this app has ever created.
@@ -2618,6 +2652,20 @@ class AppNotifier extends ChangeNotifier {
     _dismissedLinkPrompts.remove(machineId);
     machine.activeAgentId = agentId;
     _persistLayout();
+    // SAID OUTRIGHT, like every other move.
+    //
+    // This path — a rail click on an agent with no tile — was the one that never said it. It relied on
+    // the daemon inferring the move from the `terminal_open` that follows, which is the old
+    // one-terminal-per-window equivalence [see _announceFocusToDial]. Two things wrong with that: the
+    // roster below changes the dial's carousel, so the focus and the roster are one transaction and the
+    // inference arrives after it by luck; and every early return under here (machine offline, terminal
+    // capability missing, a session already attached) opens no stream at all, so nothing was ever sent
+    // and the dial stayed on the old agent with the window on the new one.
+    //
+    // After _persistLayout, so the daemon has the new tile roster before it is told to move onto it. A
+    // duplicate with the inferred one is free: the daemon drops the second against where the dial
+    // already is.
+    _announceFocusToDial();
 
     if (machine.nodeOnline == false) {
       machine.pendingOfflineAgentId = agentId;
@@ -3105,6 +3153,7 @@ class AppNotifier extends ChangeNotifier {
       case 'machine_select_error':
         _lastError =
             'Machine selection failed: ${payload['error'] ?? 'unknown error'}';
+        _lastErrorRetryable = true;
         machine.connectionStatus = ConnectionStatus.disconnected;
         break;
       case 'agent_synced':
@@ -3209,6 +3258,14 @@ class AppNotifier extends ChangeNotifier {
         final agentId = _eventAgentId(machine, event, payload);
         if (agentId != null) {
           _markAgentProcessing(machine, agentId);
+          // Only a START opens a stats turn, for the reason above: a heartbeat
+          // is a turn already under way, and counting one would report an agent
+          // this app merely reconnected to as work somebody just asked for.
+          if (type == 'turn_started') {
+            harnessStats.onTurnStarted(
+              _turnActivityKey(machine.machine.machineId, agentId),
+            );
+          }
         } else {
           final sessionId = _eventSessionId(event, payload);
           if (sessionId != null) {

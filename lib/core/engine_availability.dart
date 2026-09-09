@@ -13,24 +13,6 @@
 /// would be wrong for precisely the remote case the feature exists for.
 library;
 
-/// The engines the CLI has a citable install line for.
-///
-/// Mirrors `INSTALLABLE_ENGINES` in the harness CLI (`lib/engineInstall.ts`),
-/// the same arrangement [kGridCapableEngines] has with `gridLaunch.ts`. It is
-/// only for labelling a row **before** the machine has answered; once a probe
-/// lands, its own `installable` is authoritative, because the machine is what
-/// knows whether the engine is already there.
-///
-/// Keep this in sync with the CLI.
-const Set<String> kInstallableEngines = {
-  'claude',
-  'codex',
-  'copilot',
-  'hermes',
-  'opencode',
-  'pi',
-};
-
 class EngineAvailability {
   const EngineAvailability({
     required this.engine,

@@ -67,6 +67,11 @@ void main() {
     expect(shipped, [
       SettingsSection.appearance,
       SettingsSection.terminal,
+      // Usage carries no gate of its own: it reads only this machine's own
+      // files, and it reads nothing at all until a provider is switched on, so
+      // there is nothing here for a shipped build to hide.
+      SettingsSection.usage,
+      SettingsSection.devices,
       SettingsSection.shortcuts,
       SettingsSection.about,
     ]);

@@ -132,6 +132,33 @@ void main() {
     expect(warning, findsNothing);
   });
 
+  // The note beside an engine's name, which said `no grid` for BOTH "you chose
+  // to use none" and "this one cannot use one" — the picker's own words for a
+  // deliberate choice, spent on an engine's limitation.
+  final gridNote = find.text('grid not supported');
+
+  testWidgets('no grid picked, no grid note beside any engine', (tester) async {
+    // The gate that matters: with nothing chosen, an engine's grid-capability
+    // decides nothing at all, so a caveat about grids down half the list is a
+    // warning about a feature this user has not opted into.
+    gridSelectionStore.value = GridSelection.none;
+    await openDialog(tester, engine: 'cursor');
+    expect(gridNote, findsNothing);
+    // And the old words are gone with it — the picker owns those.
+    expect(find.text('no grid'), findsNothing);
+  });
+
+  testWidgets('a chosen grid marks the engines that cannot reach it', (
+    tester,
+  ) async {
+    gridSelectionStore.value = const GridSelection(
+      networkId: 'grid-3378218621364f16',
+      networkName: 'autonomous.ai',
+    );
+    await openDialog(tester, engine: 'cursor');
+    expect(gridNote, findsOneWidget);
+  });
+
   testWidgets('names the grid for an engine that can reach it', (tester) async {
     // The summary reads the dialog's own state, never the store's — and a new
     // agent is always Auto, which is what it names here.

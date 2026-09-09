@@ -128,6 +128,36 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     return entry.installable ? null : 'not installed';
   }
 
+  /// The one caveat worth printing beside an engine's name, or none.
+  ///
+  /// Stated in the row rather than discovered after picking: each of these
+  /// changes what the engine can do, and finding out by watching the checkbox
+  /// vanish — or by reading `command not found` out of a pane — is a worse way
+  /// to learn it. One note per row, so the row stays a name with a caveat
+  /// rather than a sentence.
+  ///
+  /// The grid note wins when it applies, because an engine that cannot be
+  /// pointed at a grid is refused outright: saying "will install" there would
+  /// promise a launch that is still going to be refused. But it applies ONLY
+  /// with a grid actually chosen — with none, every engine runs on its own
+  /// account and its grid-capability decides nothing, so printing a caveat
+  /// about grids down half the list is a warning about a feature the reader
+  /// has not opted into.
+  ///
+  /// It says "grid not supported", never "no grid": those two words are what
+  /// the picker calls the deliberate choice to use none, and the same words for
+  /// "this engine cannot" and "you asked for none" is how one is read as the
+  /// other.
+  String? _engineNote(String engine, bool gridChosen) {
+    if (gridChosen && !kGridCapableEngines.contains(engine)) {
+      return 'grid not supported';
+    }
+    return _engineInstallNote(engine) ??
+        (kEngineBypassPermissionFlag.containsKey(engine)
+            ? null
+            : 'no bypass flag');
+  }
+
   /// This engine is absent and Harness would install it before launching.
   bool _willInstallEngine(String engine) {
     final entry = _availability(engine);
@@ -152,10 +182,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     return !machine.engines.loaded && machine.engines.error != null;
   }
 
-  /// The engine is missing and Harness has no line it can cite to fix that —
-  /// Pi, and anything else without an entry in the CLI's install table. Stated
-  /// rather than silently offered, because the create WILL fail and the person
-  /// needs to install it themselves first.
+  /// The engine is missing but this machine cannot safely auto-install it — for
+  /// example, an explicit ENGINE_PATH override points at a missing file, or an
+  /// older CLI has no recipe. Stated rather than silently offered, because the
+  /// create WILL fail and the person needs to fix that machine first.
   bool get _missingAndUnfixable {
     final entry = _availability(_engine);
     return entry != null && !entry.installed && !entry.installable;
@@ -326,7 +356,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 children: [
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final choices = _choices(bypassFlag);
+                      final choices = _choices(bypassFlag, chosen.hasGrid);
                       final summary = _NewAgentSummary(
                         engine: _engine,
                         folder: _folder,
@@ -399,7 +429,12 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   }
 
   /// The left column: what the user actually decides.
-  Widget _choices(String? bypassFlag) {
+  ///
+  /// [gridChosen] only gates the grid note — see [_engineNote]. It is passed in
+  /// rather than read off the store here because `build` is already inside the
+  /// [ValueListenableBuilder] that watches it, and a second listener would be a
+  /// second answer to the same question.
+  Widget _choices(String? bypassFlag, bool gridChosen) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -420,22 +455,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
               SelectOption(
                 value: identity.id,
                 label: identity.label,
-                // Stated in the row rather than discovered after picking: all
-                // three change what the engine can do, and finding out by
-                // watching the checkbox vanish — or by reading `command not
-                // found` out of a pane — is a worse way to learn it.
-                //
-                // `no grid` still wins. An engine that cannot be pointed at a
-                // grid is refused outright, so installing it would not make
-                // this create work: saying "will install" there would promise
-                // a launch that is still going to be refused. The install note
-                // therefore only appears for engines a create could reach.
-                note: !kGridCapableEngines.contains(identity.id)
-                    ? 'no grid'
-                    : _engineInstallNote(identity.id) ??
-                          (kEngineBypassPermissionFlag.containsKey(identity.id)
-                              ? null
-                              : 'no bypass flag'),
+                note: _engineNote(identity.id, gridChosen),
                 leading: () => EngineMark(engine: identity.id, size: 14),
                 // "will install" said in words repeated down a third of the
                 // list, and a column of the same two words is a column the eye

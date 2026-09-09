@@ -6,16 +6,22 @@ import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
 import '../../grid/grid_surface.dart';
 import '../../grid/node_metrics.dart';
+import '../../grid/plural.dart';
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
+import '../../usage/usage_controller.dart';
+import '../../usage/usage_window.dart';
 import '../node_dashboard/node_dashboard_screen.dart';
 import '../share_grid/share_grid_dialog.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
 import 'memory_ring.dart';
+import 'rail_figure.dart';
+import 'usage_readout.dart';
+import 'usage_panel.dart';
 
 /// The strip along the bottom of the window: what the chosen grid is made of,
 /// and which build of the app is reading it.
@@ -28,11 +34,20 @@ import 'memory_ring.dart';
 /// closes on one unbroken line. A strip that started after the rail would put a
 /// step in the bottom edge and read as part of the pane rather than the window.
 class GridStatusRail extends StatefulWidget {
-  const GridStatusRail({super.key, this.controller, this.onShareIntelligence});
+  const GridStatusRail({
+    super.key,
+    this.controller,
+    this.usage,
+    this.onShareIntelligence,
+  });
 
   /// Injected by tests. Null in the app, where the rail makes — and disposes —
   /// its own.
   final GridOverviewController? controller;
+
+  /// The agent accounts' rate limits. Injected by tests; null in the app, where
+  /// the rail makes — and disposes — its own.
+  final UsageController? usage;
 
   /// Opens Settings ▸ Share Intelligence — the other way a grid with no
   /// machines on it grows one. Handed down from the shell, which is where the
@@ -52,6 +67,11 @@ class _GridStatusRailState extends State<GridStatusRail> {
   late final GridOverviewController _controller =
       widget.controller ?? GridOverviewController();
 
+  /// Unlike the grid controller, this one is created in every build flavour:
+  /// a rate limit belongs to an account, so the figures are as true in a build
+  /// that hides Grid as in one that shows it.
+  late final UsageController _usage = widget.usage ?? UsageController();
+
   @override
   void dispose() {
     // `_controller` is `late`: in a build that hides Grid the readout below is
@@ -59,6 +79,7 @@ class _GridStatusRailState extends State<GridStatusRail> {
     // dispose it is what would create it, listener on the selection store and
     // all.
     if (widget.controller == null && kGridSurfaceEnabled) _controller.dispose();
+    if (widget.usage == null) _usage.dispose();
     super.dispose();
   }
 
@@ -81,24 +102,30 @@ class _GridStatusRailState extends State<GridStatusRail> {
           padding: const EdgeInsets.only(left: 12, right: 10),
           child: Row(
             children: [
-              // Every figure on the left of this strip is a provider's, and the
-              // version mark on the right is not — so a build that hides the
-              // provider surface keeps the strip for the mark alone. The
-              // readout's other state is the words "No provider chosen", which
-              // is a fair thing to say to someone who can pick one and a riddle
-              // for someone who cannot.
-              if (kGridSurfaceEnabled)
-                Expanded(
-                  child: ListenableBuilder(
-                    listenable: _controller,
-                    builder: (context, _) => _Readout(
-                      controller: _controller,
-                      onShareIntelligence: widget.onShareIntelligence,
-                    ),
+              // The left of this strip answers whichever question this build
+              // can. With a grid chosen it is the grid's figures; with none —
+              // or in a build that hides Grid altogether — it is what the agent
+              // accounts on this machine have spent, which is true either way
+              // because a rate limit belongs to an account rather than a grid.
+              // It used to read "No grid chosen", a sentence that tells someone
+              // what they already know and hands a riddle to anyone who cannot
+              // pick one.
+              Expanded(
+                child: ListenableBuilder(
+                  // `_controller` is `late` and must stay untouched in a build
+                  // that hides Grid — see [dispose]. The `if` guards the read,
+                  // not just the listening.
+                  listenable: Listenable.merge([
+                    if (kGridSurfaceEnabled) _controller,
+                    _usage,
+                  ]),
+                  builder: (context, _) => _Readout(
+                    controller: kGridSurfaceEnabled ? _controller : null,
+                    usage: _usage,
+                    onShareIntelligence: widget.onShareIntelligence,
                   ),
-                )
-              else
-                const Spacer(),
+                ),
+              ),
               const _VersionMark(),
             ],
           ),
@@ -111,24 +138,50 @@ class _GridStatusRailState extends State<GridStatusRail> {
 /// Which of the rail's panels is open.
 ///
 /// [power] is the whole left cluster — the grid's name, its live dot and its
-/// memory ring — because all three are facts about the grid itself. The other
+/// memory ring — because all three are facts about the grid itself. The next
 /// four name the thing their own figure counts.
-enum _PanelKind { power, tokens, members, nodes, models }
+///
+/// [usageClaude] and [usageCodex] belong to the other readout entirely: one
+/// kind per account rather than a single `usage` carrying a provider beside it,
+/// because everything here is keyed on this enum alone and a kind that needed a
+/// companion field would be a kind that could be hovered without it.
+enum _PanelKind {
+  power,
+  tokens,
+  members,
+  nodes,
+  models,
+  usageClaude,
+  usageCodex;
 
-/// What a panel hangs from: the link that places it under its figure, and the
-/// key that says where that figure sits. Both, because the link alone cannot
-/// answer whether the panel it places still fits inside the window — see
-/// [GridStatPanel.anchorKey].
-typedef _FigureAnchor = ({LayerLink link, GlobalKey key});
+  /// The kind that opens [provider]'s panel.
+  static _PanelKind forProvider(UsageProvider provider) => switch (provider) {
+    UsageProvider.claude => usageClaude,
+    UsageProvider.codex => usageCodex,
+  };
 
-_FigureAnchor _newFigureAnchor() => (link: LayerLink(), key: GlobalKey());
+  /// The account this kind belongs to, or null for the grid's own panels.
+  UsageProvider? get provider => switch (this) {
+    usageClaude => UsageProvider.claude,
+    usageCodex => UsageProvider.codex,
+    _ => null,
+  };
+}
 
 /// The figures, read from both ends: what this grid *is* on the left, what it
-/// is *made of* on the right.
+/// is *made of* on the right — or, with no grid, what the agent accounts on
+/// this machine have spent.
 class _Readout extends StatefulWidget {
-  const _Readout({required this.controller, this.onShareIntelligence});
+  const _Readout({
+    required this.controller,
+    required this.usage,
+    this.onShareIntelligence,
+  });
 
-  final GridOverviewController controller;
+  /// The chosen grid's figures, or null in a build that hides Grid entirely.
+  final GridOverviewController? controller;
+
+  final UsageController usage;
 
   /// See [GridStatusRail.onShareIntelligence].
   final VoidCallback? onShareIntelligence;
@@ -141,11 +194,19 @@ class _ReadoutState extends State<_Readout> {
   /// One anchor per figure, so a panel hangs under the number it explains
   /// rather than under the row as a whole. A [LayerLink] can only be attached
   /// to one target, hence one each.
-  final _nameAnchor = _newFigureAnchor();
-  final _tokenAnchor = _newFigureAnchor();
-  final _memberAnchor = _newFigureAnchor();
-  final _nodeAnchor = _newFigureAnchor();
-  final _modelAnchor = _newFigureAnchor();
+  final _nameAnchor = newRailFigureAnchor();
+  final _tokenAnchor = newRailFigureAnchor();
+  final _memberAnchor = newRailFigureAnchor();
+  final _nodeAnchor = newRailFigureAnchor();
+  final _modelAnchor = newRailFigureAnchor();
+
+  /// One per account, made up front rather than per build: an anchor rebuilt
+  /// mid-hover would hand the open panel a [LayerLink] its target no longer
+  /// holds, and the panel would jump to the window's origin.
+  final Map<UsageProvider, RailFigureAnchor> _usageAnchors = {
+    for (final provider in UsageProvider.values)
+      provider: newRailFigureAnchor(),
+  };
   final _portal = OverlayPortalController();
 
   /// Ties the rail and its panel into one tap region, so a click inside either
@@ -162,7 +223,28 @@ class _ReadoutState extends State<_Readout> {
   _PanelKind? _hovered;
 
   /// What the panel is currently showing.
-  _PanelKind _panel = _PanelKind.power;
+  ///
+  /// `late`, because which panel is even *available* depends on whether a grid
+  /// is chosen, and a field initialiser cannot ask.
+  late _PanelKind _panel = _defaultKind;
+
+  /// The grid's figures, or null when there is no grid to describe — either
+  /// because none is chosen or because this build hides Grid altogether. The
+  /// rail then reads the agent accounts instead.
+  GridOverviewController? get _grid {
+    final controller = widget.controller;
+    return controller != null && controller.hasGrid ? controller : null;
+  }
+
+  /// What a click on empty rail opens: the grid's own panel when there is a
+  /// grid, and otherwise the first account with figures to show.
+  _PanelKind get _defaultKind {
+    if (_grid != null) return _PanelKind.power;
+    final first = widget.usage.answered.firstOrNull;
+    return first == null
+        ? _PanelKind.power
+        : _PanelKind.forProvider(first.provider);
+  }
 
   /// Held open by a click, rather than by the pointer resting on the rail.
   ///
@@ -220,22 +302,21 @@ class _ReadoutState extends State<_Readout> {
       return;
     }
     _pinned = true;
-    setState(() => _panel = _hovered ?? _PanelKind.power);
+    setState(() => _panel = _hovered ?? _defaultKind);
     _show();
   }
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final controller = widget.controller;
-    if (!controller.hasGrid) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          'No provider chosen',
-          style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
-        ),
-      );
+    // Nothing to describe and nothing to report: no grid, and no account
+    // signed in here either. The strip keeps its version mark and says
+    // nothing else, rather than drawing a figure-shaped blank that will
+    // never fill.
+    if (_grid == null &&
+        !widget.usage.loading &&
+        widget.usage.answered.isEmpty) {
+      return const SizedBox.shrink();
     }
     return TapRegion(
       groupId: _tapGroup,
@@ -257,13 +338,25 @@ class _ReadoutState extends State<_Readout> {
   }
 
   List<OverviewNode> get _onlineNodes => [
-    for (final node
-        in widget.controller.overview?.nodes ?? const <OverviewNode>[])
+    for (final node in _grid?.overview?.nodes ?? const <OverviewNode>[])
       if (node.online) node,
   ];
 
   Widget _figures() {
-    final controller = widget.controller;
+    final controller = _grid;
+    // No grid to describe: the strip reads the agent accounts instead. These
+    // are the same figures either way — a rate limit is the account's, not the
+    // grid's — so this is a substitution, not a fallback.
+    if (controller == null) {
+      return UsageReadout<_PanelKind>(
+        readings: widget.usage.readings,
+        loading: widget.usage.loading,
+        anchorFor: (provider) => _usageAnchors[provider]!,
+        kindFor: _PanelKind.forProvider,
+        onEnter: _onEnter,
+        onExit: _onExit,
+      );
+    }
     final power = controller.power;
     final answered = power?.answered;
     // The first answer for this grid is still on its way. Every figure that
@@ -280,16 +373,31 @@ class _ReadoutState extends State<_Readout> {
           onExit: _onExit,
         ),
         if (pending)
-          const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 58),
+          // Measured against what lands here — `92.4M tokens / 24h`, not the
+          // bare `92.4M / 24h` this stood in for before the figure was given
+          // its noun. A placeholder narrower than its answer is the jump a
+          // skeleton exists to prevent.
+          const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 104),
         if (power != null && answered != null && answered.freshInputTokens > 0)
-          _Figure(
-            anchor: _tokenAnchor,
-            kind: _PanelKind.tokens,
-            value: formatCount(answered.freshInputTokens),
-            unit: answeredWindowLabel(answered.windowSeconds),
-            semantics: 'work answered',
-            onEnter: _onEnter,
-            onExit: _onExit,
+          // Flexible, so the one figure on this strip that carries words gives
+          // them up before the row overflows. The rail is a plain Row over the
+          // window's full width: past the Spacer there is no slack left, and a
+          // narrow window is what turns the naming of this figure into a
+          // yellow-and-black bar along the bottom edge.
+          Flexible(
+            child: _Figure(
+              anchor: _tokenAnchor,
+              kind: _PanelKind.tokens,
+              value: formatCount(answered.freshInputTokens),
+              // Pluralised off the raw count, not off what `formatCount` printed:
+              // past a thousand that prints "1.2M" and the noun beside it is
+              // still plural, and only the count itself knows that.
+              noun: plural(answered.freshInputTokens, 'token'),
+              unit: answeredWindowLabel(answered.windowSeconds),
+              semantics: 'work answered',
+              onEnter: _onEnter,
+              onExit: _onExit,
+            ),
           ),
         const Spacer(),
         // WHAT THE GRID IS MADE OF — people, machines, models.
@@ -343,42 +451,51 @@ class _ReadoutState extends State<_Readout> {
   /// it takes the window, the way Settings does, instead of a box over a
   /// greyed-out shell.
   void _openNodes() {
+    // Only ever reached from a grid panel, which cannot be open without one.
+    final controller = _grid;
+    if (controller == null) return;
     _hide();
     analytics.gridDashboardOpened(
-      networkId: widget.controller.networkId,
-      nodes: widget.controller.overview?.nodes.length,
+      networkId: controller.networkId,
+      nodes: controller.overview?.nodes.length,
     );
     showNodeDashboardScreen(
       context,
-      controller: widget.controller,
+      controller: controller,
       onShareIntelligence: widget.onShareIntelligence,
       // The dashboard's empty state offers the other way to fill a grid, and
       // reaches it through the same sheet the members panel does.
-      onInvite: widget.controller.networkId == null ? null : _openShare,
+      onInvite: controller.networkId == null ? null : _openShare,
     );
   }
 
   void _openShare() {
-    final id = widget.controller.networkId;
-    if (id == null) return;
+    final controller = _grid;
+    final id = controller?.networkId;
+    if (controller == null || id == null) return;
     _hide();
-    analytics.gridShareOpened(
-      networkId: id,
-      members: widget.controller.members,
-    );
+    analytics.gridShareOpened(networkId: id, members: controller.members);
     showShareGridDialog(
       context,
       networkId: id,
-      gridName: widget.controller.gridName,
+      gridName: controller.gridName,
       // An invite that lands changes the figure this rail prints, so the poll
       // is asked again rather than left to come round in its own time.
-      onChanged: widget.controller.refresh,
+      onChanged: controller.refresh,
     );
   }
 
   /// The panel [kind] asks for, anchored to the figure it belongs to.
   Widget _panelFor(_PanelKind kind) {
-    final controller = widget.controller;
+    // An account's panel, which needs no grid — and is the only kind reachable
+    // when there is none.
+    final provider = kind.provider;
+    if (provider != null) return _usagePanel(kind, provider);
+    final controller = _grid;
+    // The grid panels cannot be opened without a grid, but a pinned panel
+    // outlives the frame that opened it: deselecting a grid while one is up
+    // arrives here with nothing to draw.
+    if (controller == null) return const SizedBox.shrink();
     final onShare = controller.networkId == null ? null : _openShare;
     return switch (kind) {
       _PanelKind.power => GridPowerPanel(
@@ -434,12 +551,35 @@ class _ReadoutState extends State<_Readout> {
         ),
         width: 352,
       ),
+      // Taken by the early return above, before a grid was even asked for.
+      // Named rather than left to a wildcard so a seventh kind added later
+      // still has to come here and say what it draws.
+      _PanelKind.usageClaude ||
+      _PanelKind.usageCodex => const SizedBox.shrink(),
     };
+  }
+
+  /// One account's windows, under the figure that summarises them.
+  ///
+  /// Narrower than the grid's lists: every row is a label, a bar and two short
+  /// figures, and the extra width would go to the bar alone — which is the one
+  /// thing here that carries no reading of its own.
+  Widget _usagePanel(_PanelKind kind, UsageProvider provider) {
+    final reading = widget.usage.readings.firstWhere(
+      (r) => r.provider == provider,
+      orElse: () => ProviderUsage.loading(provider),
+    );
+    return _stat(
+      kind,
+      _usageAnchors[provider]!,
+      UsagePanelContent(reading: reading),
+      width: 248,
+    );
   }
 
   Widget _stat(
     _PanelKind kind,
-    _FigureAnchor anchor,
+    RailFigureAnchor anchor,
     Widget child, {
     required double width,
   }) => GridStatPanel(
@@ -467,7 +607,7 @@ class _GridMark extends StatelessWidget {
   });
 
   final GridOverviewController controller;
-  final _FigureAnchor anchor;
+  final RailFigureAnchor anchor;
   final void Function(_PanelKind) onEnter;
   final void Function(_PanelKind) onExit;
 
@@ -485,7 +625,7 @@ class _GridMark extends StatelessWidget {
     final share = (vram != null && used != null && vram > 0)
         ? used / vram
         : (power?.gpuUtilPct != null ? power!.gpuUtilPct! / 100 : null);
-    return _HoverTarget(
+    return RailHoverTarget<_PanelKind>(
       kind: _PanelKind.power,
       anchor: anchor,
       enabled: power != null,
@@ -557,21 +697,31 @@ class _GridMark extends StatelessWidget {
   }
 }
 
-/// A figure with its unit: `92.4M / 24h`.
+/// A figure, what it counts, and over how long: `92.4M tokens / 24h`.
 class _Figure extends StatelessWidget {
   const _Figure({
     required this.anchor,
     required this.kind,
     required this.value,
+    required this.noun,
     required this.unit,
     required this.semantics,
     required this.onEnter,
     required this.onExit,
   });
 
-  final _FigureAnchor anchor;
+  final RailFigureAnchor anchor;
   final _PanelKind kind;
   final String value;
+
+  /// What the figure counts, drawn faint beside it.
+  ///
+  /// On screen rather than in [semantics] alone: a bare `92.4M / 24h` at the
+  /// window's edge is a number nobody can name without hovering it, and the
+  /// panel that names it is a whole card — far more than the question deserves.
+  /// The counts beside it are read from their glyphs; this one has none.
+  final String noun;
+
   final String unit;
   final String semantics;
   final void Function(_PanelKind) onEnter;
@@ -580,7 +730,7 @@ class _Figure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return _HoverTarget(
+    return RailHoverTarget<_PanelKind>(
       kind: kind,
       anchor: anchor,
       semantics: semantics,
@@ -597,14 +747,19 @@ class _Figure extends StatelessWidget {
               fontWeight: grid.AppFont.medium,
             ),
           ),
-          if (unit.isNotEmpty)
-            Text(
-              ' / $unit',
+          // The tail flexes, never the count: a truncated figure is a wrong
+          // figure, while a truncated noun is still a legible hint at one.
+          Flexible(
+            child: Text(
+              unit.isEmpty ? ' $noun' : ' $noun / $unit',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: grid.AppPalette.textFaint,
                 fontSize: 11.5,
               ),
             ),
+          ),
         ],
       ),
     );
@@ -668,7 +823,7 @@ class _Count extends StatelessWidget {
     required this.onExit,
   });
 
-  final _FigureAnchor anchor;
+  final RailFigureAnchor anchor;
   final _PanelKind kind;
   final IconData icon;
   final String value;
@@ -679,7 +834,7 @@ class _Count extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return _HoverTarget(
+    return RailHoverTarget<_PanelKind>(
       kind: kind,
       anchor: anchor,
       semantics: '$value $semantics',
@@ -699,66 +854,6 @@ class _Count extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// One figure on the rail, and the panel it opens.
-///
-/// The regions touch: the gap between figures is each figure's own padding
-/// rather than a spacer between them. A bare `SizedBox` would be dead ground —
-/// the pointer crossing it belongs to nothing, so an open panel would close on
-/// the way past and reopen on landing.
-class _HoverTarget extends StatelessWidget {
-  const _HoverTarget({
-    required this.kind,
-    required this.anchor,
-    required this.semantics,
-    required this.child,
-    required this.onEnter,
-    required this.onExit,
-    this.enabled = true,
-  });
-
-  final _PanelKind kind;
-  final _FigureAnchor anchor;
-  final String semantics;
-  final Widget child;
-  final void Function(_PanelKind) onEnter;
-  final void Function(_PanelKind) onExit;
-
-  /// False while there is nothing to open — the figure is then still readable
-  /// and simply inert.
-  final bool enabled;
-
-  /// Half the space between two figures. Each side owns its own half, so the
-  /// two regions meet with nothing between them.
-  static const double _gap = 9;
-
-  @override
-  Widget build(BuildContext context) {
-    return CompositedTransformTarget(
-      link: anchor.link,
-      child: KeyedSubtree(
-        key: anchor.key,
-        child: Semantics(
-          label: semantics,
-          child: MouseRegion(
-            cursor: enabled
-                ? SystemMouseCursors.click
-                : SystemMouseCursors.basic,
-            onEnter: enabled ? (_) => onEnter(kind) : null,
-            onExit: enabled ? (_) => onExit(kind) : null,
-            child: Padding(
-              // Full height, so the pointer entering the rail anywhere over a
-              // figure is already on it — a region inset from the strip's own
-              // edges leaves a lane above and below that closes the panel.
-              padding: const EdgeInsets.symmetric(horizontal: _gap),
-              child: Center(child: child),
-            ),
-          ),
-        ),
       ),
     );
   }

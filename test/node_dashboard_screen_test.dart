@@ -288,7 +288,7 @@ void main() {
         // could only ever empty an already-empty pane.
         expect(find.text('Input tokens'), findsNothing);
 
-        await tester.tap(find.text('Share Intelligence'));
+        await tester.tap(find.text('Share this computer'));
         await tester.pumpAndSettle();
         expect(shared, 1);
       },
@@ -303,7 +303,7 @@ void main() {
       nodes: const [],
       body: (dash) async {
         expect(find.text('Add the first machine'), findsOneWidget);
-        expect(find.text('Share Intelligence'), findsNothing);
+        expect(find.text('Share this computer'), findsNothing);
         expect(find.text('Invite people'), findsNothing);
       },
     );

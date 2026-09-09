@@ -259,7 +259,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             top: 0,
                             child: _ErrorStrip(
                               message: notifier.lastError!,
+                              retryable: notifier.lastErrorRetryable,
                               onRetry: notifier.retryMachines,
+                              onDismiss: notifier.dismissError,
                             ),
                           ),
                       ],
@@ -459,9 +461,16 @@ class _ResizeHandle extends StatelessWidget {
 
 class _ErrorStrip extends StatelessWidget {
   final String message;
+  final bool retryable;
   final VoidCallback onRetry;
+  final VoidCallback onDismiss;
 
-  const _ErrorStrip({required this.message, required this.onRetry});
+  const _ErrorStrip({
+    required this.message,
+    required this.retryable,
+    required this.onRetry,
+    required this.onDismiss,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -485,7 +494,14 @@ class _ErrorStrip extends StatelessWidget {
                 style: TextStyle(color: AppColors.textSoft, fontSize: 10),
               ),
             ),
-            TextButton(onPressed: onRetry, child: const Text('RETRY')),
+            // A failure already finished (an agent's launch) has nothing left
+            // for a retry to redo — reloading the machine list will not
+            // install the engine that just failed to. Offer to dismiss it
+            // instead of a button that only looks like it did something.
+            if (retryable)
+              TextButton(onPressed: onRetry, child: const Text('RETRY'))
+            else
+              TextButton(onPressed: onDismiss, child: const Text('CLOSE')),
           ],
         ),
       ),

@@ -79,7 +79,7 @@ const _expects = {
   '33': ['33 MEMBERS', 'owner', '106M input · 24h'],
   '8': ['NODES', '@team2', '828.3 GB VRAM', '4 × Apple M2 Ultra · macOS'],
   '10': ['MODELS', 'CARRYING THIS GRID · LAST 24H', 'FRESH IN', 'OTHERS · 9'],
-  '106M': ['TOKENS', 'last 24h', 'Input', 'Cached', 'Output', 'Answered'],
+  '106M': ['TOKENS', 'last 24h', 'Input', 'Cached', 'Output', 'Requests'],
 };
 
 void main() {

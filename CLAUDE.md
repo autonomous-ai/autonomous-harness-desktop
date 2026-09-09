@@ -295,9 +295,10 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   machine and that is far too short to browse. Both are shown, labelled apart. A version's
   `pull_spec` names only the FIRST file, so a split GGUF is downloaded through every URL in `urls`
   (`share/pull_spec.dart`) — pulling the named one alone leaves a model that will not load.
-- **The status rail is the app's one polling reader** (`lib/widgets/status_rail/`,
+- **The status rail is where the app polls** (`lib/widgets/status_rail/`,
   `grid/grid_overview_controller.dart`): a 26px full-bleed strip along the window's bottom edge
-  showing what the chosen grid is made of. Its data is `GET {relay}/grid/overview` — the RELAY, not
+  showing what the chosen grid is made of. Two pollers now hang off it, never both at once — the grid
+  overview below, and the agent-account usage further down. Its data is `GET {relay}/grid/overview` — the RELAY, not
   the control plane, because the relay is what dispatches the work — reached with a fresh key from
   `credentials(networkId)` every 60s. **A figure the relay did not send is null, never zero**: a zero
   is a measurement and a blank is an admission, and on this strip the difference is the whole point.
@@ -313,6 +314,137 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
   `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
   exist to fit.
+- **Agent-account usage is the rail's OTHER readout, and it stands exactly where the grid's
+  cannot** (`lib/usage/`, `widgets/status_rail/usage_readout.dart` + `usage_panel.dart`). With a grid
+  chosen the strip reads the grid; with none — or in a build where `kGridSurfaceEnabled` is off — it
+  reads what the Claude and Codex accounts on this machine have spent. The two never share the strip,
+  which is why they share one hover/pin surface (`rail_figure.dart`, extracted from the grid rail
+  rather than copied) and one `_PanelKind`. It replaced the words "No grid chosen", a sentence that
+  tells someone what they already know and hands a riddle to anyone whose build has no picker.
+  **This is the SECOND exception to "the app talks only to the local CLI"**, after Grid, and it is a
+  narrower one: nothing here is dialled on the app's own behalf. `UsageCredentials` reads the tokens
+  the agent CLIs already wrote — the macOS Keychain item `Claude Code-credentials` (falling back to
+  `~/.claude/.credentials.json`, which is all Linux has) and `~/.codex/auth.json` — and spends them
+  against the vendors' own usage endpoints. It never writes or refreshes them: one sign-in per
+  machine, owned by the CLI that made it, the same rule Grid follows with `credentials.toml`.
+  A rate limit is scoped to an **account**, not a machine, so reading it here is right even though
+  the agents run elsewhere — provided the remote machines sign in as the same account. They are also
+  the reason this poller is not gated on a grid: an account's limit is true with no grid at all.
+  ⚠️ **Both endpoints are undocumented** — `api.anthropic.com/api/oauth/usage` (needs
+  `anthropic-beta: oauth-2025-04-20` and the CLI's own user agent, because the OAuth token was minted
+  for the CLI) and `chatgpt.com/backend-api/wham/usage`. Either can change without notice; both
+  failures land as a `ProviderUsage` state rather than an exception. **`signedOut` is kept apart from
+  `failed`** for the reason Grid keeps `GridNetworksSignedOut` apart from `GridNetworksFailed`:
+  retrying a sign-out fails identically forever. Claude's Fable window has been spelled three ways
+  across releases and all three are tried; Codex names its windows from `limit_window_seconds` rather
+  than assuming, because a confident "5h" beside a real percentage reads as measured.
+  `loading` is false **before** `start()` as well as after the first answer — a controller nobody
+  started is not waiting for anything, and a skeleton for it would promise an answer never coming.
+  That is also what keeps `flutter test` honest: `kUnderTest` (`core/test_run.dart`, shared with
+  `AnalyticsConfig`) stops the poll auto-starting, since a `Timer.periodic` is a `pumpAndSettle` that
+  never settles and these sources would otherwise shell out to `security` and open real sockets.
+- **The token ledger is the OTHER usage feature, and the two must not be merged** (`lib/usage/ledger/`,
+  Settings ▸ Usage in `settings/sections/usage_section.dart` + `usage_panels.dart`). The rail's readout
+  above asks the vendors *how much of your rate limit is left* — a percentage, scoped to an **account**,
+  true whichever machine burned it. This counts **tokens**, scoped to **this machine**, with a history:
+  it reads the logs the agent CLIs already wrote to this disk and calls nobody. Ported from Orca
+  (`src/main/{claude,codex,opencode}-usage/`); keep the pricing tables in step with its
+  `claude-model-pricing.ts` / `codex-model-pricing.ts`.
+  **Three providers, three unrelated formats.** Claude: JSONL under `~/.claude/projects` *and*
+  `~/.claude/transcripts` (the older layout — reading only the first drops every pre-move session),
+  usage off `message.usage` on `type == "assistant"` rows. Codex: JSONL under
+  `$CODEX_HOME`/`~/.codex/{sessions,archived_sessions}`, usage off `event_msg`/`token_count`. OpenCode:
+  a **SQLite** database at `$XDG_DATA_HOME/opencode/opencode*.db`, one aggregate row per session.
+  ⚠️ **Codex reports CUMULATIVE totals where Claude reports per-turn figures** — summing
+  `total_token_usage` would bill a 40-turn session forty times over, so `resolveCodexDelta` takes the
+  increment and guards the compaction/resume regressions. ⚠️ **`UsageTotals.freshInput` is
+  cache-EXCLUSIVE for all three**, which costs Codex a subtraction because its `input_tokens` includes
+  `cached_input_tokens`; Orca deliberately does *not* normalise, which is right for a scanner that
+  round-trips a file format and wrong here, where one panel adds all three together. Codex's
+  `cache_write_input_tokens` is dropped on purpose — OpenAI writes its cache free, so a bucket for it
+  would show tokens nobody is billed for.
+  **`costUsd` is nullable and null is never zero.** Only OpenCode fills it, from its own `cost` column;
+  Claude and Codex are priced from `model_pricing.dart`, and a model that matches no row leaves
+  `hasUnpricedModel` set so the panel calls the figure a floor. A Grid session records a real `0.0`
+  (Grid inference is free, grid ADR 0039 D-g) and that measurement must not render like an unpriced
+  model. Same rule as the rail: `LedgerStatus.unavailable` is kept apart from `failed`, because a
+  machine with no OpenCode is never fixed by retrying.
+  **Off is the resting state**, per provider, persisted through `LocalKeyValueStore`: these transcripts
+  hold every prompt, path and branch a session touched and this feature wants only the counts, so
+  nothing is read until somebody switches it on — and switching one off deletes its snapshot from disk
+  as well as from memory. Scans are incremental against a `{path, mtime, size}` fingerprint cached in
+  `~/.harness/desktop-app/usage-ledger-<provider>.json`, and `kLedgerStaleAfter` (5 min) keeps opening
+  the pane from re-walking the disk; a cold Claude scan is ~3s over 71 transcripts, which is why
+  neither of those is optional. Nothing polls — a ledger only moves when an agent writes here.
+  ⚠️ **Local only, by decision.** Agents launched onto remote machines write their transcripts there and
+  nothing here reaches them; the pane's subtitle says so, because a total that silently excluded most of
+  a team's work would be worse than no total. `UsageSource` in `usage/usage_source.dart` is where a
+  per-machine source would arrive if that changes.
+  `sqlite3` is a **Dart-only FFI** dependency (never `sqlite3_flutter_libs`): it dlopens the system
+  library, so it registers no native plugin and leaves the macOS SPM package list alone. `kUnderTest`
+  keeps `UsageSection` from auto-loading, for the same reason the rail's poller does not start there.
+  ⚠️ **The snapshot goes through `SnapshotStore` (`core/snapshot_store.dart`), and a test MUST pass
+  `MemorySnapshotStore`** — this is not tidiness. A real `File.writeAsString` never completes inside
+  `testWidgets`' fake-async zone, so a store awaiting one hangs the whole run until the shell is
+  killed rather than failing; that seam is what keeps `dart:io` out of a widget test, exactly as
+  `LocalKeyValueStore` does. It is deliberately NOT `LocalKeyValueStore`: that is `state.json`, one
+  small locked document, and a multi-megabyte usage snapshot in it would be rewritten on every theme
+  flip. `HarnessStats` uses the same seam.
+- **Settings ▸ Usage has a second half, and it counts the APP rather than the CLIs**
+  (`lib/stats/harness_stats.dart`, drawn by `StatsSummaryCards`). Ported from Orca's
+  `src/main/stats/`: agents spawned, time agents worked, and a "Tracking since" line. These are this
+  app's own events, so unlike the ledger there is no permission to ask and no switch — an app may
+  count what it did. `harnessStats` is a singleton like `analytics`, loaded by
+  `loadPersistedSettings` (not for the first frame — because the counters start moving as soon as an
+  agent does, and a load landing after the first `onAgentSpawned` would overwrite it) and flushed by
+  `AnalyticsLifecycle.didRequestAppExit`, which is the ONLY place a turn still running at quit gets
+  its time counted.
+  Three hooks, all in `AppNotifier`: `createAgent` (**not** the `agent_created` push, which also
+  fires for agents another client made on the same machine), the `turn_started` case (**not**
+  `turn_heartbeat`, which is a turn already under way), and `_cancelTurnActivity` plus the turn
+  watchdog for the end. ⚠️ **The watchdog end is load-bearing**: it is the only close a stalled turn
+  ever gets, and a stats turn left open would sit there until quit and then bank every hour since as
+  work. A start on a live key is ignored rather than restarting the clock, and an end with no start
+  contributes nothing — that is what makes the disconnect sweep safe.
+  ⚠️ **Two deliberate departures from Orca.** The third card is TURNS, not PRs created: this app
+  opens no pull requests, and a card wired to a number that can only read zero is worse than one
+  showing something true. And no event log is kept — Orca persists 10,000 events beside its
+  aggregates for breakdowns it does not draw, at ~900KB per write; `firstEventAt` is stored directly,
+  which is the one thing that log was protecting.
+- **The per-provider detail pane is ONE file, not three** (`settings/sections/usage_provider_pane.dart`
+  with `usage_detail_panels.dart`), against Orca's near-identical `ClaudeUsagePane` /
+  `CodexUsagePane` / `OpenCodeUsagePane`. Everything that differs between providers is already in
+  `usage/ledger/usage_report.dart`; three copies of the layout would be three places to fix a
+  spacing bug. The lens picker at the top of Settings ▸ Usage switches between the overview and one
+  provider, and `_Lens` is a nullable `LedgerProvider` so the per-provider cases stay exactly the
+  providers that exist.
+  **The overview opens on the last 30 days**, the window Orca's default range shows, so a figure here
+  can be compared against one there — `_kDefaultOverviewRange`. All-time is a click away in the same
+  picker the provider panes carry. Measured on one machine: 30 days reads 3.2B tokens / 20 active days
+  / 80 sessions, where all-time reads 3.8B / 33 / 92 — both true, answering different questions. The
+  intensity grid draws a fixed six weeks whatever the range is, as Orca's does: `overview.days` is
+  already clipped, so the days before the window fill in as EMPTY cells rather than as stray data, and
+  shrinking the strip to the range only costs it the context a heatmap exists for. Clipping
+  happens in `clipLedger` at draw time, not at scan time: the scan is the expensive half and does not
+  depend on the window being looked at, and `ledgerFromEntries` is shared with `buildProviderLedger` so
+  a clipped ledger cannot sum its cost differently from the full one.
+  ⚠️ **There is a RANGE filter and deliberately no SCOPE filter.** Orca offers "Orca worktrees only"
+  against "all local usage" because it owns the worktrees its agents run in. This app owns no such
+  boundary — agents launched through Harness run on OTHER machines and write their transcripts there
+  — so a "Harness only" lens over this computer's logs would filter on a distinction that does not
+  exist here and would answer nearly zero. Everything local is counted and the pane says so.
+  ⚠️ **OpenCode's `tokens_cache_read` is a PEER of `tokens_input`, not a subset — Orca gets this
+  wrong and this app must not copy it.** `opencode-usage-row-parsing.ts` clamps it with
+  `Math.min(cache.read, input)` on the assumption it is contained, the way Codex's cached input is.
+  Measured against a live database, three of nine sessions read more from cache than they had input at
+  all (7,680 cached against 72 input), which no subset can do; the clamp threw away 30.2k of 51.0k real
+  cache reads and dropped them from the total besides. OpenCode's schema keeps `tokens_input`,
+  `tokens_cache_read` and `tokens_cache_write` as three columns, the Anthropic shape rather than the
+  OpenAI one. Codex remains the only provider whose input needs the subtraction.
+  ⚠️ **`UsageSessionsTable` states its width instead of stretching.** Inside a horizontal
+  `SingleChildScrollView` the incoming width is unbounded, so `CrossAxisAlignment.stretch` asks for
+  an infinite row and the layout throws; `_sessionTableWidth` sums the columns, which is the only
+  honest width it has.
 - **The rail's two panels open the only surfaces this app grew that the CLI
   knows nothing about.** "View dashboard" opens the node dashboard
   (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`

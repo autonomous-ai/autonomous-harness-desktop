@@ -16,11 +16,15 @@ class SettingRow extends StatelessWidget {
     required this.title,
     required this.detail,
     required this.control,
+    this.alignTop = false,
   });
 
   final String title;
   final String detail;
   final Widget control;
+
+  /// Align taller controls with the title; compact controls stay centered.
+  final bool alignTop;
 
   /// Fixed, so every control on this screen lines up on one right edge.
   static const double controlWidth = 188;
@@ -59,6 +63,9 @@ class SettingRow extends StatelessWidget {
                 children: [text, const SizedBox(height: 10), control],
               )
             : Row(
+                crossAxisAlignment: alignTop
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.center,
                 children: [
                   Expanded(child: text),
                   const SizedBox(width: 20),

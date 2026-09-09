@@ -243,8 +243,8 @@ class _EmptyState extends StatelessWidget {
       icon: LucideIcons.server300,
       title: 'Add the first machine',
       message:
-          "Share this computer's models with the grid, or invite someone who "
-          'can share theirs.',
+          "Put this computer's models on the grid, or invite someone who can "
+          'put theirs on it.',
       action: (share == null && invite == null)
           ? null
           : Row(
@@ -252,10 +252,10 @@ class _EmptyState extends StatelessWidget {
               children: [
                 if (share != null) ...[
                   // The screen's own name — Settings lists it under exactly
-                  // this word, and one screen answers to one word.
+                  // this phrase, and one screen answers to one name.
                   FilledButton(
                     onPressed: share,
-                    child: const Text('Share Intelligence'),
+                    child: const Text('Share this computer'),
                   ),
                   if (invite != null) const SizedBox(width: 8),
                 ],

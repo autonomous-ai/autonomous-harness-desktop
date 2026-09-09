@@ -51,6 +51,39 @@ PROD_TERMINAL_E2E=1 ... bash scripts/test-terminal-prod-e2e.sh
 The production script deliberately requires release, deployment, machine, and
 commit evidence before it sends terminal traffic to production.
 
+## Autonomous device pairing
+
+Settings → Devices discovers Autonomous devices on the same network using the
+CLI's `_autonomous._tcp` discovery, reusing the device's existing advertisement. Start pairing on the Autonomous
+device to generate its code, select that device in Desktop, and enter the code.
+The Mac connects directly to the selected device without backend routing or a
+manually entered IP address. The device needs no backend credentials; Harness’s
+existing Mac login/start requirements remain unchanged.
+
+The pairing form is one shared settings row: device picker with an adjacent refresh
+icon, code field and Pair button. The form aligns with the title at the top; a
+visible note explains that closing Desktop leaves the connection running.
+
+Desktop uses `harness autonomous-device discover --json` to populate the picker.
+The CLI resolves the selected discovery ID to its host and port. Pairing runs
+`harness autonomous-device pair --code-stdin --device <discoveryId> --json` through
+`HarnessCliRunner`; the code travels through stdin only, never argv or logs.
+Code normalization matches the original Harness pairing implementation, including
+Crockford aliases and separators. The original PAKE handshake authenticates the
+connection. Changing or losing the selected discovery identity clears entered
+code, and a code mismatch remains visible through background refreshes. A mismatch
+consumes the device pairing window: generate a new code before retrying. Rate
+limits require waiting five minutes before another attempt. Desktop allows the
+pair command fifty seconds to finish, beyond the CLI’s bounded handshake deadline.
+
+`status` and `list` report direct connections and saved device identities.
+Revocation requires confirmation and targets the complete saved fingerprint.
+Closing Desktop leaves the CLI daemon running. Discovery and status refresh every sixty seconds, including when no device is
+paired. Use Refresh to discover a newly started device immediately. Pasted codes
+may include separators, for example `ABC-123`. Older CLIs show `harness update`
+guidance. Widget tests inject a fake CLI, and the `kUnderTest` gate prevents real
+processes and background polling.
+
 ## Releases
 
 The application self-updates from the Harness desktop metadata manifest in the
@@ -66,3 +99,6 @@ make upload-node-runtime ARGS="22.23.2"
 
 See [RELEASE.md](RELEASE.md) for signing, notarization, versioning, managed
 Node runtime publishing, safe test releases, and rollback behavior.
+
+Pairing failures use the original Harness manager's validation and attempt limits.
+If the device code expires, start pairing again on the Autonomous device.

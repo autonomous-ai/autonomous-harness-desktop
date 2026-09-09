@@ -1196,10 +1196,14 @@ class GridTokensList extends StatelessWidget {
           value: formatCount(answered.tokensOut),
           unit: plural(answered.tokensOut, 'token'),
         ),
+        // "Requests", not "Answered": the rail's own token figure is the one
+        // this app calls work answered, and one word for a count of turns and
+        // a count of tokens is how a reader comes to compare the two. The
+        // label is the noun here, so it carries no unit of its own — the three
+        // rows above keep theirs, which is what tells the four apart.
         PillPanelStatRow(
-          label: 'Answered',
+          label: 'Requests',
           value: formatCount(answered.requests),
-          unit: plural(answered.requests, 'request'),
         ),
       ],
     );

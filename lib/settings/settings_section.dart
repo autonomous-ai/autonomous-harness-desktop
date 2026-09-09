@@ -11,9 +11,15 @@ import '../logging/debug_surface.dart';
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
   grid(LucideIcons.zap300, 'Providers'),
+  // ⚠️ `main` renamed this to "Share this computer" while this branch was
+  // renaming its neighbour to Providers. Kept as it was: the two rows are one
+  // group, and "Share Intelligence" is the name the pane itself, the setup
+  // step (`EnvironmentStep.grid`) and the Grid product all use.
   shareIntelligence(LucideIcons.share2300, 'Share Intelligence'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
+  usage(LucideIcons.chartNoAxesColumn300, 'Usage'),
+  devices(LucideIcons.zap300, 'Autonomous devices'),
   shortcuts(LucideIcons.keyboard300, 'Keyboard shortcuts'),
   debug(LucideIcons.bug300, 'Debug'),
   tracking(LucideIcons.activity300, 'Tracking'),
@@ -109,9 +115,16 @@ const _kSettingsGroups = [
     SettingsSection.grid,
     SettingsSection.shareIntelligence,
   ]),
+  // Usage sits with the preferences rather than with Debug and Tracking, which
+  // it otherwise resembles: those two are developer furniture a shipped build
+  // hides, and this is a screen anybody is meant to open. It earns its place in
+  // a run titled "what you change" by carrying the three switches that decide
+  // which logs are read at all — the pane is off until somebody sets it.
   SettingsGroup('Preferences', [
     SettingsSection.appearance,
     SettingsSection.terminal,
+    SettingsSection.usage,
+    SettingsSection.devices,
   ]),
   // Debug and Tracking sit between the two things they are most often reached
   // from: the keys that open them, and the version a report has to name. The
