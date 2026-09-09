@@ -57,6 +57,7 @@ enum ShortcutAction {
 
   closePane,
   newAgent,
+  routeTask,
   reload,
   showLayout,
   pinPane,
@@ -235,6 +236,13 @@ const List<AppShortcut> kAppShortcuts = [
     action: ShortcutAction.newAgent,
     activator: SingleActivator(LogicalKeyboardKey.keyN, meta: true),
     label: 'New agent',
+    group: ShortcutGroup.actions,
+  ),
+  AppShortcut(
+    action: ShortcutAction.routeTask,
+    // ⌘K, the key this gesture has in every app that has a "just tell me what you want" box.
+    activator: SingleActivator(LogicalKeyboardKey.keyK, meta: true),
+    label: 'Describe a task, and let it pick the agent',
     group: ShortcutGroup.actions,
   ),
   AppShortcut(

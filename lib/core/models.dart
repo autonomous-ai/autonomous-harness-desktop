@@ -234,3 +234,61 @@ class Agent {
     return clean.length <= 500 ? clean : clean.substring(0, 500);
   }
 }
+
+/// What the daemon answered when asked where a typed task belongs (⌘K).
+///
+/// `candidates` is the pick followed by its runners-up. The window reads it only when `confidence` is
+/// too low to act on — the whole point of the number being on the wire.
+class RouteAnswer {
+  const RouteAnswer({
+    required this.agentId,
+    required this.name,
+    required this.confidence,
+    required this.reason,
+    required this.candidates,
+  });
+
+  final String agentId;
+  final String name;
+  final double confidence;
+  final String reason;
+  final List<RouteCandidate> candidates;
+
+  /// True when nobody was picked at all — an empty machine, or a daemon that could not answer.
+  bool get isEmpty => agentId.isEmpty;
+
+  /// Read with `is`, never with `as`.
+  ///
+  /// `json['x'] as String?` does not answer null for a number — it THROWS, and this frame crosses a
+  /// socket, so the shape is whatever the other end sent. An exception here surfaces as a palette
+  /// spinner that never comes down, which is the one failure the person cannot act on. A malformed field
+  /// has to read as "nobody was picked" instead.
+  static RouteAnswer fromJson(Map<String, dynamic> json) => RouteAnswer(
+    agentId: _str(json['agentId']),
+    name: _str(json['name']),
+    confidence: json['confidence'] is num ? (json['confidence'] as num).toDouble() : 0,
+    reason: _str(json['reason']),
+    candidates: [
+      for (final entry in (json['candidates'] is List ? json['candidates'] as List<dynamic> : const []))
+        if (entry is Map<String, dynamic>) RouteCandidate.fromJson(entry),
+    ],
+  );
+}
+
+class RouteCandidate {
+  const RouteCandidate({required this.agentId, required this.name, required this.recent});
+
+  final String agentId;
+  final String name;
+
+  /// What that agent was last doing — the line under its name when the window has to ask.
+  final String recent;
+
+  static RouteCandidate fromJson(Map<String, dynamic> json) => RouteCandidate(
+    agentId: _str(json['agentId']),
+    name: _str(json['name']),
+    recent: _str(json['recent']),
+  );
+}
+
+String _str(Object? value) => value is String ? value : '';

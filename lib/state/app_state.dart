@@ -479,6 +479,60 @@ class AppNotifier extends ChangeNotifier {
     if (_dismissedLinkPrompts.add(machineId)) notifyListeners();
   }
 
+  // ── ⌘K: a typed task, and which agent it belongs to ────────────────────────────────────────────
+
+  /// The machine this window is running ON. ⌘K routes over its agents and no others.
+  ///
+  /// Deliberately not "the machine in focus": the router lives in the local daemon, and reaching agents
+  /// on another computer would cost an RPC per agent just to read their recaps — most of the latency the
+  /// dial's cross-machine route pays. The cost of this choice is plain: an agent on another computer
+  /// cannot be reached from ⌘K, even while its pane is on screen.
+  MachineState? get localMachineState {
+    for (final state in machineStates.values) {
+      if (state.isLocalMachine) return state;   // the flag is the STATE's, not the machine row's
+    }
+    return null;
+  }
+
+  /// Ask the daemon which agent a typed task belongs to. Sends nothing.
+  ///
+  /// Rides the app's own rpc convention (`ws_conn.request`), so the pending map, the timeout and the
+  /// logging are the ones every other request already uses. Returns null when there is nobody to ask —
+  /// no local machine, or its socket is not up — which the palette says out loud rather than spinning.
+  Future<RouteAnswer?> routeTask(String text) async {
+    final machineId = localMachineState?.machine.machineId;
+    final connection = machineId == null ? null : _pool?[machineId];
+    if (connection == null) return null;
+    try {
+      final reply = await connection.request(
+        'route_task',
+        payload: {'text': text},
+        // Under the daemon's own 12s classification budget plus room for the round trip: a request that
+        // gives up BEFORE the router does would leave the person with nothing while the answer is on its
+        // way, which is the one outcome worse than waiting.
+        timeout: const Duration(seconds: 20),
+      );
+      return RouteAnswer.fromJson(reply);
+    } catch (_) {
+      // A timeout or a transport failure is not an error the person can act on — the palette shows the
+      // candidates it has and lets them choose, which is the same thing it does for a weak answer.
+      return null;
+    }
+  }
+
+  /// Commit: deliver the task, then bring the agent onto the grid the way a rail click does.
+  ///
+  /// The daemon delivers it through the SAME door as the web's messages and the dial's — queueing,
+  /// retries and the per-engine slash-command adaptation are not re-implemented for the caller that
+  /// types instead of speaking.
+  Future<void> sendRoutedTask(String agentId, String text) async {
+    final machineId = localMachineState?.machine.machineId;
+    final connection = machineId == null ? null : _pool?[machineId];
+    if (connection == null || machineId == null) return;
+    connection.sendRaw('route_send', {'agentId': agentId, 'text': text});
+    await selectAgent(machineId, agentId);
+  }
+
   MachineState? get activeMachineState {
     final terminal = activeTerminal;
     if (terminal != null) return machineStates[terminal.machineId];
