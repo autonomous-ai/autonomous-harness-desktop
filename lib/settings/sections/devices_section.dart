@@ -34,7 +34,6 @@ class _DevicesSectionState extends State<DevicesSection> {
   String? _selectedDevice;
   List<Map<String, dynamic>> _discovered = [];
   Map<String, dynamic> _status = {};
-  Map<String, dynamic> _pair = {};
   List<Map<String, dynamic>> _devices = [];
 
   @override
@@ -211,12 +210,11 @@ class _DevicesSectionState extends State<DevicesSection> {
     await _act(() async {
       _code.clear();
       // The daemon resolves this selected discovery identity, never a UI address.
-      final result = await _cli.pair(code: code, deviceId: deviceId);
+      await _cli.pair(code: code, deviceId: deviceId);
       if (mounted) {
-        setState(() {
-          _pair = {...result, 'state': 'paired'}..remove('code');
-          _selectedDevice = null;
-        });
+        setState(() => _selectedDevice = null);
+        // The pair response and the list row carry the same identity; reading
+        // the list keeps one source for what is paired.
         final devices = await _cli.list();
         if (mounted) {
           setState(
@@ -253,21 +251,6 @@ class _DevicesSectionState extends State<DevicesSection> {
     Widget action(String label, VoidCallback? onPressed) => SizedBox(
       width: SettingRow.controlWidth,
       child: OutlinedButton(onPressed: onPressed, child: Text(label)),
-    );
-    Widget fact(String title, String value, {String detail = ''}) => SettingRow(
-      title: title,
-      detail: detail,
-      control: SizedBox(
-        width: SettingRow.controlWidth,
-        child: SelectableText(
-          value,
-          style: TextStyle(
-            fontFamily: grid.AppFont.sans,
-            fontSize: 13,
-            color: grid.AppPalette.textPrimary,
-          ),
-        ),
-      ),
     );
     return SectionScaffold(
       title: 'Autonomous devices',
@@ -330,20 +313,23 @@ class _DevicesSectionState extends State<DevicesSection> {
               for (final device in _devices) ...[
                 SettingRow(
                   title: device['label']?.toString() ?? 'Autonomous device',
-                  detail: device['pendingFirstSession'] == true
-                      ? 'Waiting for first connection'
-                      : device['online'] == true
-                      ? 'Connected'
-                      : 'Paired · Offline',
+                  // The fingerprint belongs to the device it identifies, not to
+                  // a row of its own two lines below it.
+                  detail: [
+                    device['pendingFirstSession'] == true
+                        ? 'Waiting for first connection'
+                        : device['online'] == true
+                        ? 'Connected'
+                        : 'Paired · Offline',
+                    ?device['fingerprint']?.toString(),
+                  ].join(' · '),
                   control: action(
-                    'Revoke Autonomous device',
+                    'Revoke',
                     disabled || device['id'] is! String
                         ? null
                         : () => _revoke(device),
                   ),
                 ),
-                const SizedBox(height: 10),
-                fact('Fingerprint', device['fingerprint']?.toString() ?? ''),
                 const SizedBox(height: 10),
               ],
               SettingRow(
@@ -436,13 +422,6 @@ class _DevicesSectionState extends State<DevicesSection> {
                 ),
               ),
               const SizedBox(height: 10),
-              if (_pair['state'] == 'paired') ...[
-                fact(
-                  'Autonomous device paired successfully.',
-                  _pair['fingerprint']?.toString() ?? '',
-                ),
-                const SizedBox(height: 10),
-              ],
             ],
             const SizedBox(height: 8),
           ],

@@ -43,10 +43,17 @@ class FakeAutonomousDeviceCli extends AutonomousDeviceCli {
     if (pairFailure != null) {
       throw AutonomousDeviceCliException('CODE_MISMATCH', pairFailure!);
     }
+    // The real CLI persists the trust, so the next `list` is what reports it.
+    devices.add({
+      'id': 'fingerprint-$deviceId',
+      'fingerprint': 'fingerprint-$deviceId',
+      'label': 'Autonomous device',
+      'online': true,
+    });
     return {
       'state': 'paired',
       'label': 'Autonomous device',
-      'fingerprint': '1234',
+      'fingerprint': 'fingerprint-$deviceId',
     };
   }
 
@@ -152,10 +159,7 @@ void main() {
         {'code': '011V23', 'deviceId': 'device-1'},
       ]);
       expect(tester.widget<TextField>(codeField).controller!.text, isEmpty);
-      expect(
-        find.text('Autonomous device paired successfully.'),
-        findsOneWidget,
-      );
+      expect(find.text('Connected · fingerprint-device-1'), findsOneWidget);
     },
   );
   testWidgets('changing selected device clears typed code', (tester) async {
@@ -224,7 +228,7 @@ void main() {
           },
         ];
       await open(tester, cli);
-      await tester.tap(find.text('Revoke Autonomous device').first);
+      await tester.tap(find.text('Revoke').first);
       await tester.pumpAndSettle();
       expect(cli.revoked, isEmpty);
       await tester.tap(find.byKey(const Key('device-confirm')));
@@ -266,10 +270,7 @@ void main() {
         ),
         findsNothing,
       );
-      expect(
-        find.text('Autonomous device paired successfully.'),
-        findsOneWidget,
-      );
+      expect(find.text('Connected · fingerprint-device-1'), findsOneWidget);
     },
   );
 
