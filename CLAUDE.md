@@ -183,11 +183,22 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   **stdin** — no browser, and the account token never reaches an argv. Its refusals already name
   their own way forward, so they are shown verbatim rather than re-worded. **The app signs in for
   you on bootstrap (`AppNotifier._ensureGridSession`), but ONLY when the machine has no Grid session
-  at all** — every run mints a fresh 365-day session and revokes nothing, so signing in on each
-  launch would pile sessions onto the account, with `grid logout --everywhere` (all-or-nothing,
-  every machine) as the only cleanup. An existing session is therefore left alone whoever owns it,
-  which leaves Settings ▸ Grid one duty: `_AccountMismatch` says whose grids these are when the Grid
-  CLI's account is not the Harness one. No session is a state,
+  at all, or when the one it has belongs to a DIFFERENT account** — every run mints a fresh 365-day
+  session and revokes nothing, so signing in on each launch would pile sessions onto the account,
+  with `grid logout --everywhere` (all-or-nothing, every machine) as the only cleanup. A session
+  matching the Harness account is therefore left exactly alone; the address is compared inside
+  `GridSessionStore.signIn(account:)`, so the guard stays in one place rather than once per caller,
+  and an address it cannot know reads as "leave it alone" (a slow `api.me()` must not look like a
+  mismatch). Settings ▸ Grid still says the mismatch out loud (`_AccountMismatch`) for the window
+  between the two. **`logout()` now signs Grid out too** (`GridSessionStore.signOut` →
+  `harness grid logout --json`, this machine only): the CLI itself still has no cascade in either
+  direction, so without this a sign-out left a live 365-day token on the machine and the next person
+  to sign in inherited the previous one's grids. It never blocks the Harness sign-out — trapping
+  somebody in the account they asked to leave over a Grid failure would be worse — but it is logged
+  rather than swallowed, because a failure means the credential is still there. ⚠️ `grid logout`
+  **stops whatever engine this machine is serving** before deleting anything, and that engine is
+  detached and normally outlives the app, so a sign-out now ends a share the user left running.
+  No session is a state,
   not an error: `GridSignedOutException` → `GridNetworksSignedOut` → the sign-in card in Settings ▸
   Grid, kept apart from `GridNetworksFailed` because that one offers a Retry and retrying a sign-out
   fails identically forever. `--dart-define=GRID_API_TOKEN=…` still pins a token for a build that

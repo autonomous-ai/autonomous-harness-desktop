@@ -18,6 +18,7 @@ import '../core/models.dart';
 import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
+import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
@@ -845,14 +846,21 @@ class AppNotifier extends ChangeNotifier {
   /// and about a second, so making somebody go and ask for a second sign-in is
   /// asking them to care about a split they did not create.
   ///
-  /// **Only when there is none, and that guard is the whole design.** Every run
-  /// mints a fresh 365-day session and revokes nothing, so a sign-in on every
-  /// launch would pile sessions onto the account forever — and the only cleanup
-  /// is `grid logout --everywhere`, which is all-or-nothing and signs out every
-  /// other machine too. It would also overwrite a session somebody deliberately
-  /// pointed at another account. A session that already exists is therefore
-  /// left exactly alone, whoever it belongs to; Settings ▸ Grid is where a
-  /// mismatch is said out loud.
+  /// **Only when there is none, or when the one there belongs to a DIFFERENT
+  /// account, and that guard is the whole design.** Every run mints a fresh
+  /// 365-day session and revokes nothing, so a sign-in on every launch would
+  /// pile sessions onto the account forever — and the only cleanup is
+  /// `grid logout --everywhere`, which is all-or-nothing and signs out every
+  /// other machine too. A session that matches this Harness account is
+  /// therefore left exactly alone.
+  ///
+  /// The mismatch case is not an exception to that rule but the reason it needs
+  /// one. `harness logout` deliberately never deletes `~/.grid/credentials.toml`
+  /// (no cascade, in either direction), so signing out and back in as somebody
+  /// else left the previous person's session on disk — and this app went on
+  /// listing THEIR grids, with no action anywhere in the UI that could correct
+  /// it. Replacing then is what earns the new session; Settings ▸ Grid still
+  /// says the mismatch out loud for the window between the two.
   ///
   /// Silent either way. This is a convenience on top of a Harness sign-in that
   /// already succeeded, and a machine with no `grid` on PATH (or no network)
@@ -860,10 +868,15 @@ class AppNotifier extends ChangeNotifier {
   /// still has its own button, and says why when it cannot.
   Future<void> _ensureGridSession() async {
     try {
-      // `signIn` is "make sure there is one" — it re-reads and returns early on
-      // a machine that already has a session, so the guard lives in one place
-      // rather than once here and once in the pane's button.
-      final failure = await gridSessionStore.signIn();
+      // `signIn` is "make sure there is one FOR THIS ACCOUNT" — it re-reads and
+      // returns early on a machine already signed in as `account`, so the guard
+      // lives in one place rather than once here and once in the pane's button.
+      // The address comes from the profile fetched a few lines above this
+      // call's site; null while that call failed, which reads as "leave
+      // whatever is there alone" rather than as a mismatch.
+      final failure = await gridSessionStore.signIn(
+        account: currentUser?.email,
+      );
       if (failure != null) debugPrint('grid sign-in skipped: $failure');
     } catch (error) {
       debugPrint('grid sign-in skipped: $error');
@@ -1068,6 +1081,22 @@ class AppNotifier extends ChangeNotifier {
     // process could be reached, but a real `harness logout` clears its saved session so the NEXT
     // launch doesn't silently sign back in without ever showing the login screen.
     unawaited(cliLogin.logout());
+    // Grid goes with it. `harness logout` itself never touches
+    // `~/.grid/credentials.toml` — there is no cascade inside the CLI, in
+    // either direction — so without this a sign-out left a live 365-day Grid
+    // token on the machine, and the next person to sign in inherited the
+    // previous one's grids.
+    //
+    // Not awaited, and its failure never stops the sign-out: refusing to sign
+    // somebody out of Harness because a Grid command failed would trap them in
+    // the account they asked to leave. Said out loud rather than swallowed —
+    // when it fails the credential is still there, which is exactly the thing
+    // the user needs to know.
+    unawaited(
+      gridSessionStore.signOut().then((failure) {
+        if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
+      }),
+    );
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();
