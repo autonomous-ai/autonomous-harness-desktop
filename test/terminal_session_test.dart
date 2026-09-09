@@ -578,7 +578,7 @@ void main() {
     );
   });
 
-  test('Ctrl+C (0x03) is stripped from native terminal input', () async {
+  test('Ctrl+C (0x03) is forwarded like any other keystroke', () async {
     await ready();
     await session.handleBinary(
       output(0, utf8.encode(r'prompt> '), keyframe: true, cols: 80, rows: 24),
@@ -586,12 +586,13 @@ void main() {
 
     session.terminal.onOutput?.call('\x03');
     await Future<void>.delayed(const Duration(milliseconds: 12));
-    expect(binarySent, isEmpty);
+    expect(binarySent, hasLength(1));
+    expect(utf8.decode(binarySent.single.bytes), '\x03');
 
     session.terminal.onOutput?.call('a\x03b');
     await Future<void>.delayed(const Duration(milliseconds: 12));
-    expect(binarySent, hasLength(1));
-    expect(utf8.decode(binarySent.single.bytes), 'ab');
+    expect(binarySent, hasLength(2));
+    expect(utf8.decode(binarySent[1].bytes), 'a\x03b');
   });
 
   test(
@@ -862,13 +863,13 @@ void main() {
     });
 
     test(
-      'strips Ctrl+C, which would be a SIGINT once pasted into the pane',
+      'forwards Ctrl+C in composed text rather than stripping it',
       () async {
         await live();
 
         expect(await session.sendComposerText('a\x03b'), isTrue);
 
-        expect(messages().single['content'], 'ab');
+        expect(messages().single['content'], 'a\x03b');
       },
     );
 
@@ -915,12 +916,12 @@ void main() {
       expect(binarySent, isEmpty);
     });
 
-    test('strips Ctrl+C, which would be a SIGINT once pasted into the pane', () async {
+    test('forwards Ctrl+C in a paste rather than stripping it', () async {
       await live();
 
       expect(await session.pasteText('a\x03b'), isTrue);
 
-      expect(pastes().single['text'], 'ab');
+      expect(pastes().single['text'], 'a\x03b');
     });
 
     test('sends nothing while the stream is not accepting input', () async {

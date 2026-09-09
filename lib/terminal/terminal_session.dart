@@ -588,10 +588,7 @@ class TerminalSession extends ChangeNotifier {
   /// holding a composed line unsent, its Enter arriving in the same read as the text.
   Future<bool> sendComposerText(String text) async {
     if (!acceptsInput) return false;
-    // Ctrl+C is stripped here for the same reason [_onTerminalOutput] strips it: the machine
-    // pastes this content into a live pane, where a stray 0x03 is a SIGINT rather than a
-    // character, and the engine there has no job-control fallback to survive one.
-    final content = text.replaceAll('\x03', '').trimRight();
+    final content = text.trimRight();
     if (content.trim().isEmpty) return false;
     return send('message', {
       'content': content,
@@ -614,13 +611,10 @@ class TerminalSession extends ChangeNotifier {
   /// this frame type at all, so sending it there would silently go nowhere.
   Future<bool> pasteText(String text) async {
     if (!acceptsInput) return false;
-    // Same reason as sendComposerText/_onTerminalOutput: the engine in the pane has no job-control
-    // fallback for an uncaught SIGINT, so a stray 0x03 pasted alongside real content must not reach it.
-    final content = text.replaceAll('\x03', '');
-    if (content.isEmpty) return false;
+    if (text.isEmpty) return false;
     final sent = await send('terminal_paste', {
       'streamId': streamId,
-      'text': content,
+      'text': text,
     });
     if (!sent) transportLost('Terminal paste was not sent');
     return sent;
@@ -628,14 +622,6 @@ class TerminalSession extends ChangeNotifier {
 
   void _onTerminalOutput(String data) {
     if (!acceptsInput || data.isEmpty) return;
-    // Ctrl+C (0x03) is never forwarded to the remote pane: the engine CLI
-    // there has no local job-control fallback, so a SIGINT that isn't caught
-    // in time kills the process outright and drops tmux back to a bare
-    // shell instead of just interrupting the current turn.
-    if (data.contains('\x03')) {
-      data = data.replaceAll('\x03', '');
-      if (data.isEmpty) return;
-    }
     final bytes = utf8.encode(data);
     final isBoundary =
         data.contains('\r') ||
