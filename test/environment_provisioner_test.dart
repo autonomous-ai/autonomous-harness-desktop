@@ -36,7 +36,7 @@ void main() {
         // Matched exactly, not on a bare `curl -fsSL`: the Grid CLI's installer
         // is one too, so a loose match would make this test depend on the Grid
         // probe happening to succeed first.
-        if (command.contains('harness.autonomous.ai/cli/install.sh')) {
+        if (command.contains('cdn.autonomous.ai/harness/cli/install.sh')) {
           installEnvironments.add(environment);
           return result(0, stdout: 'installed');
         }
@@ -51,7 +51,10 @@ void main() {
     expect(installEnvironments, hasLength(1));
     // Deliberately NOT naming an interpreter any more: install.sh provisions and
     // records the managed runtime itself, so the app has none to hand over.
-    expect(installEnvironments.single?.containsKey('HARNESS_NODE_BINARY'), isNot(isTrue));
+    expect(
+      installEnvironments.single?.containsKey('HARNESS_NODE_BINARY'),
+      isNot(isTrue),
+    );
   });
 
   test('probes through the Homebrew prefixes, Apple Silicon first', () async {
@@ -75,27 +78,24 @@ void main() {
     }
   });
 
-  test(
-    'fails only when the platform is neither macOS nor Linux',
-    () async {
-      final provisioner = EnvironmentProvisioner(
-        harnessHome: scratch,
-        isMacOS: false,
-        isLinux: false,
-          run: (executable, arguments, {environment}) async => result(0),
-      );
+  test('fails only when the platform is neither macOS nor Linux', () async {
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      run: (executable, arguments, {environment}) async => result(0),
+    );
 
-      final readiness = await provisioner.ensureReady(onProgress: (_) {});
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
 
-      expect(readiness.isReady, isFalse);
-      // The message hangs off the first step, which is now the CLI one.
-      expect(
-        readiness.steps[EnvironmentStep.harness],
-        EnvironmentStepStatus.failed,
-      );
-      expect(readiness.message, contains('macOS and Linux only'));
-    },
-  );
+    expect(readiness.isReady, isFalse);
+    // The message hangs off the first step, which is now the CLI one.
+    expect(
+      readiness.steps[EnvironmentStep.harness],
+      EnvironmentStepStatus.failed,
+    );
+    expect(readiness.message, contains('macOS and Linux only'));
+  });
 
   test('provisions on Linux', () async {
     final provisioner = EnvironmentProvisioner(
@@ -198,8 +198,98 @@ void main() {
     );
   });
 
-  // --- The Grid CLI step, which the managed-runtime revert must not disturb ---
+  // --- resumeFrom: rechecking one stuck step without disturbing the others ---
 
+  test(
+    'resumeFrom skips a step already ready instead of re-probing it',
+    () async {
+      var harnessProbes = 0;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        run: (executable, arguments, {environment}) async {
+          final command = arguments.join(' ');
+          if (arguments.contains('auth') && arguments.contains('status')) {
+            harnessProbes++;
+            return result(0, stdout: '{"loggedIn":false}\n');
+          }
+          return result(0, stdout: 'tmux 3.4\n');
+        },
+      );
+      final resumeFrom = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.ready,
+          EnvironmentStep.tmux: EnvironmentStepStatus.pending,
+          EnvironmentStep.grid: EnvironmentStepStatus.pending,
+        },
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: resumeFrom,
+      );
+
+      expect(readiness.isReady, isTrue);
+      // Never re-entered: the harness step's own check was never invoked.
+      expect(harnessProbes, 0);
+      expect(
+        readiness.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.ready,
+      );
+    },
+  );
+
+  test(
+    'resumeFrom re-attempts a step still stuck and continues past it',
+    () async {
+      var tmuxAttempts = 0;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        run: (executable, arguments, {environment}) async {
+          final command = arguments.join(' ');
+          if (command.contains('tmux')) {
+            tmuxAttempts++;
+            // Missing on the first (pre-fix) probe, present once the user has
+            // supposedly run the guidance command by hand before clicking Recheck.
+            return tmuxAttempts == 1
+                ? result(1)
+                : result(0, stdout: 'tmux 3.4\n');
+          }
+          if (arguments.contains('auth') && arguments.contains('status')) {
+            return result(0, stdout: '{"loggedIn":false}\n');
+          }
+          if (command.contains('command -v brew')) return result(1);
+          return result(0);
+        },
+        openTerminal: (path) async {},
+      );
+
+      final stuck = await provisioner.ensureReady(onProgress: (_) {});
+      expect(
+        stuck.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.needsTerminal,
+      );
+
+      final rechecked = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: stuck,
+      );
+
+      expect(rechecked.isReady, isTrue);
+      expect(
+        rechecked.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.ready,
+      );
+      // Continued straight into the grid step behind it, same run.
+      expect(
+        rechecked.steps[EnvironmentStep.grid],
+        isNot(EnvironmentStepStatus.pending),
+      );
+    },
+  );
+
+  // --- The Grid CLI step, which the managed-runtime revert must not disturb ---
 
   test('installs the Grid CLI once, and never over an existing one', () async {
     var gridProbes = 0;

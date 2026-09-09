@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-
 import '../core/harness_cli_runner.dart';
 
 enum EnvironmentStep {
@@ -67,7 +66,6 @@ class EnvironmentReadiness {
     output: output ?? this.output,
   );
 }
-
 
 typedef ProcessRunner = Future<ProcessResult> Function(
   String executable,
@@ -143,10 +141,19 @@ class EnvironmentProvisioner {
     return '$home/.harness';
   }
 
+  /// Runs the three steps in order, same as always when [resumeFrom] is omitted.
+  ///
+  /// Passing [resumeFrom] (the caller's current [EnvironmentReadiness]) skips any step already
+  /// `ready` — or, for [EnvironmentStep.grid], already `unavailable` — instead of re-running it from
+  /// [EnvironmentReadiness.initial]. This is what lets a stuck step be rechecked on its own: the two
+  /// `_ensureX` calls are already "check first, act only if missing", so re-entering a step the user
+  /// just fixed by hand simply confirms it and moves on, without flashing an already-`ready` step
+  /// back through `pending`/`running`.
   Future<EnvironmentReadiness> ensureReady({
     required void Function(EnvironmentReadiness value) onProgress,
+    EnvironmentReadiness? resumeFrom,
   }) async {
-    var state = EnvironmentReadiness.initial();
+    var state = resumeFrom ?? EnvironmentReadiness.initial();
     void emit({
       EnvironmentStep? step,
       EnvironmentStepStatus? status,
@@ -174,65 +181,72 @@ class EnvironmentProvisioner {
       emit(
         step: EnvironmentStep.harness,
         status: EnvironmentStepStatus.failed,
-        message:
-            'Automatic environment setup is currently available on macOS and Linux only.',
+        message: 'Automatic environment setup is currently available on macOS and Linux only.',
       );
       return state;
     }
 
     try {
-      emit(
-        step: EnvironmentStep.harness,
-        status: EnvironmentStepStatus.running,
-        message: 'Installing Harness CLI…',
-      );
-      await _ensureHarness();
-      emit(
-        step: EnvironmentStep.harness,
-        status: EnvironmentStepStatus.ready,
-        output: 'Harness CLI ready',
-      );
+      if (state.steps[EnvironmentStep.harness] != EnvironmentStepStatus.ready) {
+        emit(
+          step: EnvironmentStep.harness,
+          status: EnvironmentStepStatus.running,
+          message: 'Installing Harness CLI…',
+        );
+        await _ensureHarness();
+        emit(
+          step: EnvironmentStep.harness,
+          status: EnvironmentStepStatus.ready,
+          output: 'Harness CLI ready',
+        );
+      }
 
-      emit(
-        step: EnvironmentStep.tmux,
-        status: EnvironmentStepStatus.running,
-        message: 'Checking tmux…',
-      );
-      final tmux = await _ensureTmux();
-      if (!tmux) {
+      if (state.steps[EnvironmentStep.tmux] != EnvironmentStepStatus.ready) {
         emit(
           step: EnvironmentStep.tmux,
-          status: EnvironmentStepStatus.needsTerminal,
-          message: 'Complete the setup in the terminal window, then click Retry.',
-          output: _isMacOS
-              ? 'Terminal opened to install Homebrew and tmux.'
-              : 'Terminal opened to install tmux.',
+          status: EnvironmentStepStatus.running,
+          message: 'Checking tmux…',
         );
-        return state;
+        final tmux = await _ensureTmux();
+        if (!tmux) {
+          emit(
+            step: EnvironmentStep.tmux,
+            status: EnvironmentStepStatus.needsTerminal,
+            message: 'Complete the setup in the terminal window, then click Recheck.',
+            output: _isMacOS
+                ? 'Terminal opened to install Homebrew and tmux.'
+                : 'Terminal opened to install tmux.',
+          );
+          return state;
+        }
+        emit(
+          step: EnvironmentStep.tmux,
+          status: EnvironmentStepStatus.ready,
+          output: 'tmux ready',
+        );
       }
-      emit(
-        step: EnvironmentStep.tmux,
-        status: EnvironmentStepStatus.ready,
-        output: 'tmux ready',
-      );
 
-      emit(
-        step: EnvironmentStep.grid,
-        status: EnvironmentStepStatus.running,
-        message: 'Checking the Grid CLI…',
-      );
-      final grid = await _ensureGrid();
-      emit(
-        step: EnvironmentStep.grid,
-        status: grid
-            ? EnvironmentStepStatus.ready
-            : EnvironmentStepStatus.unavailable,
-        message: 'Environment ready.',
-        output: grid
-            ? 'Grid CLI ready'
-            : 'Grid CLI unavailable — this computer cannot be shared with a '
-                  'grid until it is installed.',
-      );
+      if (state.steps[EnvironmentStep.grid] != EnvironmentStepStatus.ready &&
+          state.steps[EnvironmentStep.grid] !=
+              EnvironmentStepStatus.unavailable) {
+        emit(
+          step: EnvironmentStep.grid,
+          status: EnvironmentStepStatus.running,
+          message: 'Checking the Grid CLI…',
+        );
+        final grid = await _ensureGrid();
+        emit(
+          step: EnvironmentStep.grid,
+          status: grid
+              ? EnvironmentStepStatus.ready
+              : EnvironmentStepStatus.unavailable,
+          message: 'Environment ready.',
+          output: grid
+              ? 'Grid CLI ready'
+              : 'Grid CLI unavailable — this computer cannot be shared with a '
+                    'grid until it is installed.',
+        );
+      }
       return state;
     } catch (error) {
       final failed = state.steps.entries
@@ -247,11 +261,6 @@ class EnvironmentProvisioner {
       return state;
     }
   }
-
-
-
-
-
 
   Future<void> _ensureHarness() async {
     final runner = HarnessCliRunner(harnessHome: harnessHome, runProcess: _run);
@@ -274,11 +283,14 @@ class EnvironmentProvisioner {
     // a Node. Doing it there rather than here keeps ONE implementation of that,
     // shared with everyone who installs the CLI from a terminal.
     final install = await _shell(
-      // Served by the Harness web application; the retired top-level /install.sh is gone.
+      // Served off the CDN-fronted public bucket (autonomous-code: apps/web/scripts/cli-install.sh,
+      // published with `make upload-cli-install-sh`), not by the web app. The old web-app URL,
+      // https://harness.autonomous.ai/cli/install.sh, still redirects here, but pointing at the CDN
+      // URL directly avoids that extra hop.
       // A stale URL is worse here than anywhere else: a 404 piped into bash still exits 0 (measured),
       // so the `install.exitCode != 0` check below would pass and the failure would only surface as
       // the confusing "CLI did not start after installation" a few lines further down.
-      'set -e; curl -fsSL https://harness.autonomous.ai/cli/install.sh | /bin/sh',
+      'set -e; curl -fsSL https://cdn.autonomous.ai/harness/cli/install.sh | /bin/sh',
     );
     if (install.exitCode != 0) {
       throw StateError('Harness installer failed: ${_resultText(install)}');
@@ -446,7 +458,6 @@ fi
       onTimeout: () => ProcessResult(0, 124, '', 'timed out after $timeout'),
     );
   }
-
 
   String _resultText(ProcessResult result) {
     final text = '${result.stderr}\n${result.stdout}'.trim();

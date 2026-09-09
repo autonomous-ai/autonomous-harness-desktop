@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../shared/widgets/command_row.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
-import '../shared/theme/app_theme.dart' as grid;
 
 /// Shown when an agent is selected but its Harness adapter is not running.
 ///
@@ -82,7 +82,7 @@ class _HarnessJoinGuideScreenState extends State<HarnessJoinGuideScreen> {
                 style: TextStyle(color: AppColors.textSoft, height: 1.45),
               ),
               const SizedBox(height: 18),
-              _CommandRow(
+              CommandRow(
                 key: const Key('harness-start-command'),
                 command: 'harness start',
                 copied: _copiedCommand == 'harness start',
@@ -114,56 +114,6 @@ class _HarnessJoinGuideScreenState extends State<HarnessJoinGuideScreen> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CommandRow extends StatelessWidget {
-  final String command;
-  final bool copied;
-  final VoidCallback onCopy;
-
-  const _CommandRow({
-    super.key,
-    required this.command,
-    required this.copied,
-    required this.onCopy,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onCopy,
-      borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.background,
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(grid.AppCard.insetRadius),
-        ),
-        child: Row(
-          children: [
-            Text('\$ ', style: TextStyle(color: AppColors.mutedStrong)),
-            Expanded(
-              child: SelectableText(
-                command,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontFamily: AppFonts.mono,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            Icon(
-              copied ? Icons.check : Icons.copy,
-              size: 16,
-              color: copied ? AppColors.success : AppColors.mutedStrong,
-            ),
-          ],
         ),
       ),
     );
