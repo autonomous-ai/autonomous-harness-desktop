@@ -54,15 +54,26 @@ not a replacement for publishing the managed runtime channel before release.
 
 Homebrew and `apt` are still used for **tmux**, which is a separate step and unrelated to Node.
 
-## What CI runs
+## Publishing by hand
 
-`scripts/upload-desktop.sh` and `scripts/upload-desktop-linux.sh` are the publishing steps, invoked by
-`release.yml` with the version taken from the tag. They are no longer a human entry point — the
-`make upload-desktop*` targets were removed precisely because publishing without tagging is what let
-git and the manifest drift apart.
+`scripts/upload-desktop.sh` and `scripts/upload-desktop-linux.sh` are the publishing steps. CI invokes
+them with the version taken from the tag, and they are also reachable directly when CI cannot be:
 
-1. Takes the version it was given (CI passes the tag's `X.Y.Z`). The bump/`--force`/`--no-bump` paths
-   inside the scripts are only reachable when they are run by hand.
+```bash
+make upload-desktop                     # auto-bump (1.2.3 -> 1.2.4; 1.2.99 -> 1.3.1)
+make upload-desktop ARGS="--force"      # bump the MINOR version — a mandatory update
+make upload-desktop ARGS="1.3.0"        # explicit version
+make upload-desktop ARGS="--no-bump"    # rebuild and re-upload the current version
+make upload-desktop-linux ARCH=arm64    # the same, per Linux architecture
+```
+
+**These create no git tag.** They bump from the remote manifest, so the repo stops reflecting what is
+published — one tag, `v1.0.52`, once sat nine releases behind a manifest already serving `1.0.61`.
+Prefer `make release`; if you do publish by hand, cut a `make release` afterwards to bring the tag
+back in line, and remember it only publishes the platform you ran it on.
+
+1. Takes the version it was given (CI passes the tag's `X.Y.Z`) or bumps from the manifest when run
+   by hand.
 2. Runs `flutter build macos --release --build-name=<version> --build-number=<n>` — the version is
    stamped into the bundle's `Info.plist` at build time, not read from any file.
 3. Asserts the built bundle's `CFBundleShortVersionString` really carries that version before
@@ -204,8 +215,10 @@ running app back.
 
 `scripts/upload-desktop-linux.sh` publishes architecture-specific Linux ARM64 and x64 releases to the
 **same** `metadata.json` as macOS. `release.yml` runs it on both a `ubuntu-24.04` and a
-`ubuntu-24.04-arm` runner, so one `make release` covers all three artifacts. `amd64` and `x86_64` are
-accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`.
+`ubuntu-24.04-arm` runner, so one `make release` covers all three artifacts — which is also why the
+four `desktop-*` keys only stay on one version when the release goes through CI. Run by hand
+(`make upload-desktop-linux ARCH=arm64`) it moves one key and leaves the others behind. `amd64` and
+`x86_64` are accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`.
 
 With no `ARCH`, the command detects the host architecture. A build must run on a matching
 Ubuntu/Linux host because Flutter Linux desktop builds use the host architecture. `--no-build` can

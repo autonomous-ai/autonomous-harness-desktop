@@ -1,12 +1,16 @@
 name: CI
 
+# Deliberately has NO `push` or `pull_request` trigger. This suite runs when a release is cut and
+# at no other time: a tag push starts release.yml, whose `tests` job calls this one, so the release
+# is still gated on the full suite rather than on someone remembering to watch it. Every commit to
+# main used to start a run of its own, which is the same suite spending runner minutes twice for
+# the one verdict that ends up mattering.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  # release.yml calls this, so a release is gated on the SAME suite a PR is rather than on
-  # someone remembering to watch it — a tag push does not trigger `on: push: branches: [main]`.
-  # It also hands the release the Flutter version this suite actually ran on (see below).
+  # The escape hatch that replaces those runs: Actions -> CI -> Run workflow, on any branch, when
+  # you want the verdict without cutting a release.
+  workflow_dispatch:
+  # release.yml calls this. It also hands the release the Flutter version this suite actually ran
+  # on (see below), so an artifact can never be built with a toolchain the tests did not use.
   workflow_call:
     outputs:
       flutter-version:
@@ -17,10 +21,10 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to a PR makes the previous run's verdict irrelevant. Nothing else is cancelled:
-  # a main/tag run is the record of whether that commit was green.
+  # Never cancelled in progress: every run left is either a release's gate or one somebody started
+  # by hand, and both are the record of whether that commit was green.
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   analyze-test:

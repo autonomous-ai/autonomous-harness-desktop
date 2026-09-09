@@ -51,6 +51,15 @@ dependencies:
   # XDG portal on Linux. Used ONLY for a machine that is this computer — see
   # `widgets/new_agent_dialog.dart`.
   file_selector: ^1.0.3
+  # Reads OpenCode's own database for the usage ledger — `usage/ledger/`. The
+  # Dart-only FFI package on purpose, NOT `sqlite3_flutter_libs`: this dlopens
+  # the sqlite the OS already ships (every macOS has one, every Ubuntu desktop
+  # has one), so it registers no native plugin and leaves the macOS SPM package
+  # list untouched — see CLAUDE.md on what a plugin costs here. A machine
+  # without the library reports `OpenCodeUnavailable` rather than failing to
+  # build, which is the same shape the other two scanners use for "nothing to
+  # read".
+  sqlite3: ^2.4.0
 
 dev_dependencies:
   flutter_test:

@@ -182,10 +182,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     return !machine.engines.loaded && machine.engines.error != null;
   }
 
-  /// The engine is missing and Harness has no line it can cite to fix that —
-  /// Pi, and anything else without an entry in the CLI's install table. Stated
-  /// rather than silently offered, because the create WILL fail and the person
-  /// needs to install it themselves first.
+  /// The engine is missing but this machine cannot safely auto-install it — for
+  /// example, an explicit ENGINE_PATH override points at a missing file, or an
+  /// older CLI has no recipe. Stated rather than silently offered, because the
+  /// create WILL fail and the person needs to fix that machine first.
   bool get _missingAndUnfixable {
     final entry = _availability(_engine);
     return entry != null && !entry.installed && !entry.installable;

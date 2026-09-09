@@ -2,6 +2,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/widgets.dart';
 
+import '../stats/harness_stats.dart';
 import 'analytics.dart';
 
 /// Closes the launch out: `app_closed`, then a time-boxed drain of whatever is
@@ -52,6 +53,11 @@ class _AnalyticsLifecycleState extends State<AnalyticsLifecycle>
     if (!_closed) {
       _closed = true;
       analytics.appClosed(open: DateTime.now().difference(_openedAt));
+      // Before the drain below, and awaited: this is a local file write that
+      // finishes in milliseconds, and it is the ONLY place a turn still running
+      // at quit gets its time counted — the debounce timer is cancelled by the
+      // process exiting, not fired by it.
+      await harnessStats.flush();
       // Time-boxed inside `close` itself — a wedged network must never be what
       // keeps the window on screen after the user pressed ⌘Q.
       await analytics.close();
