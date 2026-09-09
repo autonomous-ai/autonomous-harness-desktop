@@ -257,9 +257,11 @@ const List<AppShortcut> kAppShortcuts = [
   ),
   AppShortcut(
     action: ShortcutAction.routeTask,
-    // ⌘K, the key this gesture has in every app that has a "just tell me
-    // what you want" box.
-    activator: SingleActivator(LogicalKeyboardKey.keyK, meta: true),
+    // ⌘B, the owner's pick. ⌘K is the chord this gesture wears in most apps, and it is deliberately
+    // NOT taken here — leaving it free keeps it available for the search-shaped thing people reach for
+    // it with. B is unclaimed on both sides: nothing in this list uses it, and neither does the macOS
+    // menu bar (which would win silently if it did).
+    activator: SingleActivator(LogicalKeyboardKey.keyB, meta: true),
     label: 'Describe a task, and let it pick the agent',
     group: ShortcutGroup.actions,
   ),
@@ -277,8 +279,11 @@ const List<AppShortcut> kAppShortcuts = [
   ),
   AppShortcut(
     action: ShortcutAction.showLayout,
-    // "Layout". Free on this OS and on this list.
-    activator: SingleActivator(LogicalKeyboardKey.keyL, meta: true),
+    // ⌘S, the owner's pick. It is Save nearly everywhere else, and free here for the reason that makes
+    // it safe: this window has no document to save — the layout, the panes and the dividers all persist
+    // themselves the moment they change. Nothing on this list or in the macOS menu bar claims it (the
+    // menu would win silently if it did).
+    activator: SingleActivator(LogicalKeyboardKey.keyS, meta: true),
     label: 'Choose the grid layout',
     group: ShortcutGroup.panes,
   ),

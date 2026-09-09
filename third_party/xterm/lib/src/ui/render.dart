@@ -461,6 +461,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
     _paintHighlights(
       canvas,
+      offset,
       _controller.highlights,
       effectFirstLine,
       effectLastLine,
@@ -469,6 +470,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     if (_controller.selection != null) {
       _paintSelection(
         canvas,
+        offset,
         _controller.selection!,
         effectFirstLine,
         effectLastLine,
@@ -534,6 +536,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   void _paintSelection(
     Canvas canvas,
+    Offset offset,
     BufferRange selection,
     int firstLine,
     int lastLine,
@@ -551,12 +554,13 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         break;
       }
 
-      _paintSegment(canvas, segment, _painter.theme.selection);
+      _paintSegment(canvas, offset, segment, _painter.theme.selection);
     }
   }
 
   void _paintHighlights(
     Canvas canvas,
+    Offset offset,
     List<TerminalHighlight> highlights,
     int firstLine,
     int lastLine,
@@ -579,17 +583,26 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
           break;
         }
 
-        _paintSegment(canvas, segment, highlight.color);
+        _paintSegment(canvas, offset, segment, highlight.color);
       }
     }
   }
 
+  // The render box's own paint offset (e.g. from an ancestor Padding) must be added here just like
+  // paintLine/paintCursor already do — this was missing, so a selection/highlight rect was drawn in
+  // the wrong place whenever this box's offset was non-zero, leaving trailing selected characters
+  // rendered outside the highlighted box instead of inside it.
   @pragma('vm:prefer-inline')
-  void _paintSegment(Canvas canvas, BufferSegment segment, Color color) {
+  void _paintSegment(
+    Canvas canvas,
+    Offset offset,
+    BufferSegment segment,
+    Color color,
+  ) {
     final start = segment.start ?? 0;
     final end = segment.end ?? _terminal.viewWidth;
 
-    final startOffset = Offset(
+    final startOffset = offset.translate(
       start * _painter.cellSize.width,
       segment.line * _painter.cellSize.height + _lineOffset,
     );

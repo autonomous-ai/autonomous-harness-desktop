@@ -162,9 +162,39 @@ void main() {
     );
 
     expect(session.status, TerminalSessionStatus.controlling);
-    expect(session.terminal.buffer.getText(), startsWith('bc'));
+    // Cell 0 is now blank (erased), not gone — it copies as a literal leading space, the same as
+    // any other blank cell with real content after it. See the getText() whitespace test below.
+    expect(session.terminal.buffer.getText(), startsWith(' bc'));
     expect(sent.where((frame) => frame.type == 'terminal_resync'), isEmpty);
   });
+
+  test(
+    'copied text keeps cursor-positioned gaps as spaces instead of gluing words together',
+    () async {
+      await ready();
+
+      // TUI-style output (Claude Code, Codex, …) lays out text with cursor-forward moves (CSI C)
+      // rather than printing literal space bytes — those cells are never written to, so their
+      // stored codePoint is 0, the same value an erased cell has. Line 1: 3-column indent before
+      // "indented". Line 2: a 5-column gap between two words.
+      await session.handleBinary(
+        output(
+          0,
+          utf8.encode('\x1b[3Cindented\r\nfirst\x1b[5Csecond'),
+          keyframe: true,
+          cols: 80,
+          rows: 24,
+        ),
+      );
+
+      final lines = session.terminal.buffer.getText().split('\n');
+      expect(lines[0], '   indented');
+      expect(lines[1], 'first     second');
+      // A line with no real content anywhere must still copy as empty, not as columns of padding —
+      // only the gap BEFORE real content becomes spaces, not blank cells with nothing after them.
+      expect(lines[2], isEmpty);
+    },
+  );
 
   test(
     'uses measured viewport geometry for the initial terminal_open',
@@ -578,7 +608,7 @@ void main() {
     );
   });
 
-  test('Ctrl+C (0x03) is stripped from native terminal input', () async {
+  test('Ctrl+C (0x03) is forwarded like any other keystroke', () async {
     await ready();
     await session.handleBinary(
       output(0, utf8.encode(r'prompt> '), keyframe: true, cols: 80, rows: 24),
@@ -586,12 +616,13 @@ void main() {
 
     session.terminal.onOutput?.call('\x03');
     await Future<void>.delayed(const Duration(milliseconds: 12));
-    expect(binarySent, isEmpty);
+    expect(binarySent, hasLength(1));
+    expect(utf8.decode(binarySent.single.bytes), '\x03');
 
     session.terminal.onOutput?.call('a\x03b');
     await Future<void>.delayed(const Duration(milliseconds: 12));
-    expect(binarySent, hasLength(1));
-    expect(utf8.decode(binarySent.single.bytes), 'ab');
+    expect(binarySent, hasLength(2));
+    expect(utf8.decode(binarySent[1].bytes), 'a\x03b');
   });
 
   test(
@@ -862,13 +893,13 @@ void main() {
     });
 
     test(
-      'strips Ctrl+C, which would be a SIGINT once pasted into the pane',
+      'forwards Ctrl+C in composed text rather than stripping it',
       () async {
         await live();
 
         expect(await session.sendComposerText('a\x03b'), isTrue);
 
-        expect(messages().single['content'], 'ab');
+        expect(messages().single['content'], 'a\x03b');
       },
     );
 
@@ -888,10 +919,10 @@ void main() {
   });
 
   group('pasteText', () {
-    /// The `terminal_paste` frames this session put on the wire.
-    List<Map<String, dynamic>> pastes() => [
-      for (final frame in sent)
-        if (frame.type == 'terminal_paste') frame.payload,
+    /// The `TerminalBinaryKind.paste` frames this session put on the wire.
+    List<TerminalBinaryFrame> pastes() => [
+      for (final frame in binarySent)
+        if (frame.kind == TerminalBinaryKind.paste) frame,
     ];
 
     Future<void> live() async {
@@ -900,28 +931,34 @@ void main() {
         output(0, utf8.encode(r'$ '), keyframe: true, cols: 100, rows: 30),
       );
       sent.clear();
+      binarySent.clear();
     }
 
-    test('sends the whole clipboard as one frame, not chunked', () async {
+    test('sends the whole clipboard as one binary frame, not chunked', () async {
       await live();
       final big = List.generate(200, (i) => 'line $i').join('\n');
 
       expect(await session.pasteText(big), isTrue);
 
       expect(pastes(), hasLength(1));
-      expect(pastes().single['text'], big);
-      expect(pastes().single['streamId'], streamId);
-      // Never through the keystroke/binary pipeline this feature exists to avoid.
-      expect(binarySent, isEmpty);
+      expect(utf8.decode(pastes().single.bytes), big);
+      expect(pastes().single.streamId, streamId);
+      expect(pastes().single.compressed, isFalse);
+      // Never through the ordinary keystroke pipeline this feature exists to avoid, and never as JSON.
+      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.input), isEmpty);
+      expect(sent, isEmpty);
     });
 
-    test('strips Ctrl+C, which would be a SIGINT once pasted into the pane', () async {
-      await live();
+    test(
+      'forwards Ctrl+C in a paste rather than stripping it',
+      () async {
+        await live();
 
-      expect(await session.pasteText('a\x03b'), isTrue);
+        expect(await session.pasteText('a\x03b'), isTrue);
 
-      expect(pastes().single['text'], 'ab');
-    });
+        expect(utf8.decode(pastes().single.bytes), 'a\x03b');
+      },
+    );
 
     test('sends nothing while the stream is not accepting input', () async {
       expect(session.acceptsInput, isFalse);

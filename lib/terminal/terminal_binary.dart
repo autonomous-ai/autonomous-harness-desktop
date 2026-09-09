@@ -3,12 +3,21 @@ import 'dart:typed_data';
 const terminalLocalVersion = 1;
 const terminalLocalHeaderBytes = 12;
 const terminalLocalMaxPayloadBytes = 512 * 1024;
+// A paste is delivered whole, in one frame — unlike every other kind, which is either a small
+// bounded control message (keyframe/sync) or already chunked upstream to stay well under the
+// keystroke ceiling (input, ≤8 KiB per frame). Mirrors TERMINAL_LOCAL_PASTE_MAX_PAYLOAD_BYTES in
+// the harness CLI's terminalBinary.ts — keep the two in step.
+const terminalLocalPasteMaxPayloadBytes = 6 * 1024 * 1024;
 
 enum TerminalBinaryKind {
   input(1),
   output(2),
   keyframe(3),
-  sync(4);
+  sync(4),
+  /// A clipboard paste made directly into the terminal, delivered as one atomic unit instead of
+  /// going through the chunked keystroke pipeline — see [TerminalSession.pasteText]. Upload
+  /// (client→CLI) only; nothing ever sends this back down.
+  paste(5);
 
   final int code;
   const TerminalBinaryKind(this.code);
@@ -20,6 +29,11 @@ enum TerminalBinaryKind {
     return null;
   }
 }
+
+int _maxLocalPayloadBytesFor(TerminalBinaryKind kind) =>
+    kind == TerminalBinaryKind.paste
+        ? terminalLocalPasteMaxPayloadBytes
+        : terminalLocalMaxPayloadBytes;
 
 class TerminalBinaryFrame {
   final TerminalBinaryKind kind;
@@ -64,7 +78,8 @@ Uint8List? encodeTerminalPlain(TerminalBinaryFrame frame) {
   final id = _uuidBytes(frame.streamId);
   if (id == null || frame.seq < 0) return null;
   if ((frame.kind == TerminalBinaryKind.input ||
-          frame.kind == TerminalBinaryKind.sync) &&
+          frame.kind == TerminalBinaryKind.sync ||
+          frame.kind == TerminalBinaryKind.paste) &&
       frame.compressed) {
     return null;
   }
@@ -99,7 +114,9 @@ TerminalBinaryFrame? decodeTerminalPlain(
   Uint8List plaintext,
 ) {
   if ((flags & ~_flagZlib) != 0 ||
-      ((kind == TerminalBinaryKind.input || kind == TerminalBinaryKind.sync) &&
+      ((kind == TerminalBinaryKind.input ||
+              kind == TerminalBinaryKind.sync ||
+              kind == TerminalBinaryKind.paste) &&
           flags != 0)) {
     return null;
   }
@@ -129,7 +146,7 @@ TerminalBinaryFrame? decodeTerminalPlain(
 /// wire format the app ever needs; there is no separate encrypted variant anymore.
 Uint8List? encodeTerminalLocal(TerminalBinaryFrame frame) {
   final payload = encodeTerminalPlain(frame);
-  if (payload == null || payload.length > terminalLocalMaxPayloadBytes) {
+  if (payload == null || payload.length > _maxLocalPayloadBytesFor(frame.kind)) {
     return null;
   }
   final header = Uint8List(terminalLocalHeaderBytes)
@@ -152,7 +169,7 @@ TerminalBinaryFrame? decodeTerminalLocal(List<int> raw) {
     return null;
   }
   final length = ByteData.sublistView(bytes).getUint32(8, Endian.big);
-  if (length > terminalLocalMaxPayloadBytes ||
+  if (length > _maxLocalPayloadBytesFor(kind) ||
       bytes.length != terminalLocalHeaderBytes + length) {
     return null;
   }

@@ -588,10 +588,7 @@ class TerminalSession extends ChangeNotifier {
   /// holding a composed line unsent, its Enter arriving in the same read as the text.
   Future<bool> sendComposerText(String text) async {
     if (!acceptsInput) return false;
-    // Ctrl+C is stripped here for the same reason [_onTerminalOutput] strips it: the machine
-    // pastes this content into a live pane, where a stray 0x03 is a SIGINT rather than a
-    // character, and the engine there has no job-control fallback to survive one.
-    final content = text.replaceAll('\x03', '').trimRight();
+    final content = text.trimRight();
     if (content.trim().isEmpty) return false;
     return send('message', {
       'content': content,
@@ -606,36 +603,40 @@ class TerminalSession extends ChangeNotifier {
   /// A big paste run through that pipeline gets sliced into ≤8 KiB binary frames client-side and then
   /// into 2 KiB `send-keys -H` bursts on the daemon — each burst arrives far enough apart that the
   /// engine's own paste-detector (readline/Ink) can register it as a SEPARATE paste, which is why a
-  /// large paste read as dozens of `[Pasted text #N]` markers instead of one. `terminal_paste` routes
-  /// through the daemon's `tmux paste-buffer` instead, the same single-shot mechanism composer
-  /// messages already use — see `pasteRawIntoTmux` in the harness CLI.
+  /// large paste read as dozens of `[Pasted text #N]` markers instead of one. A [TerminalBinaryKind.paste]
+  /// frame routes through the daemon's `tmux paste-buffer` instead, the same single-shot mechanism
+  /// composer messages already use — see `pasteRawIntoTmux` in the harness CLI.
+  ///
+  /// Binary, not JSON: unlike a JSON frame type, a new binary `kind` needs no entry in the E2EE
+  /// allowlist (`ENCRYPTED_DOWN_TYPES`) three OTHER codebases also pin a hash of — the AEAD wrapping
+  /// that already covers `input`/`output` covers this too, with nothing extra to keep in sync. That is
+  /// what lets this work over a relayed machine, not just a local one.
   ///
   /// The caller must check [MachineState.terminalPasteRawAvailable] first: an older CLI does not know
-  /// this frame type at all, so sending it there would silently go nowhere.
+  /// this binary kind at all, so sending it there would silently go nowhere.
   Future<bool> pasteText(String text) async {
     if (!acceptsInput) return false;
-    // Same reason as sendComposerText/_onTerminalOutput: the engine in the pane has no job-control
-    // fallback for an uncaught SIGINT, so a stray 0x03 pasted alongside real content must not reach it.
-    final content = text.replaceAll('\x03', '');
-    if (content.isEmpty) return false;
-    final sent = await send('terminal_paste', {
-      'streamId': streamId,
-      'text': content,
-    });
+    // Forwarded verbatim, including a stray 0x03 — same as _onTerminalOutput/sendComposerText.
+    if (text.isEmpty) return false;
+    final currentStreamId = streamId;
+    if (currentStreamId == null) return false;
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.paste,
+      streamId: currentStreamId,
+      // Unused server-side (a paste is one self-contained unit, not part of the ordered keystroke
+      // stream `input`'s seq guards) — kept at 0 rather than threading a second counter for a field
+      // nothing reads.
+      seq: 0,
+      bytes: Uint8List.fromList(utf8.encode(text)),
+      compressed: false,
+    );
+    final sent = await sendBinary(frame);
     if (!sent) transportLost('Terminal paste was not sent');
     return sent;
   }
 
   void _onTerminalOutput(String data) {
     if (!acceptsInput || data.isEmpty) return;
-    // Ctrl+C (0x03) is never forwarded to the remote pane: the engine CLI
-    // there has no local job-control fallback, so a SIGINT that isn't caught
-    // in time kills the process outright and drops tmux back to a bare
-    // shell instead of just interrupting the current turn.
-    if (data.contains('\x03')) {
-      data = data.replaceAll('\x03', '');
-      if (data.isEmpty) return;
-    }
     final bytes = utf8.encode(data);
     final isBoundary =
         data.contains('\r') ||

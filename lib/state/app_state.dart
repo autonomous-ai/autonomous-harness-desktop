@@ -494,9 +494,9 @@ class AppNotifier extends ChangeNotifier {
     if (_dismissedLinkPrompts.add(machineId)) notifyListeners();
   }
 
-  // ── ⌘K: a typed task, and which agent it belongs to ────────────────────────────────────────────
+  // ── ⌘B: a typed task, and which agent it belongs to ────────────────────────────────────────────
 
-  /// The machine this window is running ON — where the daemon that ANSWERS ⌘K lives.
+  /// The machine this window is running ON — where the daemon that ANSWERS ⌘B lives.
   ///
   /// It is not the scope of the search: the daemon weighs agents on every machine and answers with the
   /// one each pick belongs to. This is only the socket the question travels on, because the router, the
