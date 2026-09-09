@@ -90,8 +90,9 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// `grid login` in a terminal, a `grid logout`, or our own [signIn].
   Future<void> refresh() => load();
 
-  /// Makes sure this computer has a Grid session, signing in through
-  /// `harness grid login --json` when it has none.
+  /// Makes sure this computer has a Grid session **for [account]**, signing in
+  /// through `harness grid login --json` when it has none — or when the one it
+  /// has belongs to somebody else.
   ///
   /// "Make sure", not "run the login": the check is HERE rather than at each
   /// caller because every run mints a fresh 365-day session and revokes
@@ -101,6 +102,19 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// a machine that already had one, which is the pile-up this whole design
   /// exists to avoid.
   ///
+  /// [account] is the Harness address this machine is signed in as. A Grid
+  /// session under any other address is **replaced**, because `harness logout`
+  /// deliberately leaves `~/.grid/credentials.toml` alone (there is no cascade
+  /// between the two sign-ins, by design) — so signing out and back in as
+  /// somebody else otherwise left this app serving the previous person's grids
+  /// forever, with nothing on screen that could fix it.
+  ///
+  /// Null means "whoever is here is fine", which is the old behaviour and what
+  /// a caller that does not know the address passes. It is NOT a licence to
+  /// re-mint: a session that matches is still left exactly alone. Replacing is
+  /// the one case that earns a fresh 365-day session, because the alternative
+  /// is an app that shows the wrong account's grids.
+  ///
   /// Returns null on success and a sentence to show otherwise. Nothing throws:
   /// every caller is a button, and none of them has anywhere to put an
   /// exception.
@@ -109,13 +123,22 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// CLI", "run harness login again"), so they are passed through verbatim
   /// rather than re-worded here — this app is not the second place that has an
   /// opinion about why a sign-in did not happen.
-  Future<String?> signIn() async {
+  Future<String?> signIn({String? account}) async {
     // Re-read first: something may have signed in since we last looked — the
     // bootstrap, a `grid login` in a terminal, or the other caller.
     await load();
-    if (signedIn) return null;
+    if (signedIn && !_belongsToSomebodyElse(account)) return null;
     final ProcessResult result;
     try {
+      // ⚠️ No `--force`. It is not a Grid flag: `harness grid login` hands it to
+      // the HARNESS sign-in, where it means "do the whole SSO again even though
+      // this computer is already signed in" — that path stops the running
+      // daemon first (`if (force) await stopDaemonProcess()`) and then waits on
+      // a browser round trip this app has no window to complete.
+      //
+      // It is also not needed. Measured against a live session: plain
+      // `harness grid login --json` exits 0 and REPLACES the token on disk, so
+      // the handoff already overwrites whoever was there.
       result = await _runner.run(['grid', 'login', '--json']);
     } on Object catch (error) {
       return 'Could not run the harness CLI: $error';
@@ -133,6 +156,61 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
         ? null
         : 'The sign-in reported success but left no Grid session on this '
               'computer. Run `harness grid login` in a terminal to see why.';
+  }
+
+  /// Signs this computer out of Grid — `harness grid logout --json`.
+  ///
+  /// Returns null when there was nothing to do or it worked, and a sentence to
+  /// show otherwise. Nothing throws, for the same reason [signIn] does not.
+  ///
+  /// **The caller must not block a Harness sign-out on this.** Refusing to sign
+  /// somebody out of Harness because a Grid command failed would trap them in
+  /// an account they asked to leave. The sentence is for saying what is still
+  /// on the machine, not for stopping anything.
+  ///
+  /// ⚠️ `grid logout` **stops whatever engine this machine is serving** before
+  /// it deletes anything — its own `--force` exists for the case where that
+  /// teardown fails. That engine is detached and normally outlives the app, so
+  /// signing out ends a share the user deliberately left running. Deliberate:
+  /// a credential that outlives the sign-out is worse, and the alternative was
+  /// leaving a live 365-day token on a machine somebody just signed out of.
+  ///
+  /// **This machine only.** `--everywhere` would sign out every other machine
+  /// on the account and is never passed here.
+  Future<String?> signOut() async {
+    await load();
+    // Nothing to delete: say so by doing nothing, rather than running a command
+    // whose refusal would then need explaining.
+    if (!signedIn) return null;
+    final ProcessResult result;
+    try {
+      result = await _runner.run(['grid', 'logout', '--json']);
+    } on Object catch (error) {
+      return 'Could not run the harness CLI to sign out of Grid: $error';
+    }
+    // The file is the only thing that decides whether we still have a session,
+    // whatever the command said about itself.
+    await load();
+    if (!signedIn) return null;
+    final said = '${result.stderr}'.trim();
+    return 'This computer is still signed in to Grid'
+        '${said.isEmpty ? '' : ' — $said'}. '
+        'Run `harness grid logout` in a terminal to clear it.';
+  }
+
+  /// Whether the session on disk is somebody other than [account].
+  ///
+  /// False whenever either address is unknown — the same rule Settings ▸ Grid
+  /// draws its mismatch warning by. "We have not asked yet" must never be
+  /// treated as "they differ": that reading would re-mint a session on a
+  /// machine whose profile call was merely slow, which is the pile-up this
+  /// class exists to prevent.
+  bool _belongsToSomebodyElse(String? account) {
+    final harness = account?.trim();
+    final grid = value?.email?.trim();
+    if (harness == null || harness.isEmpty) return false;
+    if (grid == null || grid.isEmpty) return false;
+    return grid.toLowerCase() != harness.toLowerCase();
   }
 }
 

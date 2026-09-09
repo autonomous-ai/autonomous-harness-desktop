@@ -242,6 +242,120 @@ name = "A Grid"
     );
   });
 
+  // --- whose session it is -------------------------------------------------
+  //
+  // `harness logout` never deletes ~/.grid/credentials.toml, so signing out and
+  // back in as somebody else used to leave the previous person's session on
+  // disk — and the app went on listing THEIR grids with nothing in the UI that
+  // could correct it.
+
+  test('a session belonging to somebody else is replaced', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final runner = FakeCliRunner(
+      exited(0, stdout: '{"type":"result","status":"success"}\n'),
+      onRun: (_) => file.writeAsStringSync(
+        _realShape
+            .replaceAll('someone@example.test', 'newcomer@example.test')
+            .replaceAll('session-abc', 'session-xyz'),
+      ),
+    );
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
+
+    final failure = await store.signIn(account: 'newcomer@example.test');
+
+    expect(failure, isNull);
+    // Plain `grid login` — never `--force`, which is the HARNESS sign-in's flag
+    // and stops the daemon this app is talking to.
+    expect(runner.calls.single, ['grid', 'login', '--json']);
+    expect(store.value?.email, 'newcomer@example.test');
+  });
+
+  test('a session for the same account is left exactly alone', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final runner = FakeCliRunner(exited(0));
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
+
+    // Case matters nowhere in an address, and a re-mint here would be the
+    // 365-day pile-up the guard exists to prevent.
+    final failure = await store.signIn(account: 'SOMEONE@Example.Test');
+
+    expect(failure, isNull);
+    expect(runner.calls, isEmpty);
+    expect(store.value?.token, 'session-abc');
+  });
+
+  test('an unknown account leaves whoever is there alone', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final runner = FakeCliRunner(exited(0));
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
+
+    // "We have not asked yet" must never read as "they differ": the profile
+    // call can simply have failed, and re-minting over a slow network call is
+    // exactly the wrong reading.
+    expect(await store.signIn(), isNull);
+    expect(await store.signIn(account: ''), isNull);
+    expect(runner.calls, isEmpty);
+  });
+
+  // --- signing out ---------------------------------------------------------
+
+  test('signOut clears the session, this machine only', () async {
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final runner = FakeCliRunner(
+      exited(0, stdout: '{"type":"result","status":"success"}\n'),
+      onRun: (_) => file.deleteSync(),
+    );
+    final store = GridSessionStore(file: file, runner: runner);
+    await store.load();
+
+    final failure = await store.signOut();
+
+    expect(failure, isNull);
+    // `--everywhere` would sign out every other machine on the account.
+    expect(runner.calls.single, ['grid', 'logout', '--json']);
+    expect(store.signedIn, isFalse);
+  });
+
+  test('signOut with nothing to clear runs no CLI', () async {
+    final runner = FakeCliRunner(exited(0));
+    final store = GridSessionStore(
+      file: File('${scratch.path}/absent.toml'),
+      runner: runner,
+    );
+    await store.load();
+
+    expect(await store.signOut(), isNull);
+    expect(runner.calls, isEmpty);
+  });
+
+  test('a sign-out that left the credential says so', () async {
+    // The file is the only thing that decides, whatever the command claimed —
+    // and the caller must be able to tell the user their credential is still
+    // on the machine.
+    final file = File('${scratch.path}/credentials.toml')
+      ..writeAsStringSync(_realShape);
+    final store = GridSessionStore(
+      file: file,
+      runner: FakeCliRunner(
+        exited(1, stderr: 'a serve child on this box could not be stopped'),
+      ),
+    );
+    await store.load();
+
+    final failure = await store.signOut();
+
+    expect(failure, contains('still signed in to Grid'));
+    expect(failure, contains('could not be stopped'));
+    expect(store.signedIn, isTrue);
+  });
+
   // --- what the client does with it ---------------------------------------
 
   test('with no session the client refuses before it opens a socket', () async {
