@@ -33,6 +33,70 @@ void main() {
     expect(answer.candidates.map((c) => c.machineId), ['m-local', 'm-mini']);
   });
 
+  test('the picker gets what it needs to explain itself', () {
+    // Three things the window shows and nothing dispatches on: how much was weighed, WHICH router
+    // answered, and how well each runner-up fit. They exist so an unsure answer can be argued with.
+    final answer = RouteAnswer.fromJson({
+      'agentId': 'a1',
+      'confidence': 0.44,
+      'weighed': 12,
+      'machines': 4,
+      'via': 'model',
+      'candidates': [
+        {'agentId': 'a1', 'name': 'auth-api', 'engine': 'claude', 'confidence': 0.44},
+        {'agentId': 'a2', 'name': 'payment-api', 'engine': 'codex', 'confidence': 0.31},
+        {'agentId': 'a3', 'name': 'web'},
+      ],
+    });
+    expect(answer.weighed, 12);
+    expect(answer.machines, 4);
+    expect(answer.via, 'model');
+    expect(answer.candidates.map((c) => c.engine), ['claude', 'codex', '']);
+    expect(answer.candidates.map((c) => c.confidence), [0.44, 0.31, 0]);
+  });
+
+  test('an older daemon answers without any of them, and that is fine', () {
+    // The app self-updates ahead of the CLI often enough that this is the normal case for a while: no
+    // counts, no via, no per-candidate fit. Every one of them has to read as "not said" — 0 and '' —
+    // rather than as a wrong claim, because the picker draws nothing for those.
+    final answer = RouteAnswer.fromJson({
+      'agentId': 'a1',
+      'confidence': 0.4,
+      'candidates': [
+        {'agentId': 'a1', 'name': 'auth-api', 'machine': 'mac-mini'},
+      ],
+    });
+    expect(answer.weighed, 0);
+    expect(answer.machines, 0);
+    expect(answer.via, '');
+    expect(answer.candidates.single.confidence, 0);
+    expect(answer.candidates.single.engine, '');
+  });
+
+  test('a fit outside 0..1 is clamped, not drawn off the end of its bar', () {
+    final answer = RouteAnswer.fromJson({
+      'agentId': 'a1',
+      'candidates': [
+        {'agentId': 'a1', 'name': 'x', 'confidence': 4},
+        {'agentId': 'a2', 'name': 'y', 'confidence': -2},
+        {'agentId': 'a3', 'name': 'z', 'confidence': 'lots'},
+      ],
+    });
+    expect(answer.candidates.map((c) => c.confidence), [1.0, 0.0, 0.0]);
+  });
+
+  test('counts that arrive as junk are not counts', () {
+    final answer = RouteAnswer.fromJson({
+      'agentId': 'a1',
+      'weighed': 'twelve',
+      'machines': null,
+      'via': 9,
+    });
+    expect(answer.weighed, 0);
+    expect(answer.machines, 0);
+    expect(answer.via, '');
+  });
+
   test('an integer confidence is still a number', () {
     // The router is told to answer 0..1 and a model that says `1` sends an int. Read as a double or the
     // certain answer is the one that gets second-guessed.

@@ -235,7 +235,7 @@ class Agent {
   }
 }
 
-/// What the daemon answered when asked where a typed task belongs (⌘K).
+/// What the daemon answered when asked where a typed task belongs (⌘B).
 ///
 /// `candidates` is the pick followed by its runners-up. The window reads it only when `confidence` is
 /// too low to act on — the whole point of the number being on the wire.
@@ -247,6 +247,9 @@ class RouteAnswer {
     required this.confidence,
     required this.reason,
     required this.candidates,
+    this.weighed = 0,
+    this.machines = 0,
+    this.via = '',
   });
 
   final String agentId;
@@ -257,6 +260,22 @@ class RouteAnswer {
   final double confidence;
   final String reason;
   final List<RouteCandidate> candidates;
+
+  /// How many agents were weighed, and across how many computers.
+  ///
+  /// Shown WHILE the router thinks, because the question during those seconds is not "how long" — it is
+  /// "did it even look at the agent I mean". The daemon caps the list it weighs, so this is the only
+  /// place that can answer it.
+  final int weighed;
+  final int machines;
+
+  /// 'model' when a classifier answered, 'heuristic' when name matching stood in for it, '' when the
+  /// daemon did not say.
+  ///
+  /// Both land under the threshold BY DESIGN — an unsure model and a router that could not run must both
+  /// stop and ask — which is exactly why the window needs to tell them apart: "not sure which agent" and
+  /// "the router could not run" send a person to different next moves.
+  final String via;
 
   /// True when nobody was picked at all — an empty machine, or a daemon that could not answer.
   bool get isEmpty => agentId.isEmpty;
@@ -275,6 +294,9 @@ class RouteAnswer {
         ? (json['confidence'] as num).toDouble()
         : 0,
     reason: _str(json['reason']),
+    weighed: json['weighed'] is num ? (json['weighed'] as num).toInt() : 0,
+    machines: json['machines'] is num ? (json['machines'] as num).toInt() : 0,
+    via: _str(json['via']),
     candidates: [
       for (final entry
           in (json['candidates'] is List
@@ -292,6 +314,8 @@ class RouteCandidate {
     required this.name,
     required this.machine,
     required this.recent,
+    this.engine = '',
+    this.confidence = 0,
   });
 
   final String agentId;
@@ -307,12 +331,28 @@ class RouteCandidate {
   /// What that agent was last doing — the line under its name when the window has to ask.
   final String recent;
 
+  /// Which CLI it runs on. The picker wears the same engine mark the rail does, so a row here and the
+  /// same agent in the rail are recognisably one thing rather than two lists that happen to share names.
+  final String engine;
+
+  /// How well the router thought this one fits, 0..1. DISPLAY ONLY.
+  ///
+  /// Nothing is dispatched on it — the pick is [RouteAnswer.agentId] and the number that gates it is
+  /// [RouteAnswer.confidence]. 0 means the router said nothing about this candidate, and the picker
+  /// draws no bar rather than an empty one, because an empty bar reads as "no fit" and this is "no
+  /// answer".
+  final double confidence;
+
   static RouteCandidate fromJson(Map<String, dynamic> json) => RouteCandidate(
     agentId: _str(json['agentId']),
     machineId: _str(json['machineId']),
     name: _str(json['name']),
     machine: _str(json['machine']),
     recent: _str(json['recent']),
+    engine: _str(json['engine']),
+    confidence: json['confidence'] is num
+        ? (json['confidence'] as num).toDouble().clamp(0, 1)
+        : 0,
   );
 }
 
