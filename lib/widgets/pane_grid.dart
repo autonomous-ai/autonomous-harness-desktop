@@ -63,7 +63,23 @@ class PaneGrid extends StatelessWidget {
               child: const _AddSlot(),
             ),
         ];
-        return _arrange(cells);
+        // WRAPPED HERE, not inside one of the shapes.
+        //
+        // It was in the >4 branch, which is one of six: _arrange returns a
+        // different tree for one tile, two, three, four, five-with-a-main, and
+        // the lattice beyond that. The gaps come from _Axis and so appeared in
+        // all six; the field and the outer margin came from that one branch and
+        // so appeared in one. Two tiles — the common case — showed gaps the
+        // exact colour of the tiles either side of them, which is no gap at all.
+        return _GridField(
+          child: Padding(
+            // The same space outside as between the tiles. Without it the edge
+            // tiles run into the window and only the INNER boundaries read as
+            // deliberate.
+            padding: const EdgeInsets.all(_Gap.thickness),
+            child: _arrange(cells),
+          ),
+        );
       },
     );
   }
@@ -237,7 +253,7 @@ class _Lattice extends StatelessWidget {
         // measured at six tiles in 736px, which is 115px each against a 46px
         // header. Nine usable tiles behind a scrollbar beat nine unusable ones
         // in view.
-        final needed = rows * minTile.height + _Wall.thickness * (rows - 1);
+        final needed = rows * minTile.height + _Gap.thickness * (rows - 1);
         final scrolls = needed > constraints.maxHeight;
 
         final grid = _Axis(
@@ -275,8 +291,8 @@ class _Lattice extends StatelessWidget {
   }
 }
 
-/// N children along one axis, sharing the space evenly, with one wall between
-/// each pair.
+/// N children along one axis, sharing the space evenly, with a gap between each
+/// pair.
 ///
 /// The proportions come from the SHAPE — which nesting it puts the tiles in —
 /// and nothing moves them. Dragging a
@@ -302,11 +318,11 @@ class _Axis extends StatelessWidget {
       // level of nesting, including the main-and-stack one: half the width, and
       // three equal rows in that half.
       laid.add(Expanded(child: children[i]));
-      if (i < children.length - 1) laid.add(_Wall(axis: axis));
+      if (i < children.length - 1) laid.add(_Gap(axis: axis));
     }
     return Flex(
       direction: axis,
-      // Stretch, so a wall fills the cross axis without being told a height it
+      // Stretch, so a gap spans the cross axis without being told a height it
       // cannot know.
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: laid,
@@ -354,33 +370,77 @@ class _MinTile {
   }
 }
 
-/// The line between two tiles: one pixel, and it belongs to both of them.
+/// What shows through the gaps.
 ///
-/// It used to be nine pixels — one of line inside eight of grab, because the
-/// boundary was draggable and a boundary you have to hit exactly is one people
-/// give up on. What that left on screen was THREE lines between every pair of
-/// tiles: this one, plus the 1px border each tile drew around itself. With the
-/// drag gone the grab is dead space, so the tiles stopped drawing their own
-/// border (see [_PaneCell]) and this is the only line there is.
-class _Wall extends StatelessWidget {
-  const _Wall({required this.axis});
+/// Space only separates when the two sides differ, and every tile is the
+/// window's own colour — so on the window's own background the gaps would be
+/// invisible and the grid would read as one enormous terminal with seams in it.
+/// The first attempt used [AppPalette.cardBg], one step off the window — six
+/// values apart in dark (#181818 against #1E1E1E). That is enough to see across
+/// a whole panel and not nearly enough at the scale that matters here: a corner
+/// curve is a few antialiased pixels wide, and against a background almost the
+/// same colour it does not read as a curve at all, it reads as a dirty notch.
+/// So the field is a deliberate step, not a nudge.
+class _GridField extends StatelessWidget {
+  const _GridField({required this.child});
 
-  /// The axis the tiles are laid along — so a wall between two columns is
-  /// vertical, and this is [Axis.horizontal].
-  final Axis axis;
-
-  static const double thickness = 1;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return SizedBox(
-      width: axis == Axis.horizontal ? thickness : null,
-      height: axis == Axis.horizontal ? null : thickness,
-      child: ColoredBox(color: AppColors.border),
+    return ColoredBox(
+      // Dark: above the tiles. Light: below them. Both are the familiar way
+      // round for cards on a page in that theme.
+      color: grid.AppTheme.pick(
+        const Color(0xFFEDEDEB),
+        const Color(0xFF262626),
+      ),
+      child: child,
     );
   }
 }
+
+/// The space between two tiles.
+///
+/// It was a one-pixel line, and before that nine pixels of draggable grab strip
+/// around one. A drawn boundary is the wrong tool here: every tile is already a
+/// self-contained thing with its own header, its own engine and its own machine,
+/// and a shared line asks the eye to work out which side each edge belongs to.
+/// Set the tiles apart instead and the grouping needs no drawing at all — the
+/// page shows through, and each pane reads as a card the way it reads on the
+/// dial and in the rail.
+///
+/// Empty on purpose: what fills it is whatever is behind the grid, so a theme
+/// change moves the background and this follows with no colour of its own.
+class _Gap extends StatelessWidget {
+  const _Gap({required this.axis});
+
+  /// The axis the tiles are laid along — so the space between two columns is
+  /// vertical, and this is [Axis.horizontal].
+  final Axis axis;
+
+  /// Wide enough to read as a deliberate separation rather than a rendering
+  /// seam, narrow enough that four tiles do not lose a tile's worth of room to
+  /// the space between them.
+  ///
+  /// Was 10, taken in 30% on the owner's call once the separation was actually
+  /// visible: the gap only had to be that wide while it was doing the work of
+  /// showing itself, and with the field behind it reading properly, less space
+  /// says the same thing and gives it back to the terminals.
+  static const double thickness = 7;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: axis == Axis.horizontal ? thickness : null,
+    height: axis == Axis.horizontal ? null : thickness,
+  );
+}
+
+/// How round a pane's corners are. Matches the cards elsewhere in the window so
+/// a terminal does not read as a different KIND of surface from everything
+/// around it.
+const double _paneRadius = 10;
 
 class _PaneCell extends StatelessWidget {
   const _PaneCell({
@@ -413,18 +473,21 @@ class _PaneCell extends StatelessWidget {
       onPointerDown: (_) => notifier.focusPane(pane.id),
       child: Container(
         decoration: BoxDecoration(
+          // UNCHANGED, and deliberately: the terminal renders its own background
+          // inside this box, so a tile that stops matching the window colour
+          // shows a seam between the header strip and the terminal under it.
+          // What changes to make the gaps visible is the field BEHIND the grid
+          // (see _GridField), which is the part the gaps actually show.
           color: grid.AppPalette.windowBg,
-          // The tile draws a line ONLY when it is the focused one. An
-          // unfocused border would sit right beside the wall its neighbour
-          // shares with it, and two lines a pixel apart is what made every
-          // boundary in this grid read as three.
-          //
-          // Transparent rather than absent, so the 1px it takes is there in
-          // both states and a tile does not resize as focus moves to it.
+          borderRadius: BorderRadius.circular(_paneRadius),
+          // The rim is always drawn — it is what gives an unfocused card its
+          // edge, now that no shared line does. It only CHANGES COLOUR on
+          // focus, so nothing resizes as focus moves.
           border: Border.all(
-            // Only meaningful with company. A ring around the only tile would
-            // be decoration, since there is nowhere else focus could be.
-            color: !_single && focused ? AppColors.accent : Colors.transparent,
+            // The accent ring is only meaningful with company: a ring around
+            // the only tile would be decoration, since there is nowhere else
+            // focus could be.
+            color: !_single && focused ? AppColors.accent : AppColors.border,
             width: 1,
           ),
         ),
@@ -438,31 +501,45 @@ class _PaneCell extends StatelessWidget {
         foregroundDecoration: blocked
             ? BoxDecoration(
                 border: Border.all(color: grid.AppPalette.warn, width: 2),
+                borderRadius: BorderRadius.circular(_paneRadius),
               )
             : null,
         // Keeps a terminal's constant repainting inside its own layer instead
         // of dirtying the whole grid. No key: nothing reads this boundary, it
         // only has to exist.
-        child: RepaintBoundary(
-          child: _SwapZone(
-            notifier: notifier,
-            paneId: pane.id,
-            child: _DropZone(
+        child: ClipRRect(
+          // Clipped HERE rather than through Container's own clipBehavior.
+          //
+          // Both clip, but they clip to different shapes: Container's is the
+          // decoration's OUTER edge, so the child fills the full radius and
+          // paints under the rim, leaving a square-shouldered corner peeking
+          // through the 1px the rim occupies. This one takes the rim's pixel
+          // off the radius, so the fill stops exactly where the rim starts.
+          //
+          // TerminalPanel opens with a ColoredBox across its whole box, and
+          // that is what was reaching the corners.
+          borderRadius: BorderRadius.circular(_paneRadius - 1),
+          child: RepaintBoundary(
+            child: _SwapZone(
               notifier: notifier,
               paneId: pane.id,
-              dragging: dragging,
-              child: ValueListenableBuilder<PaneDragRef?>(
-                valueListenable: paneDragging,
-                // The tile being carried fades where it sits, so the grid shows
-                // where it came FROM while the ghost shows where it is going.
-                builder: (context, inFlight, child) => Opacity(
-                  opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
-                  child: child,
-                ),
-                child: _PaneContent(
-                  notifier: notifier,
-                  pane: pane,
-                  single: _single,
+              child: _DropZone(
+                notifier: notifier,
+                paneId: pane.id,
+                dragging: dragging,
+                child: ValueListenableBuilder<PaneDragRef?>(
+                  valueListenable: paneDragging,
+                  // The tile being carried fades where it sits, so the grid shows
+                  // where it came FROM while the ghost shows where it is going.
+                  builder: (context, inFlight, child) => Opacity(
+                    opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                    child: child,
+                  ),
+                  child: _PaneContent(
+                    notifier: notifier,
+                    pane: pane,
+                    single: _single,
+                  ),
                 ),
               ),
             ),
