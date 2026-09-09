@@ -633,6 +633,18 @@ class _MachineNodeState extends State<_MachineNode> {
                           onOpen: () => setState(() => _menuOpen = true),
                           onClose: () => setState(() => _menuOpen = false),
                           menuChildren: [
+                            // Where the empty state's refresh went. It used to hang off a status line
+                            // that only existed while a machine had no agents, so the one machine you
+                            // could not reload was a machine whose list had gone stale WITH agents in
+                            // it. A per-machine action belongs with the machine's other ones.
+                            AppMenuItem(
+                              icon: LucideIcons.refreshCw300,
+                              label: 'Reload agents',
+                              onPressed: () {
+                                _machineMenu.close();
+                                notifier.reloadMachineData(machine.machineId);
+                              },
+                            ),
                             AppMenuItem(
                               icon: LucideIcons.pencil300,
                               label: 'Edit name',
@@ -720,10 +732,7 @@ class _AgentTree extends StatelessWidget {
   final AppNotifier notifier;
   final MachineState state;
 
-  const _AgentTree({
-    required this.notifier,
-    required this.state,
-  });
+  const _AgentTree({required this.notifier, required this.state});
 
   @override
   Widget build(BuildContext context) {
@@ -768,6 +777,16 @@ class _AgentTree extends StatelessWidget {
     final rows = <Widget>[
       for (final root in byParent[null] ?? const <Agent>[])
         ..._rows(root, byParent, visible, 0, <String>{}),
+      // …and the invitation, last, as a row of the same list. Adding an agent to a machine that already
+      // has some was reachable only through a `+` revealed on hover of the machine's caption — a control
+      // nobody finds who does not already know it. Put where a new row would actually appear, it needs no
+      // discovering. It joins `rows` rather than being appended after the loop so the guide's trunk runs
+      // down to it and closes there, exactly as it would on a real last agent.
+      _NewAgentRow(
+        notifier: notifier,
+        machineId: state.machine.machineId,
+        source: 'rail_tail',
+      ),
     ];
 
     return Column(
@@ -1441,6 +1460,107 @@ class _AgentLoadError extends StatelessWidget {
   }
 }
 
+/// "New agent…", drawn as the row it would create.
+///
+/// The rail is a LIST, and every framed control put in it has read as a foreign object — there is
+/// nothing else in this column with a border or a fill of its own. So this is not a button placed in a
+/// list; it is a row of the list that happens to be empty. Same indent, same well, same label type, same
+/// hover fill: what changes is that the well is drawn in dashes and holds a `+`, which is the shared
+/// vocabulary for "this one is not real yet".
+///
+/// It replaces two things that were louder and said less. A sentence — "no running agents" — set at
+/// 13.5px under an 11px machine caption, so the status line was bigger than its own heading and the eye
+/// landed on the least useful words on screen. And an accent-washed button, which in a rail holding no
+/// other framed control read as the primary action of the whole window for a machine that is merely
+/// idle. Neither said the thing that matters, which is that a row can be added here.
+///
+/// It also stands at the END of a machine that already has agents, and that is not scope creep — it is
+/// the same problem one row further down. Adding an agent to a machine that has some is only offered by
+/// a `+` revealed on hover of the machine caption, which cannot be found by anyone who does not already
+/// know it is there. One shape now answers both.
+class _NewAgentRow extends StatelessWidget {
+  const _NewAgentRow({
+    required this.notifier,
+    required this.machineId,
+    required this.source,
+  });
+
+  final AppNotifier notifier;
+  final String machineId;
+
+  /// Which of the two places this row is standing in, so the dialog's own telemetry can tell an empty
+  /// machine's first agent from a fifth one added to a busy machine — different moments, different
+  /// answers to "did this get found".
+  final String source;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Padding(
+      // The same 28 an agent row takes, so the guide's arm reaches this row exactly as it reaches a real
+      // one. A different indent here would bend the trunk at the last branch.
+      padding: const EdgeInsets.only(left: 28),
+      child: SidebarItem(
+        label: 'New agent…',
+        // Dimmed rather than a colour of its own: this row is a placeholder until it is reached for, and
+        // the hover state SidebarItem already owns is what says it is live.
+        dimmed: true,
+        tooltip: 'Start an agent on this machine',
+        onTap: () =>
+            showNewAgentDialog(context, notifier, machineId, source: source),
+        // The agent row's well, in dashes. Same 24px box and same 7px radius, so the column of marks
+        // stays a column — only the border and the glyph say this one is an invitation.
+        leading: CustomPaint(
+          painter: _DashedWellPainter(color: grid.AppPalette.textFaint),
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: Icon(
+              LucideIcons.plus300,
+              size: 13,
+              color: grid.AppPalette.textFaint,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The agent well's 7px rounded square, drawn as a dashed outline.
+///
+/// Hand-drawn because Flutter has no dashed border: the path is walked in fixed steps and every other
+/// step is stroked. Cheap enough for a row — it is one rounded rect — and it keeps the well's exact
+/// geometry, which a substitute icon would not.
+class _DashedWellPainter extends CustomPainter {
+  const _DashedWellPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = color.withValues(alpha: 0.55);
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0.5, 0.5, size.width - 1, size.height - 1),
+      const Radius.circular(7),
+    );
+    final path = Path()..addRRect(rect);
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        canvas.drawPath(metric.extractPath(distance, distance + 2.5), paint);
+        distance += 5;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedWellPainter old) => old.color != color;
+}
+
 class _EmptyAgents extends StatelessWidget {
   final AppNotifier notifier;
   final MachineState state;
@@ -1448,112 +1568,24 @@ class _EmptyAgents extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(38, 2, 8, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'no running agents',
-                  style: TextStyle(
-                    color: grid.AppPalette.textFaint,
-                    fontFamily: grid.AppFont.sans,
-                    fontSize: 13.5,
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 14),
-                color: grid.AppPalette.textSecondary,
-                tooltip: 'Reload agents',
-                onPressed: () =>
-                    notifier.reloadMachineData(state.machine.machineId),
-              ),
-            ],
-          ),
-        ),
-        // The machine row's `+` is hover-revealed, so on a first launch — the
-        // one moment the rail is empty — there is nothing on screen that says
-        // an agent can be started at all. This says it, and starts the same
-        // dialog for the same machine.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
-          child: _EmptyNewAgentButton(
-            onPressed: () => showNewAgentDialog(
-              context,
-              notifier,
-              state.machine.machineId,
-              source: 'rail_empty',
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// The empty rail's one call to action.
-///
-/// Washed in the accent rather than drawn as a button ([AppSurface.accentWash]
-/// is the token for exactly this — the rail's primary action), because the rail
-/// holds no other framed control and one would sit oddly among the plain rows.
-class _EmptyNewAgentButton extends StatefulWidget {
-  const _EmptyNewAgentButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  State<_EmptyNewAgentButton> createState() => _EmptyNewAgentButtonState();
-}
-
-class _EmptyNewAgentButtonState extends State<_EmptyNewAgentButton> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: AnimatedContainer(
-          key: const ValueKey('empty-new-agent'),
-          duration: grid.AppMotion.hover,
-          curve: grid.AppMotion.curve,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: _hovered
-                ? grid.AppSurface.accentWashHover
-                : grid.AppSurface.accentWash,
-            borderRadius: BorderRadius.circular(grid.AppControl.menuRadius),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                LucideIcons.plus300,
-                size: 13,
-                color: grid.AppPalette.accentOnSurface,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'New agent',
-                style: TextStyle(
-                  color: grid.AppPalette.accentOnSurface,
-                  fontFamily: grid.AppFont.sans,
-                  fontSize: 12.5,
-                  fontWeight: grid.AppFont.semibold,
-                ),
-              ),
-            ],
-          ),
-        ),
+    // No sentence, and nothing framed. An empty list says it is empty by being empty; what it cannot say
+    // on its own is that a row can be added, and that is exactly what this row is. See [_NewAgentRow] for
+    // what it replaces and why.
+    //
+    // The reload the old sentence carried moved to the machine's own menu. It was a 40px icon button
+    // living on a status line, reachable only while a machine happened to be empty — a per-machine action
+    // belongs with the machine's other per-machine actions, where it is reachable in every state.
+    // Wrapped in the timeline like any other row, and that is the whole claim: the guide's arm reaches
+    // this row from the machine's trunk exactly as it reaches a real agent, so the rail reads as a list
+    // with one row in it rather than as a message where a list should be. `below: false` closes the
+    // trunk here — there is nothing after it.
+    return SidebarTimeline(
+      role: SidebarTimelineRole.branch,
+      below: false,
+      child: _NewAgentRow(
+        notifier: notifier,
+        machineId: state.machine.machineId,
+        source: 'rail_empty',
       ),
     );
   }

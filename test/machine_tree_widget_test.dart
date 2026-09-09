@@ -152,6 +152,59 @@ void main() {
     notifier.dispose();
   });
 
+  testWidgets('an empty machine offers a row, not a sentence and a button', (
+    tester,
+  ) async {
+    // The empty state IS the list, with one row in it that would become an agent. What it must NOT be is
+    // what it was: a 13.5px status line under an 11px machine caption — a sentence outranking its own
+    // heading — over an accent-washed button that read as the primary action of the whole window for a
+    // machine that is merely idle.
+    final notifier = notifierWithLoadState(AgentLoadStatus.loaded);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 320, child: MachineRail(notifier: notifier)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('New agent…'), findsOneWidget);
+    expect(find.text('no running agents'), findsNothing);
+    // The old button read "New agent" flat, and it is the ellipsis that promises a dialog rather than an
+    // agent appearing on the spot.
+    expect(find.text('New agent'), findsNothing);
+  });
+
+  testWidgets('a machine that HAS agents is offered the same row, last', (
+    tester,
+  ) async {
+    // The same problem one row further down: adding to a machine that already has agents was reachable
+    // only through a `+` revealed on hover of the machine's caption, which nobody finds who does not
+    // already know it is there.
+    final notifier = notifierWithTree();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 320, child: MachineRail(notifier: notifier)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('backend-api'), findsOneWidget);
+    expect(find.text('New agent…'), findsOneWidget);
+    // …and LAST, because a row that would create the next agent has to stand where the next agent would.
+    final rowY = tester.getTopLeft(find.text('New agent…')).dy;
+    for (final name in ['backend-api', 'future-worker', 'herdr-session']) {
+      expect(
+        tester.getTopLeft(find.text(name)).dy,
+        lessThan(rowY),
+        reason: '$name should sit above the invitation',
+      );
+    }
+  });
+
   testWidgets('renders one-line agent rows with engine identity', (
     tester,
   ) async {
