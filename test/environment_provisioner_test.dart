@@ -78,11 +78,12 @@ void main() {
     }
   });
 
-  test('fails only when the platform is neither macOS nor Linux', () async {
+  test('fails only when the platform is neither macOS, Linux nor Windows', () async {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: false,
       isLinux: false,
+      isWindows: false,
       run: (executable, arguments, {environment}) async => result(0),
     );
 
@@ -95,6 +96,51 @@ void main() {
       EnvironmentStepStatus.failed,
     );
     expect(readiness.message, contains('macOS and Linux only'));
+  });
+
+  test('verifies rather than installs on Windows, and boots without tmux', () async {
+    final commands = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      isWindows: true,
+      run: (executable, arguments, {environment}) async {
+        commands.add('$executable ${arguments.join(' ')}');
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":true}');
+        }
+        if (arguments.contains('--version')) return result(0, stdout: 'grid 0.3.45');
+        return result(1);
+      },
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isTrue);
+    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.ready);
+    expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
+    // tmux cannot exist here, so it is reported and stepped over rather than blocking the boot.
+    expect(readiness.steps[EnvironmentStep.tmux], EnvironmentStepStatus.unavailable);
+    // Nothing POSIX was ever shelled out to.
+    expect(commands.any((c) => c.contains('/bin/')), isFalse);
+    expect(commands.any((c) => c.contains('install.sh')), isFalse);
+  });
+
+  test('reports the Harness CLI as failed on Windows when it does not answer', () async {
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      isWindows: true,
+      run: (executable, arguments, {environment}) async => result(1),
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isFalse);
+    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.failed);
+    expect(readiness.message, contains('scripts/install-cli.sh'));
   });
 
   test('provisions on Linux', () async {
