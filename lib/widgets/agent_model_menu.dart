@@ -155,9 +155,10 @@ Future<void> pickAgentModel(
 
 /// Move [agentId] onto [choice] — a fresh relay key, then `agent_retarget`.
 ///
-/// Split from [pickAgentModel] so a caller that already knows the answer (a
-/// test, a future "repeat last model") does not have to open a panel to use it.
-@visibleForTesting
+/// Split from [pickAgentModel] so a caller that already knows the answer does
+/// not have to open a panel to use it — the status rail's "move my agents off a
+/// spent subscription" offer (`widgets/usage_offer_actions.dart`) applies one
+/// choice to several agents in a row, and the tests apply one without a picker.
 Future<void> applyAgentModel(
   BuildContext context,
   AppNotifier notifier, {

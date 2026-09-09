@@ -6,6 +6,7 @@ import '../share/share_target_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
+import '../usage/usage_nudge_store.dart';
 
 /// Every preference that has to be in place BEFORE the first frame.
 ///
@@ -28,6 +29,7 @@ Future<void> loadPersistedSettings({
   ShareTargetStore? shareTarget,
   AppearancePrefsStore? appearance,
   HarnessStats? stats,
+  UsageNudgeStore? usageNudges,
 }) async {
   await (terminalFont ?? terminalFontStore).load();
   // The sidebar names the chosen grid in its first frame; loading this later
@@ -62,4 +64,10 @@ Future<void> loadPersistedSettings({
   // as soon as an agent does, and a load that landed after the first
   // `onAgentSpawned` would overwrite it with the number from disk.
   await (stats ?? harnessStats).load();
+  // Not for the first frame either, but for the opposite reason to the stores
+  // above: this one has to be in place before the first usage poll LANDS, which
+  // is roughly a second after launch. A load that arrived later would find the
+  // card already on screen for a window somebody closed yesterday — and closing
+  // it again would be the second time they were asked.
+  await (usageNudges ?? usageNudgeStore).load();
 }

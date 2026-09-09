@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -15,9 +17,12 @@ import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
 import '../../usage/usage_controller.dart';
+import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
 import '../node_dashboard/node_dashboard_screen.dart';
 import '../share_grid/share_grid_dialog.dart';
+import '../usage_limit_notice.dart';
+import '../usage_offer_actions.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
@@ -56,8 +61,12 @@ class GridStatusRail extends StatefulWidget {
   /// its own.
   final GridOverviewController? controller;
 
-  /// The agent accounts' rate limits. Injected by tests; null in the app, where
-  /// the rail makes — and disposes — its own.
+  /// The agent accounts' rate limits.
+  ///
+  /// Handed down by the shell, which owns it because [UsageLimitNotice] above
+  /// this rail reads the same figures — two controllers would be two pollers
+  /// and two answers. Null only in a test that wants the rail on its own, where
+  /// the rail makes — and disposes — one for itself.
   final UsageController? usage;
 
   /// What new agents run on, for [RailProviderPill]. Injected by tests so the
@@ -435,7 +444,10 @@ class _ReadoutState extends State<_Readout> {
     if (railWidth >= _taperFrom) return full;
     // Linear between the app's minimum window and the taper point, so the
     // reading gives up width smoothly rather than snapping at a breakpoint.
-    final t = ((railWidth - _minRail) / (_taperFrom - _minRail)).clamp(0.0, 1.0);
+    final t = ((railWidth - _minRail) / (_taperFrom - _minRail)).clamp(
+      0.0,
+      1.0,
+    );
     return floor + (full - floor) * t;
   }
 
@@ -461,7 +473,10 @@ class _ReadoutState extends State<_Readout> {
   /// strip separates "measured just now" from "measured a while ago", and
   /// there is no measurement on this row to be old — a provider with nothing
   /// on it is equally empty whether the poll landed a second or a minute ago.
-  Widget _emptyProviderRow(GridOverviewController controller, double railWidth) {
+  Widget _emptyProviderRow(
+    GridOverviewController controller,
+    double railWidth,
+  ) {
     final canShare = widget.onShareIntelligence != null;
     return Row(
       children: [
@@ -831,10 +846,34 @@ class _ReadoutState extends State<_Readout> {
       (r) => r.provider == provider,
       orElse: () => ProviderUsage.loading(provider),
     );
+    // The same offer the card above the rail makes, in the one place that is
+    // always reachable: that card shows once per window and can be closed, and
+    // somebody who closed it an hour ago still needs a door.
+    final alerts = usageAlerts([reading]);
+    final offer = alerts.isEmpty
+        ? null
+        : usageOfferOf(
+            widget.notifier,
+            alerts.first,
+            selection: widget.selection,
+          );
     return _stat(
       kind,
       _usageAnchors[provider]!,
-      UsagePanelContent(reading: reading),
+      UsagePanelContent(
+        reading: reading,
+        offer: offer,
+        onAct: offer == null
+            ? null
+            : () => unawaited(
+                runUsageOffer(
+                  context,
+                  widget.notifier,
+                  offer,
+                  selection: widget.selection,
+                ),
+              ),
+      ),
       width: 248,
     );
   }

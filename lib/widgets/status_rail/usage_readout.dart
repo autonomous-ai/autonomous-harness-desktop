@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/widgets/skeleton.dart';
+import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
 import '../engine_identity.dart';
 import 'rail_figure.dart';
+import 'usage_ink.dart';
 
 /// What the agent accounts on this machine have spent, along the status rail.
 ///
@@ -105,7 +107,18 @@ class _ProviderFigures extends StatelessWidget {
             ),
           Text(
             '${window.usedPercent.round()}% used',
-            style: style.copyWith(fontWeight: grid.AppFont.medium),
+            // Amber past 80, red past 90. The figure is exact either way, so
+            // the colour is not carrying the number — it is carrying the
+            // moment the number starts to matter, which is the whole reason
+            // somebody would look down here unprompted. `19% used` and
+            // `92% used` used to print identically.
+            style: style.copyWith(
+              fontWeight: grid.AppFont.medium,
+              color: usagePressureInk(
+                window.pressure,
+                grid.AppPalette.textSecondary,
+              ),
+            ),
           ),
           const SizedBox(width: 4),
           // The countdown when there is one, and the window's own name when

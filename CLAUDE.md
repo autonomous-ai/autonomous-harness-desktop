@@ -412,6 +412,37 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   That is also what keeps `flutter test` honest: `kUnderTest` (`core/test_run.dart`, shared with
   `AnalyticsConfig`) stops the poll auto-starting, since a `Timer.periodic` is a `pumpAndSettle` that
   never settles and these sources would otherwise shell out to `security` and open real sockets.
+- **A nearly-spent subscription is the ONE thing this app says unprompted**
+  (`lib/usage/usage_pressure.dart`, `usage_offer.dart`, `usage_nudge_store.dart`;
+  `widgets/usage_limit_notice.dart` + `usage_limit_card.dart` + `usage_offer_actions.dart`).
+  Two thresholds, one meaning each: **80% changes a colour, 90% speaks**. The rail figure and
+  `UsageBar` share both through `usagePressureOf`, so a window cannot be amber in the strip and
+  plain in the panel that expands it — `19% used` and `92% used` used to print in identical ink,
+  which made the readout useless for the one question it answers at a glance.
+  ⚠️ **It is deliberately NOT a modal.** These panes are terminals: a dialog takes focus off
+  whichever one has it, so keystrokes meant for a running agent land nowhere — and 90% of a window
+  arrives precisely when somebody is deep in a turn. It is also not full-bleed like `_ErrorStrip`:
+  a row in the shell's `Column` would SIGWINCH every pty on screen to deliver a message, so it
+  floats at bottom-left, over the figure it is about, taking no layout.
+  **It never draws without something to press.** `usageOfferFor` answers null in four cases —
+  a build with no providers (`kGridSurfaceEnabled`), no agent here spending that subscription
+  (so whatever burned it is out of reach), a provider chosen with every candidate mid-turn (the
+  CLI would answer `AGENT_BUSY`), and below the threshold. A warning the reader can only agree
+  with is what the amber figure already says for free. With a default provider the button MOVES
+  the idle agents (`applyAgentModel` per agent, Auto model, sequential — a retarget respawns the
+  pane in place with `--resume`, so this is not destructive); with none it opens Settings ▸
+  Providers. ⚠️ **Only the MOVE closes the card.** Choosing a provider does not answer the
+  question, it changes which offer applies — the card should come back reading `Move 3 agents to
+  Water Grid`, which is the step that gets the work going again; silencing it there would strand
+  somebody one click short. **Once per rate-limit window**: `UsageNudgeStore` keys a dismissal by
+  `provider|label` — deliberately WITHOUT the reset time, which both vendors recompute on every
+  answer, so a key carrying it would change under a once-a-minute poll — and expires it at the
+  window's own reset, or `kUsageDismissGrace` when the vendor sent none. **Every entry expires**,
+  which is why there is no permanent opt-out and why the file cannot grow. The `UsageController`
+  moved to `_HomeScreenState`: the notice and the rail read the SAME poller, or the card could
+  name a percentage the figure under it disagreed with. Three events —
+  `usage_limit_warned`/`_offer`/`_dismissed` — because a warning nobody sees and a warning nobody
+  acts on produce the same number of moves.
 - **The token ledger is the OTHER usage feature, and the two must not be merged** (`lib/usage/ledger/`,
   Settings ▸ Usage in `settings/sections/usage_section.dart` + `usage_panels.dart`). The rail's readout
   above asks the vendors *how much of your rate limit is left* — a percentage, scoped to an **account**,

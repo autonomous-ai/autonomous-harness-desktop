@@ -7,7 +7,9 @@ import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/grid/grid_api_client.dart';
+import 'package:harness/shared/theme/app_theme.dart' as grid;
 import 'package:harness/state/app_state.dart';
+import 'package:harness/theme/app_theme.dart';
 import 'package:harness/grid/grid_credentials.dart';
 import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
@@ -245,6 +247,50 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('a nearly-spent window colours its own figure', (tester) async {
+    // The whole point of looking down here unprompted. `19% used` and
+    // `92% used` used to print in exactly the same ink, which made the strip
+    // useless for the one question it can answer at a glance.
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        // Two, not three: at this window width a third figure overflows the
+        // rail, and this test is about ink rather than layout.
+        windows: [
+          UsageWindow(label: 'Session', usedPercent: 12),
+          UsageWindow(label: 'Fable', usedPercent: 92),
+        ],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(tester, usage: usage, withGrid: false);
+
+    Color inkOf(String text) =>
+        tester.widget<Text>(find.text(text)).style!.color!;
+    expect(inkOf('12% used'), grid.AppPalette.textSecondary);
+    expect(inkOf('92% used'), AppColors.danger);
+    controller.dispose();
+  });
+
+  testWidgets('and warns in amber before it turns red', (tester) async {
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        windows: [UsageWindow(label: 'Weekly', usedPercent: 84)],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(tester, usage: usage, withGrid: false);
+
+    expect(
+      tester.widget<Text>(find.text('84% used')).style!.color,
+      grid.AppPalette.warn,
+    );
+    controller.dispose();
+  });
+
   testWidgets('an account nobody signed into here leaves the strip empty', (
     tester,
   ) async {
@@ -415,7 +461,9 @@ void main() {
     // Into the dead band between the two.
     final rail = tester.getRect(find.byType(GridStatusRail));
     final panel = tester.getRect(find.byType(PillPanelSurface));
-    await gesture.moveTo(Offset(panel.center.dx, (panel.bottom + rail.top) / 2));
+    await gesture.moveTo(
+      Offset(panel.center.dx, (panel.bottom + rail.top) / 2),
+    );
     await tester.pump(const Duration(milliseconds: 60));
     expect(find.byType(PillPanelSurface), findsOneWidget);
 
