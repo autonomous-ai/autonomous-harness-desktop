@@ -20,22 +20,27 @@ import '../grid_target_pill.dart' show gridTargetMenuOptions;
 /// this strip is a measurement — how much of a rate limit is spent, how many
 /// machines are up — and a person reading `2% used` was given no way to know
 /// whose 2% it was. This says it in the two words the answer actually takes:
-/// a provider's name, or `Subscription` when there is none and the engines are
+/// a provider's name, or `This computer` when there is none and the engines are
 /// spending their own accounts.
 ///
-/// ### Why the word is "Subscription"
+/// ### Why the words are "This computer"
 ///
-/// Because it says what IS rather than what is missing. With no provider
-/// chosen the agents bill the engine subscriptions already signed in on this
-/// computer — which is also what the figures to the right of this pill are
-/// counting, so the two halves of the strip describe one thing.
+/// Because they say what IS rather than what is missing. With no provider
+/// chosen the agents bill whatever the engines are already signed in with here
+/// — which is also what the figures to the right of this pill are counting, so
+/// the two halves of the strip describe one thing.
 ///
 /// ⚠️ The picker inside this menu once said `No provider` for the same state,
 /// on the theory that a menu row may be named for what it is NOT while a
 /// readout must say what IS. Seen together that failed: clicking a pill
 /// labelled one thing and finding the tick beside another makes a reader match
-/// up two names for one state. Both say Subscription now — see
+/// up two names for one state. Both say the same thing now — see
 /// [kNoGridTargetLabel], which this aliases.
+///
+/// ⚠️ Both said `Subscription` for a while, which was the same failure one step
+/// on: that word names a subscription, and an account signed in with an API key
+/// is this state too. See [kNoGridTargetLabel] for why the name moved to where
+/// the credential lives rather than what kind it is.
 ///
 /// The pill is a button because the alternative was worse: the name was already
 /// on the rail when a provider was chosen (the old `_GridMark`), and it was not
@@ -182,7 +187,7 @@ class _RailProviderPillState extends State<RailProviderPill> {
   ];
 
   /// Point new agents somewhere else. A null [networkId] is the picker's own
-  /// "no provider" row, which is this readout's `Subscription`.
+  /// "no provider" row, which is this readout's `This computer`.
   Future<void> _pick(String? networkId, String label) async {
     analytics.gridPicked(source: 'rail', networkId: networkId);
     await (networkId == null
@@ -194,15 +199,22 @@ class _RailProviderPillState extends State<RailProviderPill> {
 /// What the rail calls running on no provider.
 ///
 /// ⚠️ **An alias now, not a second word.** These were deliberately different
-/// once — the pill said `Subscription` and the picker said `No provider` — on
-/// the theory that a readout states what IS while a menu row may be named for
-/// what it is NOT. Seen side by side that theory failed: clicking a pill
-/// labelled `Subscription` and finding the tick beside `No provider` makes a
-/// reader match up two names for one state, and the menu's name called a
-/// deliberate setup an absence.
+/// once — the pill said one thing and the picker said `No provider` — on the
+/// theory that a readout states what IS while a menu row may be named for what
+/// it is NOT. Seen side by side that theory failed: clicking a pill labelled
+/// one way and finding the tick beside another makes a reader match up two
+/// names for one state, and the menu's name called a deliberate setup an
+/// absence.
 ///
 /// Kept as a name because the rail reads better for it, but it resolves to
 /// [kNoGridTargetLabel] so the pill and the picker cannot drift apart again.
+///
+/// ⚠️ The NAME still says `Subscription`; the value no longer does. That word
+/// was the label once, and the state it stands for covers an API key just as
+/// much (see [kNoGridTargetLabel]), so read this as "the rail's word for
+/// running on no provider" rather than as a claim about which credential it is.
+/// Left alone deliberately: it is referenced from tests, and renaming an alias
+/// to fix a comment is not worth breaking their compile over.
 const String kRailSubscriptionLabel = kNoGridTargetLabel;
 
 /// The pill itself — a bolt, a name, a caret.

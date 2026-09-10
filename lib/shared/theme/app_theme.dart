@@ -446,6 +446,26 @@ abstract final class AppSurface {
   static Color get accentWashHover =>
       AppTheme.pick(const Color(0x1F2F5BEA), const Color(0x332F5BEA));
 
+  /// [accentWash], softened for a row inside a PANEL rather than on the page.
+  ///
+  /// ⚠️ The hue moves in dark, and that is the point. [accentWash] lays
+  /// `#2F5BEA` — the fill colour, tuned to carry white text — over the app's
+  /// own charcoal. A dialog is lighter than the page it floats over, so on
+  /// panel grey that same wash lands as a saturated indigo block: the row stops
+  /// reading as "the one you are on" and starts reading as a button someone
+  /// dropped into the list.
+  ///
+  /// So it takes [AppPalette.accentOnSurface]'s lighter `#6E8BFF` — the value
+  /// this app already reserves for the accent AS A MARK rather than as a fill —
+  /// and carries less of it. The row still separates from its neighbours by
+  /// about what [accentWash] gives on the page; it just does so as a tint
+  /// instead of a slab.
+  ///
+  /// Light is unchanged: `#2F5BEA` at 8% on a white dialog was never the
+  /// problem, and lightening it there would leave nothing to see.
+  static Color get accentWashPanel =>
+      AppTheme.pick(const Color(0x142F5BEA), const Color(0x1A6E8BFF));
+
   /// A cool slate wash for a block that is deliberately NOT the accent one.
   ///
   /// Settings ▸ Grid's headline has two live states — a grid is chosen, or the

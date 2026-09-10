@@ -9,23 +9,46 @@ import 'grid_surface.dart';
 /// What running on no provider is called on screen.
 ///
 /// ⚠️ **This used to read `No provider`, and that was the bug.** The rail's
-/// pill prints `Subscription` for this exact state, so a person clicked a pill
+/// pill printed something else for this exact state, so a person clicked a pill
 /// saying one thing and found the tick sitting beside another — two names for
 /// one state, and the one in the menu named an absence. The old reasoning was
 /// that a menu row may fairly be named for what it is NOT while a readout must
 /// say what IS; that holds for a row nobody chooses on purpose, and this is not
 /// one. Switching every provider off is a deliberate, supported setup, and what
-/// it selects is a real thing: the engine subscriptions already signed in on
-/// this computer. It gets the name of that thing.
+/// it selects is a real thing. It gets the name of that thing.
 ///
-/// One word, shared with the pill, so the two can never drift apart again.
+/// One name, shared with the pill, so the two can never drift apart again.
+///
+/// ⚠️ **It also used to read `Subscription`, and that named only half of it.**
+/// With no provider chosen the agent runs on whatever the engine is already
+/// signed in with here — a subscription for some accounts, an API key in the
+/// agent's own config for others. A reader on a key met a row called
+/// `Subscription` and could not tell whether it meant them.
+///
+/// `This computer` is the half that is true either way: it names WHERE the
+/// credential lives, and [kNoGridTargetDetail] under it names WHICH KINDS it
+/// can be. Two lines that divide the sentence rather than repeat it — which is
+/// why that constant does not end in "on this computer" any more.
 ///
 /// ⚠️ Settings ▸ Providers does not print this: it dropped the row that named
 /// this state, because a state is not a provider and the list is a list of
 /// providers. Every switch being off IS this state there. The sidebar pill
 /// keeps the row — it is a picker, not a roster, and "use nothing" is a real
 /// thing to pick from it.
-const String kNoGridTargetLabel = 'Subscription';
+const String kNoGridTargetLabel = 'This computer';
+
+/// The line under [kNoGridTargetLabel] in the model picker, naming the kinds of
+/// credential that label deliberately does not.
+///
+/// ⚠️ **No "on this computer" here.** The label already says where, so
+/// repeating it would print the same two words twice in a row two lines tall.
+/// This half answers only "which kind" — and it names BOTH, because naming one
+/// is what sent a reader on the other looking for a row that was not there.
+///
+/// A SECOND LINE rather than a longer label: the label is shared with the
+/// rail's pill, which has 26px to draw it in (see `kRailSubscriptionLabel`), so
+/// the sentence has to live where only the picker shows it.
+const String kNoGridTargetDetail = 'Subscription or API key';
 
 /// The grid new agents are launched against, if any.
 ///

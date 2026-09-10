@@ -126,7 +126,21 @@ class AppMenuItem extends StatefulWidget {
     this.trailing,
     this.metrics = AppMenuRowMetrics.compact,
     this.highlighted = false,
+    this.accentSelection = false,
   });
+
+  /// Mark the ticked row in the ACCENT rather than in ink.
+  ///
+  /// Off by default, and opt-in per call site rather than inferred from
+  /// [metrics]: `roomy` is also what [AppSelectField] passes, and every select
+  /// field in Settings would have changed colour along with the one panel that
+  /// asked for it.
+  ///
+  /// For a list that IS the control — the model picker, where the tick is the
+  /// answer to the question the panel asks and the eye should find it by colour
+  /// before it reads a word. A context menu's tick stays ink: there it is a
+  /// state on a command, not the point of the list.
+  final bool accentSelection;
 
   /// The leading glyph. Null for a row in a list that PICKS one of several — the
   /// slot is still reserved, so labels line up whether a row is ticked or not.
@@ -207,11 +221,14 @@ class _AppMenuItemState extends State<AppMenuItem> {
     final error = Theme.of(context).colorScheme.error;
     // A danger row is already red at rest, so it deepens rather than climbs.
     final lit = _hovered || widget.highlighted;
+    final picker = widget.accentSelection;
     final tint = widget.danger
         ? error
-        : (lit || widget.selected
-              ? AppPalette.textPrimary
-              : AppPalette.textSecondary);
+        : (widget.selected && picker
+              ? AppPalette.accentOnSurface
+              : (lit || widget.selected
+                    ? AppPalette.textPrimary
+                    : AppPalette.textSecondary));
     // The tick takes the leading slot when this row is the choice; otherwise the
     // row's own glyph does, and a row with neither keeps the slot EMPTY.
     //
@@ -240,8 +257,14 @@ class _AppMenuItemState extends State<AppMenuItem> {
               // so a row reached either way reads the same. `selected` outranks
               // it: an accent wash says "this is where you are", which stays
               // true under a highlight that is only passing through.
+              //
+              // A picker's rows sit on a DIALOG, which is lighter than the page
+              // the rail's wash was tuned against — see [AppSurface
+              // .accentWashPanel] for why the same alpha reads as a slab there.
               color: widget.selected
-                  ? AppSurface.accentWash
+                  ? (picker
+                        ? AppSurface.accentWashPanel
+                        : AppSurface.accentWash)
                   : (widget.highlighted
                         ? AppSurface.hoverFill
                         : Colors.transparent),

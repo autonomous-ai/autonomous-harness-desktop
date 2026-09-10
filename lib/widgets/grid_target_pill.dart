@@ -106,11 +106,11 @@ List<GridTargetOption> _readyOptions(
   ];
   if (offered.isEmpty) {
     // ⚠️ Deliberately says nothing. This used to read "Every provider is off —
-    // turn one on in Settings", printed under a ticked `Subscription` row, and
-    // it was wrong on two counts. It read as an ERROR for a setup that works:
-    // switching every provider off is supported, agents keep launching, and
-    // they bill the subscriptions on this computer — which the ticked row
-    // above already names. And it gave an ORDER for a state the person had
+    // turn one on in Settings", printed under the ticked `This computer` row,
+    // and it was wrong on two counts. It read as an ERROR for a setup that
+    // works: switching every provider off is supported, agents keep launching,
+    // and they bill whatever is signed in on this computer — which the ticked
+    // row above already names. And it gave an ORDER for a state the person had
     // just chosen on purpose, as though the choice needed undoing.
     //
     // The account that owns no providers at all still gets a line, above:
