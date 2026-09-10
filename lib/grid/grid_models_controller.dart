@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'grid_api_client.dart';
 
-/// What the model picker is showing.
+/// What the model picker is showing, for ONE provider.
 sealed class GridModelsState {
   const GridModelsState();
 }
@@ -27,73 +27,109 @@ class GridModelsFailed extends GridModelsState {
   final String message;
 }
 
-/// The models one grid serves, loaded on demand.
+/// The models each grid serves, loaded on demand and kept PER PROVIDER.
 ///
-/// Two calls deep — a relay key first, then the relay's own `/models` — so it
-/// is deliberately lazy: nothing here runs until a menu is opened. Keyed by
-/// network id so switching grids invalidates the list rather than showing the
-/// previous grid's models under the new grid's name.
+/// Two calls deep — a relay key first, then that relay's own `/models` — so it
+/// is deliberately lazy: nothing here runs until a picker is opened.
+///
+/// ⚠️ It used to hold exactly one network's answer at a time, which was right
+/// while the only reader was a menu listing the models of the one grid the
+/// sidebar had picked. The picker now lists EVERY enabled provider at once
+/// (`widgets/model_picker_dialog.dart`), so a single slot would have each
+/// provider's answer evicting the last one's and the panel would show one
+/// section filled and the rest perpetually loading. Keyed by network id, an
+/// answer lands in its own slot and a grid the user is not looking at costs
+/// nothing but the map entry.
+///
+/// The staleness guard the single-slot version needed is gone with it: a reply
+/// is written under the id it was asked for, so a switch mid-flight can no
+/// longer land one grid's models under another grid's name.
 class GridModelsController extends ChangeNotifier {
   GridModelsController({GridApiClient? client})
     : _client = client ?? GridApiClient();
 
   final GridApiClient _client;
 
-  String? _networkId;
-  GridModelsState _state = const GridModelsIdle();
-  GridModelsState get state => _state;
-
-  /// Which grid [state] describes — null before anything is loaded.
-  String? get networkId => _networkId;
+  final Map<String, GridModelsState> _states = <String, GridModelsState>{};
 
   bool _disposed = false;
 
+  /// What is known about [networkId] — [GridModelsIdle] for one never asked
+  /// about, which is a real state and not an error: nothing has been requested
+  /// yet.
+  GridModelsState stateFor(String networkId) =>
+      _states[networkId] ?? const GridModelsIdle();
+
   /// Loads [networkId]'s models unless they are already loaded or in flight.
-  /// Cheap to call from `build` or a menu's open callback.
+  /// Cheap to call from `build` or a picker's open callback.
   void ensureLoadedFor(String networkId) {
-    if (_networkId == networkId &&
-        (_state is GridModelsReady || _state is GridModelsLoading)) {
-      return;
-    }
+    final state = _states[networkId];
+    if (state is GridModelsReady || state is GridModelsLoading) return;
     refresh(networkId);
   }
 
-  Future<void> refresh(String networkId) async {
-    _networkId = networkId;
-    _set(const GridModelsLoading());
+  /// The same for a whole list — what a picker showing every enabled provider
+  /// asks for as it opens.
+  ///
+  /// The calls run together rather than in sequence: they are independent HTTP
+  /// round trips against different relays, and awaiting them one after another
+  /// would make the last provider's section wait out every section above it.
+  void ensureLoadedForAll(Iterable<String> networkIds) {
+    for (final networkId in networkIds) {
+      if (networkId.isEmpty) continue;
+      ensureLoadedFor(networkId);
+    }
+  }
+
+  /// Asks [networkId] again, whatever is already known about it.
+  ///
+  /// [keepPrevious] holds the list that is on screen while the new one is
+  /// fetched, instead of blanking it to a skeleton. That is what a *refresh*
+  /// means — the models shown are still the ones the relay last said it had,
+  /// and a pane that emptied itself every time somebody came back to it would
+  /// flicker for a second on every visit to say nothing new. The first load
+  /// passes it false: there, nothing is on screen and a skeleton is the honest
+  /// answer.
+  Future<void> refresh(String networkId, {bool keepPrevious = false}) async {
+    if (!keepPrevious || _states[networkId] is! GridModelsReady) {
+      _set(networkId, const GridModelsLoading());
+    }
     try {
       final credentials = await _client.credentials(networkId);
       final models = await _client.models(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
       );
-      // The user can switch grids while this is in flight; the answer to the
-      // question they stopped asking must not land on the one they are asking
-      // now.
-      if (_networkId != networkId) return;
-      _set(GridModelsReady(models));
+      _set(networkId, GridModelsReady(models));
     } catch (error) {
-      if (_networkId != networkId) return;
-      _set(GridModelsFailed('$error'));
+      _set(networkId, GridModelsFailed('$error'));
     }
   }
 
-  void _set(GridModelsState next) {
+  void _set(String networkId, GridModelsState next) {
     if (_disposed) return;
-    _state = next;
+    _states[networkId] = next;
     notifyListeners();
   }
 
-  /// Test-only: sets [state] for [networkId] directly, without a real round trip through [refresh].
+  /// Test-only: sets the state for [networkId] directly, without a real round
+  /// trip through [refresh].
   ///
-  /// A menu that watches this controller has to rebuild an ALREADY-OPEN panel as a real `refresh`
-  /// moves the state Idle → Loading → Ready/Failed — that live transition is exactly the thing a
-  /// widget test needs to drive deterministically, and faking a whole HTTP round trip is the wrong
-  /// tool for it.
+  /// A picker that watches this controller has to rebuild an ALREADY-OPEN panel
+  /// as a real `refresh` moves a provider Idle → Loading → Ready/Failed — that
+  /// live transition is exactly the thing a widget test needs to drive
+  /// deterministically, and faking a whole HTTP round trip is the wrong tool
+  /// for it.
   @visibleForTesting
-  void debugSetState(String networkId, GridModelsState state) {
-    _networkId = networkId;
-    _set(state);
+  void debugSetState(String networkId, GridModelsState state) =>
+      _set(networkId, state);
+
+  /// Test-only: back to knowing nothing, so one test's providers cannot leak
+  /// into the next one's picker.
+  @visibleForTesting
+  void debugClear() {
+    _states.clear();
+    if (!_disposed) notifyListeners();
   }
 
   @override
@@ -103,6 +139,7 @@ class GridModelsController extends ChangeNotifier {
   }
 }
 
-/// Shared by the agent header's model menu (`widgets/agent_model_menu.dart`) and the New agent
-/// dialog's own model field — the two places that read the list.
+/// Shared by the agent header's model pill (`widgets/agent_model_menu.dart`)
+/// and the picker it opens (`widgets/model_picker_dialog.dart`) — one cache, so
+/// the two cannot hold half-stale copies of the same list.
 final gridModelsController = GridModelsController();

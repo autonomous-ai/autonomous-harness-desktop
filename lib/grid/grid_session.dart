@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -36,6 +37,24 @@ class GridSession {
 
   /// Who the CLI says is signed in. Shown, never sent anywhere.
   final String? email;
+
+  /// Value equality, so re-reading the file is free to do often.
+  ///
+  /// [GridSessionStore] is a [ValueNotifier], which skips the notification when
+  /// the new value equals the old one — and every listener on it either re-asks
+  /// the Grid API or rebuilds a pane. Without this, the watcher below would wake
+  /// all of them every time the CLI touched the file, including the token
+  /// refreshes that change nothing this app can see.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GridSession &&
+          other.token == token &&
+          other.apiBaseUrl == apiBaseUrl &&
+          other.email == email;
+
+  @override
+  int get hashCode => Object.hash(token, apiBaseUrl, email);
 }
 
 /// Where the Grid session comes from, and how to get one.
@@ -84,11 +103,90 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
     }
     loaded = true;
     value = next;
+    // Cheap when it is already attached, and the only chance to attach when the
+    // app started before `~/.grid` existed.
+    _attachWatch();
   }
 
   /// Re-reads after something outside this app may have changed it — a
   /// `grid login` in a terminal, a `grid logout`, or our own [signIn].
   Future<void> refresh() => load();
+
+  /// Keeps reading the credential file for as long as the app runs.
+  ///
+  /// The file is written by a CLI this app does not drive: `grid login` and
+  /// `grid logout` in a terminal both replace it, `harness grid login` run
+  /// anywhere else does, and the serve loop rewrites it when a per-grid token
+  /// refreshes. Until this existed nothing ever re-read it — [refresh] had no
+  /// callers at all — so the app held the session it happened to read at launch
+  /// and went on serving the previous account's grids for the life of the
+  /// process, with nothing on screen that could fix it.
+  ///
+  /// The parent directory is watched rather than the file: `remote/credentials`
+  /// writes through a temp file and `os.replace`s it into place, and a watch on
+  /// an inode that gets replaced stops hearing about the name. Idempotent, and
+  /// safe to call before `~/.grid` exists — [load] tries again each time, and
+  /// the app's own [signIn] creates the directory on its way past.
+  void watchForChanges() {
+    _watching = true;
+    _attachWatch();
+  }
+
+  bool _watching = false;
+  StreamSubscription<FileSystemEvent>? _watch;
+  Timer? _settle;
+
+  void _attachWatch() {
+    if (!_watching || _watch != null) return;
+    final directory = _file.parent;
+    try {
+      if (!directory.existsSync()) return;
+      _watch = directory.watch().listen(
+        _onFileEvent,
+        // A watch that has died is worse than none: it reports nothing and
+        // looks alive. Drop it, and let the next [load] attach a new one.
+        onError: (Object _) => _detachWatch(),
+        onDone: _detachWatch,
+      );
+    } on Object {
+      // No watch on this platform, or the directory went away between the two
+      // lines above. The explicit paths — [signIn], [signOut], [refresh] —
+      // still work; only changes made elsewhere go unnoticed.
+      _detachWatch();
+    }
+  }
+
+  void _detachWatch() {
+    _watch?.cancel();
+    _watch = null;
+  }
+
+  void _onFileEvent(FileSystemEvent event) {
+    if (!_isOurs(event.path) &&
+        !(event is FileSystemMoveEvent && _isOurs(event.destination ?? ''))) {
+      return;
+    }
+    // One write lands as several events — the temp file, the replace, and the
+    // chmod after it — and a login writes the file twice. Read once, after it
+    // has stopped moving.
+    _settle?.cancel();
+    _settle = Timer(const Duration(milliseconds: 250), load);
+  }
+
+  /// Whether [path] is the credential file or the temp file it is written
+  /// through: `credentials.toml.tmp`, which `os.replace` renames over it.
+  bool _isOurs(String path) =>
+      path.split(Platform.pathSeparator).last.startsWith(
+        _file.uri.pathSegments.last,
+      );
+
+  @override
+  void dispose() {
+    _watching = false;
+    _settle?.cancel();
+    _detachWatch();
+    super.dispose();
+  }
 
   /// Makes sure this computer has a Grid session **for [account]**, signing in
   /// through `harness grid login --json` when it has none — or when the one it

@@ -6,43 +6,26 @@ import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/core/models.dart';
 import 'package:harness/grid/agent_grid.dart';
-import 'package:harness/grid/grid_models_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
 import 'package:harness/shared/widgets/toolbar_pill.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/agent_model_menu.dart';
+import 'package:harness/widgets/model_picker_dialog.dart';
 
 const kRelay = 'https://grid.autonomous.ai/grid-abc/relay';
 const kNetworkId = 'grid-live';
 
 void main() {
-  test('an agent with no grid says so', () {
-    expect(agentModelLabel(null), 'No grid');
-  });
+  // The in-flight set is module-level, because ⌘⇧M and the pill share it (see
+  // `retargetingAgents`). A test that leaves an agent in it hands the next one a
+  // pill stuck showing its restart skeleton.
+  setUp(() => retargetingAgents.value = const {});
+  tearDown(() => retargetingAgents.value = const {});
 
-  test('a grid with no model left the choice to the grid', () {
-    expect(agentModelLabel(const AgentGrid(baseUrl: kRelay)), 'Auto');
-  });
-
-  test('a pinned model is named', () {
-    expect(
-      agentModelLabel(const AgentGrid(baseUrl: kRelay, model: 'GLM-4.7-Flash')),
-      'GLM-4.7-Flash',
-    );
-  });
-
-  testWidgets('the header shows no model control when no grid is picked', (
-    tester,
-  ) async {
-    // The pill can only move an agent onto the grid the sidebar has picked, so with none picked it
-    // was a dimmed box naming a feature the reader had opted out of — a word to decode in the pane
-    // header with nothing behind it. It leaves entirely instead. The agent below is even ON a grid,
-    // which is the case that used to draw a model id nobody could change.
-    final before = gridSelectionStore.value;
-    addTearDown(() => gridSelectionStore.value = before);
-    gridSelectionStore.value = GridSelection.none;
-
+  /// A machine with one claude agent pinned to a model, which is the fixture
+  /// every test here needs and none of them is about.
+  AppNotifier notifierOf(WidgetTester tester, {String engine = 'claude'}) {
     final notifier = AppNotifier(
       config: AppConfig.dev,
       authSession: AuthSession(),
@@ -60,31 +43,84 @@ void main() {
             ),
           )
           ..agents = [
-            const Agent(
+            Agent(
               id: 'a1',
               name: 'a1',
-              engine: 'claude',
+              engine: engine,
               status: 'active',
-              grid: AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
+              terminalAvailable: true,
+              grid: const AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
             ),
           ];
+    return notifier;
+  }
 
+  Future<void> pumpPill(
+    WidgetTester tester,
+    AppNotifier notifier, {
+    String engine = 'claude',
+    bool gridSurface = true,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentModelMenu(
-            notifier: notifier,
-            machineId: 'm1',
-            agentId: 'a1',
-            engine: 'claude',
+          body: Center(
+            child: AgentModelMenu(
+              notifier: notifier,
+              machineId: 'm1',
+              agentId: 'a1',
+              engine: engine,
+              gridSurface: gridSurface,
+            ),
           ),
         ),
       ),
     );
     await tester.pump();
+  }
+
+  test('an agent with no grid says so', () {
+    expect(agentModelLabel(null), kNoGridTargetLabel);
+  });
+
+  test('a grid with no model left the choice to the grid', () {
+    expect(agentModelLabel(const AgentGrid(baseUrl: kRelay)), 'Auto');
+  });
+
+  test('a pinned model is named', () {
+    expect(
+      agentModelLabel(const AgentGrid(baseUrl: kRelay, model: 'GLM-4.7-Flash')),
+      'GLM-4.7-Flash',
+    );
+  });
+
+  testWidgets('the control is there even with no default provider', (
+    tester,
+  ) async {
+    // It used to leave whenever the sidebar had picked no provider, which was
+    // right while the menu could only offer that one grid's models. The picker
+    // now lists every provider this computer offers — so hiding the door to it
+    // made an agent's model unreadable and unchangeable for exactly the people
+    // who had not found the sidebar's picker.
+    final before = gridSelectionStore.value;
+    addTearDown(() => gridSelectionStore.value = before);
+    gridSelectionStore.value = GridSelection.none;
+
+    await pumpPill(tester, notifierOf(tester));
+
+    expect(find.byType(ToolbarPill), findsOneWidget);
+    expect(find.text(kModelPillLabel), findsOneWidget);
+  });
+
+  testWidgets('a build with no providers in it draws nothing at all', (
+    tester,
+  ) async {
+    // The one reason this control is ever absent. `kGridSurfaceEnabled` is a
+    // const the test run has switched ON, so the shipped build's own behaviour
+    // is only reachable through the seam.
+    await pumpPill(tester, notifierOf(tester), gridSurface: false);
 
     expect(find.byType(ToolbarPill), findsNothing);
-    expect(find.text('Pinned-Model'), findsNothing);
     expect(
       tester.getSize(find.byType(AgentModelMenu)),
       Size.zero,
@@ -92,73 +128,48 @@ void main() {
     );
   });
 
-  group('the option list', () {
-    // The menu offers its own "Auto" (value: null — leave ANTHROPIC_MODEL unset), and the relay
-    // advertises a virtual `auto` router of its own in /models. Passing that list through raw put
-    // both on screen: two rows reading the same word that send different things, and picking the
-    // relay's left the header printing the raw id back instead of "Auto".
-    test("the relay's virtual auto router is not offered beside the menu's own Auto", () {
-      final options = agentModelMenuOptions(
-        const GridModelsReady(['auto', 'Brute Force', 'Feedback Loop']),
-      );
+  testWidgets('a restart started from the keyboard shows on the pill', (
+    tester,
+  ) async {
+    // ⌘⇧M runs the same `pickAgentModel` the pill does, and the in-flight state
+    // is shared (`retargetingAgents`) rather than private to this widget — so a
+    // restart nobody clicked for still wears the skeleton on the control that
+    // is about to report the new model.
+    final notifier = notifierOf(tester);
+    await pumpPill(tester, notifier);
+    expect(find.text(kModelPillLabel), findsOneWidget);
 
-      expect(
-        options.where((o) => o.label.toLowerCase() == 'auto').length,
-        1,
-        reason: 'exactly one Auto row, whatever the relay advertises',
-      );
-      final auto = options.firstWhere((o) => o.label == 'Auto');
-      expect(
-        auto.value,
-        isNull,
-        reason: 'the surviving Auto must be the one agentModelLabel prints for a null model',
-      );
-    });
+    retargetingAgents.value = const {'m1/a1'};
+    await tester.pump();
 
-    test('a relay that capitalises its router id is still recognised', () {
-      // Ids reach the app from the catalog, a node's own advertisement and the relay's
-      // lowercased public_id — three sources that disagree on case, which is why the filter
-      // goes through modelKey rather than comparing the string.
-      for (final id in ['auto', 'Auto', 'AUTO', ' auto ']) {
-        expect(
-          agentModelMenuOptions(GridModelsReady([id]))
-              .where((o) => o.label.toLowerCase().trim() == 'auto')
-              .length,
-          1,
-          reason: 'relay advertised $id',
-        );
-      }
-    });
+    expect(find.byType(SkeletonText), findsOneWidget);
+    expect(find.byIcon(Icons.expand_more_rounded), findsNothing);
 
-    test('real models are still listed, and keep their id as their value', () {
-      final options = agentModelMenuOptions(
-        const GridModelsReady(['auto', 'GLM-4.7-Flash']),
-      );
-
-      expect(options.map((o) => o.label), ['No grid', 'Auto', 'GLM-4.7-Flash']);
-      expect(options.last.value, 'GLM-4.7-Flash');
-      expect(options.first.value, kNoGridModelOption);
-    });
-
-    test('a grid serving only auto offers no model rows at all', () {
-      expect(
-        agentModelMenuOptions(const GridModelsReady(['auto']))
-            .map((o) => o.label),
-        ['No grid', 'Auto'],
-      );
-    });
+    // The skeleton breathes on a repeating animation, so the tree has to come
+    // down inside the test — the binding asserts on a live ticker once the tree
+    // is gone.
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  group('an already-open menu', () {
-    // Fix-round regression: a PopupMenuButton's itemBuilder is a one-shot snapshot handed to
-    // showMenu() before the tap that triggers a load even finishes — so a menu opened on an
-    // unloaded network showed only "No grid"/"Auto" until closed and reopened, and could show a
-    // PREVIOUSLY-selected grid's models under the new grid's name. AgentModelMenu is now built on
-    // MenuAnchor + a ListenableBuilder on gridModelsController specifically so the OPEN panel
-    // updates live as the controller moves Loading -> Ready — this test drives that same
-    // transition with GridModelsController.debugSetState (a test-only seam) rather than a real,
-    // non-deterministic network round trip, and would fail against the old PopupMenuButton
-    // implementation: nothing there re-invoked itemBuilder once the route was already showing.
+  testWidgets('another agent\'s restart leaves this pill alone', (
+    tester,
+  ) async {
+    final notifier = notifierOf(tester);
+    await pumpPill(tester, notifier);
+
+    retargetingAgents.value = const {'m1/somebody-else'};
+    await tester.pump();
+
+    expect(find.text(kModelPillLabel), findsOneWidget);
+    expect(find.byType(SkeletonText), findsNothing);
+  });
+
+  group('the picker it opens', () {
+    // The dropdown this replaced could only ever list the models of the grid the
+    // sidebar had picked — its rows were built here, from one network's cache.
+    // The choices now live in a dialog that lists EVERY provider this computer
+    // offers (`model_picker_dialog.dart`, tested there); what this file still
+    // owes is that the pill opens it and stays lit under it.
     final beforeSelection = gridSelectionStore.value;
 
     setUp(() {
@@ -166,86 +177,58 @@ void main() {
         networkId: kNetworkId,
         networkName: 'Live Grid',
       );
-      gridModelsController.debugSetState(kNetworkId, const GridModelsLoading());
     });
 
-    tearDown(() {
-      gridSelectionStore.value = beforeSelection;
-      gridModelsController.debugSetState(kNetworkId, const GridModelsIdle());
-    });
+    tearDown(() => gridSelectionStore.value = beforeSelection);
 
-    testWidgets(
-      'picks up the grid\'s models as they load, with no close/reopen',
-      (tester) async {
-        final notifier = AppNotifier(
-          config: AppConfig.dev,
-          authSession: AuthSession(),
-          configStore: null,
-        );
-        addTearDown(notifier.dispose);
-        // A model pinned so the trigger's own label ("Pinned-Model") cannot collide with either
-        // menu row this test looks for.
-        notifier.machineStates['m1'] =
-            MachineState(
-                const Machine(
-                  machineId: 'm1',
-                  apiKey: '',
-                  authMode: MachineAuthMode.remote,
-                  name: 'm1',
-                  status: 'online',
-                ),
-              )
-              ..agents = [
-                const Agent(
-                  id: 'a1',
-                  name: 'a1',
-                  engine: 'claude',
-                  status: 'active',
-                  terminalAvailable: true,
-                  grid: AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
-                ),
-              ];
-
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: AgentModelMenu(
-                notifier: notifier,
+    testWidgets('opens on the pill, over the pane', (tester) async {
+      final notifier = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
+      addTearDown(notifier.dispose);
+      notifier.machineStates['m1'] =
+          MachineState(
+              const Machine(
                 machineId: 'm1',
-                agentId: 'a1',
-                engine: 'claude',
+                apiKey: '',
+                authMode: MachineAuthMode.remote,
+                name: 'm1',
+                status: 'online',
               ),
+            )
+            ..agents = [
+              const Agent(
+                id: 'a1',
+                name: 'a1',
+                engine: 'claude',
+                status: 'active',
+                terminalAvailable: true,
+                grid: AgentGrid(baseUrl: kRelay, model: 'Pinned-Model'),
+              ),
+            ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AgentModelMenu(
+              notifier: notifier,
+              machineId: 'm1',
+              agentId: 'a1',
+              engine: 'claude',
             ),
           ),
-        );
-        await tester.pump();
+        ),
+      );
+      await tester.pump();
 
-        await tester.tap(find.text('Pinned-Model'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text(kModelPillLabel));
+      await tester.pumpAndSettle();
 
-        // Opened while gridModelsController is still Loading for this network.
-        expect(find.text('Loading models…'), findsOneWidget);
-        expect(find.text('GLM-4.7-Flash'), findsNothing);
-
-        // The load finishes — WITHOUT closing the menu.
-        gridModelsController.debugSetState(
-          kNetworkId,
-          const GridModelsReady(['GLM-4.7-Flash']),
-        );
-        await tester.pump();
-
-        expect(
-          find.text('Loading models…'),
-          findsNothing,
-          reason: 'the open panel must drop the loading row once models arrive',
-        );
-        expect(
-          find.text('GLM-4.7-Flash'),
-          findsOneWidget,
-          reason: 'the open panel must show the newly-loaded model without a reopen',
-        );
-      },
-    );
+      expect(find.byType(ModelPickerDialog), findsOneWidget);
+      expect(find.text('Select model'), findsOneWidget);
+    });
   });
 
   group('while a restart is in flight', () {
@@ -262,15 +245,10 @@ void main() {
         networkId: kNetworkId,
         networkName: 'Live Grid',
       );
-      gridModelsController.debugSetState(
-        kNetworkId,
-        const GridModelsReady(['GLM-4.7-Flash']),
-      );
     });
 
     tearDown(() {
       gridSelectionStore.value = beforeSelection;
-      gridModelsController.debugSetState(kNetworkId, const GridModelsIdle());
     });
 
     /// Builds the control and hands back its State, so a test can put it in flight through the
@@ -393,15 +371,10 @@ void main() {
         networkId: kNetworkId,
         networkName: 'Live Grid',
       );
-      gridModelsController.debugSetState(
-        kNetworkId,
-        const GridModelsReady(['GLM-4.7-Flash']),
-      );
     });
 
     tearDown(() {
       gridSelectionStore.value = beforeSelection;
-      gridModelsController.debugSetState(kNetworkId, const GridModelsIdle());
     });
 
     Future<void> pumpMenu(WidgetTester tester, {required String engine}) async {
@@ -469,28 +442,33 @@ void main() {
         await pumpMenu(tester, engine: 'claude');
 
         expect(
-          tester.widget<Text>(find.text('Pinned-Model')).style?.color,
+          tester.widget<Text>(find.text(kModelPillLabel)).style?.color,
           ToolbarPill.tint(tinted: false, enabled: true),
           reason: 'textFaint on the header ground is ~2.6:1 — under the 4.5:1 floor',
         );
       },
     );
 
-    testWidgets(
-      'an engine with no grid loses the chevron, not the model name',
-      (tester) async {
-        // 'gemini' is outside kGridCapableEngines: the control still has to REPORT the model, but a
-        // chevron there would promise a menu that never opens.
-        await pumpMenu(tester, engine: 'gemini');
+    testWidgets('an engine with no grid loses the chevron, not the label', (
+      tester,
+    ) async {
+      // 'gemini' is outside kGridCapableEngines: the control still has to say
+      // where the agent's tokens go — which it now does on hover — but a chevron
+      // there would promise a picker that never opens.
+      await pumpMenu(tester, engine: 'gemini');
 
-        expect(find.text('Pinned-Model'), findsOneWidget);
-        expect(find.byIcon(Icons.expand_more_rounded), findsNothing);
-        expect(
-          tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
-          isNull,
-        );
-      },
-    );
+      expect(find.text(kModelPillLabel), findsOneWidget);
+      expect(
+        tester.widget<Tooltip>(find.byType(Tooltip)).message,
+        startsWith('Pinned-Model'),
+        reason: 'the model is the first thing a hover should answer',
+      );
+      expect(find.byIcon(Icons.expand_more_rounded), findsNothing);
+      expect(
+        tester.widget<ToolbarPill>(find.byType(ToolbarPill)).onTap,
+        isNull,
+      );
+    });
 
     testWidgets('the trigger is legible as a control BEFORE it is hovered', (
       tester,
@@ -518,11 +496,11 @@ void main() {
       );
     });
 
-    testWidgets('the pill stays lit while its own menu is open', (
+    testWidgets('the pill stays lit while its own picker is open', (
       tester,
     ) async {
-      // MenuAnchor exposes no state for this, so the widget tracks it: without it the pill drops
-      // its fill as soon as the pointer leaves the button for the list it just opened.
+      // Nothing tells the pill its dialog is showing, so the widget tracks it: without that the
+      // pill drops its fill the moment the pointer leaves it for the panel it just opened.
       await pumpMenu(tester, engine: 'claude');
 
       expect(
@@ -530,7 +508,7 @@ void main() {
         isFalse,
       );
 
-      await tester.tap(find.text('Pinned-Model'));
+      await tester.tap(find.text(kModelPillLabel));
       await tester.pumpAndSettle();
 
       expect(
@@ -555,15 +533,10 @@ void main() {
         networkId: kNetworkId,
         networkName: 'Live Grid',
       );
-      gridModelsController.debugSetState(
-        kNetworkId,
-        const GridModelsReady(['GLM-4.7-Flash']),
-      );
     });
 
     tearDown(() {
       gridSelectionStore.value = beforeSelection;
-      gridModelsController.debugSetState(kNetworkId, const GridModelsIdle());
     });
 
     /// Builds the control against a notifier the test can drive turns on.
@@ -653,7 +626,7 @@ void main() {
       );
       expect(
         tester.widget<Tooltip>(find.byType(Tooltip)).message,
-        contains('running a turn'),
+        allOf(startsWith('Pinned-Model'), contains('running a turn')),
         reason: 'the reason has to be readable without clicking first',
       );
 
@@ -683,9 +656,9 @@ void main() {
         reason: 'one control, one meaning: motion here is this pill working',
       );
       expect(
-        find.text('Pinned-Model'),
+        find.text(kModelPillLabel),
         findsOneWidget,
-        reason: 'the model is still the answer this pill exists to give',
+        reason: 'the control still names itself while it is refusing',
       );
       expect(
         tester.widget<ToolbarPill>(find.byType(ToolbarPill)).rimmed,
@@ -784,7 +757,7 @@ void main() {
 
       expect(
         tester.widget<Tooltip>(find.byType(Tooltip)).message,
-        'gemini cannot use a grid',
+        endsWith('gemini cannot use a grid'),
         reason: 'the condition the user can act on is the one worth naming',
       );
       expect(find.byType(CircularProgressIndicator), findsNothing);

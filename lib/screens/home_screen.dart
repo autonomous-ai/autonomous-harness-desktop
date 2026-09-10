@@ -7,8 +7,10 @@ import '../core/desktop_window.dart';
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
+import '../usage/usage_controller.dart';
 import '../widgets/layout_palette.dart';
 import '../widgets/link_machine_screen.dart';
+import '../widgets/agent_model_menu.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/machine_rail_mini.dart';
 import '../settings/settings_screen.dart';
@@ -19,6 +21,7 @@ import '../widgets/task_palette.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
 import '../widgets/status_rail/grid_status_rail.dart';
+import '../widgets/usage_limit_notice.dart';
 import '../widgets/window_chrome.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -30,6 +33,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  /// What the agent accounts on this machine have spent.
+  ///
+  /// Owned HERE rather than by the status rail that draws it, because it now
+  /// has two readers: the rail's figures and [UsageLimitNotice] above it. Two
+  /// controllers would be two pollers hitting the same two vendors a minute
+  /// apart, and a card that could name a percentage the rail underneath it
+  /// disagreed with.
+  final UsageController _usage = UsageController();
+
   /// Spoken tasks from the dial, waiting for a palette. Subscribed here because this is the lowest
   /// place that has both a [BuildContext] to open a dialog on and a lifetime to cancel with.
   StreamSubscription<SpokenTaskRequest>? _spokenTasks;
@@ -57,6 +69,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     unawaited(_spokenTasks?.cancel());
+    // The shell made it, so the shell cancels its timer. The rail is handed it
+    // and deliberately does not dispose what it did not create.
+    _usage.dispose();
     super.dispose();
   }
 
@@ -171,6 +186,36 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(widget.notifier.closePane(pane.id));
   }
 
+  /// ⌘⇧M — the pane header's Model pill, without the mouse.
+  ///
+  /// The pill is the same call (`pickAgentModel`), so the refusals, the mint,
+  /// the restart and the Recent entry are one implementation. The engine comes
+  /// from the agent the pane is showing, not from the pane: a pane is an
+  /// intent, and it can be sitting on a machine that has not answered yet.
+  void _changeModel() {
+    final pane = widget.notifier.focusedPane;
+    // A pane is an INTENT: it exists before its machine has answered, and a
+    // tile with no agent yet has no model to change.
+    final agentId = pane?.agentId;
+    if (pane == null || agentId == null) return;
+    final engine = widget.notifier
+        .stateOf(pane.machineId)
+        ?.agents
+        .where((agent) => agent.id == agentId)
+        .map((agent) => agent.engine)
+        .firstOrNull;
+    if (engine == null) return;
+    unawaited(
+      pickAgentModel(
+        context,
+        widget.notifier,
+        machineId: pane.machineId,
+        agentId: agentId,
+        engine: engine,
+      ),
+    );
+  }
+
   void _newAgent() {
     final machineId =
         widget.notifier.focusedPane?.machineId ??
@@ -211,6 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
+              ShortcutAction.changeModel: _changeModel,
               ShortcutAction.routeTask: () =>
                   unawaited(showTaskPalette(context, notifier)),
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
@@ -311,6 +357,19 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                           ),
                         ),
+                        // Floating, not a row in the Column: taking layout
+                        // here would resize every pane — a real SIGWINCH to
+                        // every pty on screen — to deliver a message. Bottom
+                        // left, so it sits directly over the usage figure it
+                        // is about.
+                        Positioned(
+                          left: UsageLimitNotice.inset,
+                          bottom: UsageLimitNotice.inset,
+                          child: UsageLimitNotice(
+                            notifier: notifier,
+                            usage: _usage,
+                          ),
+                        ),
                         if (notifier.lastError != null)
                           Positioned(
                             left: 0,
@@ -331,6 +390,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   // rail as well as the panes — a strip that started after the
                   // rail would put a step in the window's bottom edge.
                   GridStatusRail(
+                    // Two things need it, for one reason: the rail holds no
+                    // `AppNotifier` and both of these open Settings.
+                    notifier: notifier,
+                    // The shell's, shared with the card above — see [_usage].
+                    usage: _usage,
                     // The node dashboard's empty state offers to put THIS
                     // computer on the grid, and the screen that does it is a
                     // Settings pane — which needs the notifier the shell holds

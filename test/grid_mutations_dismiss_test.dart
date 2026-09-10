@@ -116,7 +116,7 @@ void main() {
     // never returns while the call is in flight.
     await tester.pump();
     expect(
-      find.text('Create grid'),
+      find.text('Create provider'),
       findsOneWidget,
       reason: 'the form stays put while the call it started is still running',
     );
@@ -132,6 +132,6 @@ void main() {
       ['use', 'grid-new'],
     ]);
     expect(find.byType(SnackBar), findsOneWidget);
-    expect(find.text('Grid “escaped grid” created.'), findsOneWidget);
+    expect(find.text('Provider “escaped grid” created.'), findsOneWidget);
   });
 }

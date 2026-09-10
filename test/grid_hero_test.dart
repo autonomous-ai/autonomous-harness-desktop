@@ -1,45 +1,27 @@
-// The headline is the pane's answer to "where do my agents run right now".
+// [GridHero] is the headline card that used to sit above Settings ▸ Providers —
+// "NEW AGENTS USE", the chosen grid's name, its three facts and its actions.
 //
-// The rule this file exists to hold: picking a grid must not move anything.
-// A first attempt at this design dropped the chosen grid out of the list below
-// — which reflowed the whole pane on every pick, so the row you clicked jumped
-// out from under the pointer. The list is now left alone, and these tests
-// measure that rather than trusting it.
+// ⚠️ **Nothing in the app builds it any more.** The pane is now a split
+// (`settings/sections/provider_split_pane.dart`) whose detail panel IS the
+// headline, so the card's own facts were being drawn twice. The widget is kept
+// rather than deleted so the design can be brought back without being rewritten
+// from the commit log, and these tests are what keep it from rotting silently:
+// they build it directly, which is the only way left to reach it.
+//
+// What they no longer cover, because there is no pane holding it: that picking
+// a grid does not move the list. That invariant moved to the split, where the
+// rail is what must not reflow — see `grid_networks_test.dart`.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:harness/core/local_key_value_store.dart';
-import 'package:harness/grid/grid_mutations_controller.dart';
-import 'package:harness/grid/grid_networks_controller.dart';
+import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/settings/sections/grid_hero.dart';
-import 'package:harness/settings/sections/grid_network_table.dart';
-import 'package:harness/settings/sections/grid_section.dart';
-import 'package:harness/share/grid_cli.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 
 import 'support/fake_grid_api.dart';
-
-class _MemoryStore implements LocalKeyValueStore {
-  final Map<String, String> values = {};
-  @override
-  Future<String?> read(String key) async => values[key];
-  @override
-  Future<void> write(String key, String value) async => values[key] = value;
-  @override
-  Future<void> delete(String key) async => values.remove(key);
-}
-
-class _Cli extends GridCli {
-  _Cli() : super(environment: const {'HOME': '/tmp/fake-home'});
-  @override
-  Future<String?> locate() async => '/usr/local/bin/grid';
-  @override
-  Future<GridCliResult> run(List<String> a) async =>
-      const GridCliResult(exitCode: 0, stdout: '', stderr: '');
-}
 
 /// Composite an ARGB overlay onto an opaque ground, the way the framework does.
 Color _over(Color base, Color layer) {
@@ -68,26 +50,28 @@ double _contrast(Color a, Color b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/// The two grids the shared fixture describes: one this account owns, one it
+/// does not. Read from the fixture rather than hand-built, so a change to the
+/// wire shape reaches this file too.
+GridNetwork _network(int index) =>
+    GridMe.fromJson(kGridMePayload).networks[index];
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late GridSelectionStore selection;
-
-  setUp(() => selection = GridSelectionStore(storage: _MemoryStore()));
-
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    required GridSelection chosen,
+    GridNetwork? network,
+    bool owned = false,
+    VoidCallback? onShare,
+    VoidCallback? onRename,
+    VoidCallback? onDelete,
+  }) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    final api = FakeGridApi();
-    final networks = GridNetworksController(client: api);
-    final mutations = GridMutationsController(
-      client: api,
-      cli: _Cli(),
-      networks: networks,
-      selection: selection,
-    );
     await tester.pumpWidget(
       MaterialApp(
         theme: buildAppTheme(brightness: Brightness.light),
@@ -96,10 +80,13 @@ void main() {
             AppTheme.brightness.value = Brightness.light;
             return BrightnessScope(
               child: Scaffold(
-                body: GridSection(
-                  controller: networks,
-                  selection: selection,
-                  mutations: mutations,
+                body: GridHero(
+                  chosen: chosen,
+                  network: network,
+                  owned: owned,
+                  onShare: onShare,
+                  onRename: onRename,
+                  onDelete: onDelete,
                 ),
               ),
             );
@@ -110,160 +97,102 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  group('nothing moves when you pick', () {
-    // The failure this guards against is physical: the row you clicked slides
-    // out from under the pointer, so the next click lands on a different grid.
-    testWidgets('the table keeps its position and its rows', (tester) async {
-      await pump(tester);
-      final before = tester.getRect(find.byType(GridNetworkTable));
-      final rowsBefore = tester.widgetList(find.text('hp-1-1')).length;
-
-      await tester.tap(find.text('hp-1-1'));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.getRect(find.byType(GridNetworkTable)),
-        before,
-        reason: 'picking a grid must not move or resize the list',
-      );
-      // Still in the list — it is highlighted there, not removed from it.
-      expect(find.text('hp-1-1'), findsNWidgets(rowsBefore + 1));
-    });
-
-    // Grid names differ wildly in length, and the headline prints one at 23px.
-    // If the block is not a fixed height, switching between a short name and a
-    // long one reflows everything under it.
-    // Owner and non-owner draw different actions — Share alone versus Share,
-    // Rename and Delete — and the block above the list must not change height
-    // between them either.
-    testWidgets('owning the grid or not does not change its height', (
-      tester,
-    ) async {
-      await pump(tester);
-
-      await tester.tap(find.text('hp-1-1'));
-      await tester.pumpAndSettle();
-      final owned = tester.getRect(find.byType(GridHero));
-
-      await tester.tap(find.text('Water Grid'));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.getRect(find.byType(GridHero)).height,
-        owned.height,
-        reason: 'a grid you do not own must not shrink the headline',
-      );
-    });
-
+  // Grid names differ wildly in length, and the headline prints one at 23px. If
+  // the block is not a fixed height, switching between a short name and a long
+  // one reflows everything under it — which is the whole reason the card
+  // reserves a minimum height rather than hugging its contents.
+  group('nothing moves when the name changes', () {
     testWidgets('the headline is the same height whatever the name', (
       tester,
     ) async {
-      await pump(tester);
-      final empty = tester.getRect(find.byType(GridHero));
+      await pump(
+        tester,
+        chosen: const GridSelection(networkId: 'a', networkName: 'x'),
+        network: _network(0),
+        owned: true,
+      );
+      final short = tester.getRect(find.byType(GridHero)).height;
 
-      await tester.tap(find.text('hp-1-1'));
-      await tester.pumpAndSettle();
-      final short = tester.getRect(find.byType(GridHero));
-
-      await tester.tap(find.text('Water Grid'));
-      await tester.pumpAndSettle();
-      final other = tester.getRect(find.byType(GridHero));
-
-      expect(
-        short.height,
-        other.height,
-        reason: 'two grids must give the headline the same height',
+      await pump(
+        tester,
+        chosen: const GridSelection(
+          networkId: 'b',
+          networkName: 'a considerably longer grid name than the other one',
+        ),
+        network: _network(1),
       );
       expect(
-        empty.height,
-        short.height,
-        reason: 'picking the first grid must not grow the headline either',
+        tester.getRect(find.byType(GridHero)).height,
+        short,
+        reason: 'the block reserves its height rather than hugging the name',
       );
+    });
+
+    testWidgets('owning the grid or not does not change its height', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        chosen: const GridSelection(networkId: 'a', networkName: 'hp-1-1'),
+        network: _network(0),
+        owned: true,
+        onRename: () {},
+        onDelete: () {},
+      );
+      final owned = tester.getRect(find.byType(GridHero)).height;
+
+      await pump(
+        tester,
+        chosen: const GridSelection(networkId: 'b', networkName: 'Water Grid'),
+        network: _network(1),
+      );
+      expect(
+        tester.getRect(find.byType(GridHero)).height,
+        owned,
+        reason: 'the actions row must not be what sets the height',
+      );
+    });
+
+    // The empty state is the third shape the same box has to hold.
+    testWidgets('and it is the same height with nothing picked', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        chosen: const GridSelection(networkId: 'a', networkName: 'hp-1-1'),
+        network: _network(0),
+        owned: true,
+      );
+      final chosen = tester.getRect(find.byType(GridHero)).height;
+
+      await pump(tester, chosen: GridSelection.none);
+      expect(tester.getRect(find.byType(GridHero)).height, chosen);
     });
   });
 
   testWidgets('with no grid picked the headline says so and offers nothing', (
     tester,
   ) async {
-    await pump(tester);
+    await pump(tester, chosen: GridSelection.none);
 
-    // It says what the state MEANS, and does not repeat "No grid" — the list
-    // below already carries a row by that name, marked as chosen, and the same
-    // two words twice on one screen reads as two settings.
-    expect(
-      find.descendant(
-        of: find.byType(GridHero),
-        matching: find.text('Each engine\u2019s own account'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byType(GridHero),
-        matching: find.text(kNoGridTargetLabel),
-      ),
-      findsNothing,
-    );
+    expect(find.text('Each engine’s own account'), findsOneWidget);
     expect(find.byKey(const Key('grid-hero-rename')), findsNothing);
     expect(find.byKey(const Key('grid-hero-delete')), findsNothing);
-  });
-
-  // The pane held "No grid" twice — once as the headline's title, once as the
-  // list's first row — 200px apart, in the same words, both marked chosen.
-  testWidgets('the pane names the no-grid state exactly once', (tester) async {
-    await pump(tester);
-    expect(find.text(kNoGridTargetLabel), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(GridNetworkTable),
-        matching: find.text(kNoGridTargetLabel),
-      ),
-      findsOneWidget,
-      reason: 'the one that survives is the row you click',
-    );
-  });
-
-  group('the pane offers each action once', () {
-    // The headline draws the chosen grid in full, actions included. The drawer
-    // used to draw them again for the same grid — one irreversible Delete on
-    // screen twice, 400px apart.
-    testWidgets('the chosen grid has no second Rename in its drawer', (
-      tester,
-    ) async {
-      await pump(tester);
-      await tester.tap(find.text('hp-1-1'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Rename'), findsOneWidget);
-      expect(find.byKey(const Key('grid-hero-rename')), findsOneWidget);
-      expect(find.text('Delete grid'), findsNothing);
-    });
-
-    // …but a grid you own and are NOT using still needs them, because the
-    // headline only ever describes the one in use.
-    testWidgets('another grid you own keeps them in its drawer', (
-      tester,
-    ) async {
-      await pump(tester);
-      // Use the grid somebody else owns, so the owned one is not the chosen.
-      await tester.tap(find.text('Water Grid'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Details for hp-1-1'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Rename'), findsOneWidget);
-      expect(find.text('Delete grid'), findsOneWidget);
-      // The headline offers neither: it is describing a grid you do not own.
-      expect(find.byKey(const Key('grid-hero-rename')), findsNothing);
-    });
+    // The card does NOT repeat the words the picker uses for this state: the
+    // same two words twice on one screen is how a reader comes to wonder
+    // whether they are two settings.
+    expect(find.text(kNoGridTargetLabel), findsNothing);
   });
 
   testWidgets('a grid you own carries Rename and Delete', (tester) async {
-    await pump(tester);
-    await tester.tap(find.text('hp-1-1'));
-    await tester.pumpAndSettle();
+    await pump(
+      tester,
+      chosen: const GridSelection(networkId: 'a', networkName: 'hp-1-1'),
+      network: _network(0),
+      owned: true,
+      onRename: () {},
+      onDelete: () {},
+    );
 
     expect(find.byKey(const Key('grid-hero-rename')), findsOneWidget);
     expect(find.byKey(const Key('grid-hero-delete')), findsOneWidget);
@@ -272,9 +201,11 @@ void main() {
   // The server refuses a non-owner anyway; the line naming the owner is what
   // stops the absence reading as a missing button.
   testWidgets('a grid somebody else owns carries neither', (tester) async {
-    await pump(tester);
-    await tester.tap(find.text('Water Grid'));
-    await tester.pumpAndSettle();
+    await pump(
+      tester,
+      chosen: const GridSelection(networkId: 'b', networkName: 'Water Grid'),
+      network: _network(1),
+    );
 
     expect(find.byKey(const Key('grid-hero-rename')), findsNothing);
     expect(find.byKey(const Key('grid-hero-delete')), findsNothing);
@@ -295,9 +226,12 @@ void main() {
   testWidgets('the headline names the access rule and the router', (
     tester,
   ) async {
-    await pump(tester);
-    await tester.tap(find.text('hp-1-1'));
-    await tester.pumpAndSettle();
+    await pump(
+      tester,
+      chosen: const GridSelection(networkId: 'a', networkName: 'hp-1-1'),
+      network: _network(0),
+      owned: true,
+    );
 
     expect(
       find.descendant(of: find.byType(GridHero), matching: find.text('JOIN')),
@@ -318,7 +252,6 @@ void main() {
       findsOneWidget,
     );
   });
-
 
   // The no-grid headline wears a slate wash rather than grey, because grey in
   // this app means the absence of a state and this one is a state. A wash is

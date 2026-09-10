@@ -14,7 +14,7 @@ final RegExp _gridNamePattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9 _.\-]*$');
 /// duplicate is rejected (case-insensitively) before the round-trip.
 String? gridNameError(String name, {Iterable<String> takenNames = const []}) {
   final trimmed = name.trim();
-  if (trimmed.isEmpty) return 'Enter a name for your grid.';
+  if (trimmed.isEmpty) return 'Enter a name for your provider.';
   if (trimmed.length > gridNameMaxLength) {
     return 'Keep the name to $gridNameMaxLength characters or fewer.';
   }
@@ -24,7 +24,7 @@ String? gridNameError(String name, {Iterable<String> takenNames = const []}) {
   }
   final lower = trimmed.toLowerCase();
   if (takenNames.any((n) => n.trim().toLowerCase() == lower)) {
-    return 'You already have a grid called "$trimmed".';
+    return 'You already have a provider called "$trimmed".';
   }
   return null;
 }

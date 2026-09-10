@@ -56,7 +56,15 @@ class EnvironmentReadiness {
 
   bool get isReady => steps.entries
       .where((entry) => entry.key.isRequired)
-      .every((entry) => entry.value == EnvironmentStepStatus.ready);
+      .every(
+        (entry) =>
+            entry.value == EnvironmentStepStatus.ready ||
+            // `unavailable` is defined above as "nothing is blocked by it", which is exactly what a
+            // required step reports when the host cannot have it at all: Windows has no tmux, and
+            // Herdr serves its terminals instead. A step that is merely missing reports `failed` or
+            // `needsTerminal` and still blocks the boot.
+            entry.value == EnvironmentStepStatus.unavailable,
+      );
 
   bool get needsTerminal => steps.values.any(
     (status) => status == EnvironmentStepStatus.needsTerminal,
@@ -80,6 +88,16 @@ typedef ProcessRunner = Future<ProcessResult> Function(
 });
 
 typedef TerminalLauncher = Future<void> Function(String scriptPath);
+
+/// The progress callback `ensureReady` builds for itself, named so the per-host paths below can be
+/// separate methods rather than one very long function.
+typedef EmitStep =
+    void Function({
+      EnvironmentStep? step,
+      EnvironmentStepStatus? status,
+      String? message,
+      String? output,
+    });
 
 Future<ProcessResult> _defaultRun(
   String executable,
@@ -126,6 +144,7 @@ class EnvironmentProvisioner {
   final TerminalLauncher _openTerminal;
   final bool _isMacOS;
   final bool _isLinux;
+  final bool _isWindows;
 
   EnvironmentProvisioner({
     Directory? harnessHome,
@@ -133,18 +152,30 @@ class EnvironmentProvisioner {
     TerminalLauncher? openTerminal,
     bool? isMacOS,
     bool? isLinux,
+    bool? isWindows,
   }) : harnessHome = harnessHome ?? Directory(_defaultHarnessHome()),
        _run = run ?? _defaultRun,
        _openTerminal = openTerminal ?? _defaultOpenTerminal,
        _isMacOS = isMacOS ?? Platform.isMacOS,
-       _isLinux = isLinux ?? Platform.isLinux;
+       _isLinux = isLinux ?? Platform.isLinux,
+       _isWindows = isWindows ?? Platform.isWindows;
+
+  /// HOME, then USERPROFILE. Windows sets only the latter, so a launch from Explorer used to throw
+  /// out of this constructor before a single frame could render.
+  static String? userHome() {
+    final home = Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) return home;
+    final profile = Platform.environment['USERPROFILE'];
+    if (profile != null && profile.isNotEmpty) return profile;
+    return null;
+  }
 
   static String _defaultHarnessHome() {
-    final home = Platform.environment['HOME'];
-    if (home == null || home.isEmpty) {
+    final home = userHome();
+    if (home == null) {
       throw StateError('Could not resolve the current user home directory');
     }
-    return '$home/.harness';
+    return '$home${Platform.pathSeparator}.harness';
   }
 
   /// Runs the three steps in order, same as always when [resumeFrom] is omitted.
@@ -184,6 +215,10 @@ class EnvironmentProvisioner {
     }
 
     if (!_isMacOS && !_isLinux) {
+      if (_isWindows) {
+        await _verifyWindows(emit);
+        return state;
+      }
       emit(
         step: EnvironmentStep.harness,
         status: EnvironmentStepStatus.failed,
@@ -266,6 +301,94 @@ class EnvironmentProvisioner {
       );
       return state;
     }
+  }
+
+  /// Windows gets a VERIFY pass rather than the install pass above.
+  ///
+  /// Every installer this class drives is a POSIX shell script — `install.sh` piped into `/bin/sh`,
+  /// a `zsh`/`bash` login shell for each probe, `brew`, `apt-get` — and none of it exists here. So
+  /// instead of refusing to boot a Windows box that is in fact provisioned, this checks what is
+  /// actually on it and names the command for whatever is missing. tmux is reported but never
+  /// required (see [EnvironmentStep.isRequired]): Herdr is the terminal backend on this host.
+  Future<void> _verifyWindows(EmitStep emit) async {
+    emit(
+      step: EnvironmentStep.harness,
+      status: EnvironmentStepStatus.running,
+      message: 'Checking the Harness CLI…',
+    );
+    var harnessReady = false;
+    try {
+      final runner = HarnessCliRunner(harnessHome: harnessHome, runProcess: _run);
+      final status = await runner.run(['auth', 'status', '--json']);
+      harnessReady =
+          status.exitCode == 0 && (status.stdout as String).trim().isNotEmpty;
+    } on ProcessException {
+      harnessReady = false;
+    } on StateError {
+      // No managed node/cli.js pair recorded under ~/.harness yet.
+      harnessReady = false;
+    }
+    if (!harnessReady) {
+      emit(
+        step: EnvironmentStep.harness,
+        status: EnvironmentStepStatus.failed,
+        message:
+            'The Harness CLI is not installed for this user. There is no Windows installer yet — '
+            'from a checkout of the CLI run: npm install && npm run bundle && '
+            'bash scripts/install-cli.sh — then click Recheck.',
+      );
+      return;
+    }
+    emit(
+      step: EnvironmentStep.harness,
+      status: EnvironmentStepStatus.ready,
+      output: 'Harness CLI ready',
+    );
+
+    emit(
+      step: EnvironmentStep.tmux,
+      status: EnvironmentStepStatus.unavailable,
+      output: 'tmux does not exist on Windows — terminals come from Herdr instead.',
+    );
+
+    emit(
+      step: EnvironmentStep.grid,
+      status: EnvironmentStepStatus.running,
+      message: 'Checking the Grid CLI…',
+    );
+    final grid = await _hasGridOnWindows();
+    emit(
+      step: EnvironmentStep.grid,
+      status: grid
+          ? EnvironmentStepStatus.ready
+          : EnvironmentStepStatus.unavailable,
+      message: 'Environment ready.',
+      output: grid
+          ? 'Grid CLI ready'
+          : 'Grid CLI unavailable — this computer cannot be shared with a '
+                'grid until it is installed.',
+    );
+  }
+
+  /// [_hasGrid]'s probe is `command -v` inside a login shell, neither of which Windows has. This
+  /// names the path the installer writes first, then falls back to PATH.
+  Future<bool> _hasGridOnWindows() async {
+    final home = userHome();
+    final candidates = <String>[
+      if (home != null)
+        '$home${Platform.pathSeparator}.local${Platform.pathSeparator}bin'
+            '${Platform.pathSeparator}grid.exe',
+      'grid',
+    ];
+    for (final candidate in candidates) {
+      try {
+        final probe = await _run(candidate, ['--version']);
+        if (probe.exitCode == 0) return true;
+      } on ProcessException {
+        continue;
+      }
+    }
+    return false;
   }
 
   Future<void> _ensureHarness() async {

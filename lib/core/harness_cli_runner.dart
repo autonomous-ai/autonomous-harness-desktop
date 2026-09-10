@@ -52,11 +52,15 @@ class HarnessCliRunner {
        _startProcess = startProcess ?? Process.start;
 
   static String _defaultHarnessHome() {
+    // HOME, then USERPROFILE: Windows sets only the latter, so a launch from Explorer threw here
+    // before any UI existed to report it.
     final home = Platform.environment['HOME'];
-    if (home == null || home.isEmpty) {
+    final profile = Platform.environment['USERPROFILE'];
+    final resolved = home != null && home.isNotEmpty ? home : profile;
+    if (resolved == null || resolved.isEmpty) {
       throw StateError('Could not resolve the current user home directory');
     }
-    return '$home${Platform.pathSeparator}.harness';
+    return '$resolved${Platform.pathSeparator}.harness';
   }
 
   Directory get _runtimeDirectory =>
@@ -82,7 +86,7 @@ class HarnessCliRunner {
       );
     }
 
-    final home = environment['HOME'];
+    final home = _home();
     if (home != null && home.isNotEmpty) {
       final launcher = File(
         '$home${Platform.pathSeparator}.local${Platform.pathSeparator}bin${Platform.pathSeparator}harness',
@@ -151,16 +155,28 @@ class HarnessCliRunner {
     }
   }
 
-  Map<String, String> _commandEnvironment() {
+  String? _home() {
     final home = environment['HOME'];
+    if (home != null && home.isNotEmpty) return home;
+    final profile = environment['USERPROFILE'];
+    return profile != null && profile.isNotEmpty ? profile : null;
+  }
+
+  Map<String, String> _commandEnvironment() {
+    final home = _home();
     final launcherDirectory = home == null || home.isEmpty
         ? null
         : '$home${Platform.pathSeparator}.local${Platform.pathSeparator}bin';
     final path = environment['PATH'] ?? '';
+    // PATH is ';'-separated on Windows. Joining with ':' there does not just fail to prepend the
+    // launcher directory — it welds it onto the first real entry and destroys that one too.
+    final pathSeparator = Platform.isWindows ? ';' : ':';
     final commandEnvironment = <String, String>{
       ...environment,
       if (launcherDirectory != null)
-        'PATH': path.isEmpty ? launcherDirectory : '$launcherDirectory:$path',
+        'PATH': path.isEmpty
+            ? launcherDirectory
+            : '$launcherDirectory$pathSeparator$path',
     };
     final configuredLocale =
         commandEnvironment['LC_ALL'] ??

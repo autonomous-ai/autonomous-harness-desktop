@@ -113,11 +113,23 @@ void main() {
 
     expect(shape[0].right, closeTo(1 / 3, 0.02), reason: 'tile 1: left column');
     expect(shape[0].bottom, closeTo(1 / 2, 0.02), reason: 'tile 1: top half');
-    expect(shape[1].top, closeTo(0, 0.02), reason: 'tile 2 runs the full height');
+    expect(
+      shape[1].top,
+      closeTo(0, 0.02),
+      reason: 'tile 2 runs the full height',
+    );
     expect(shape[1].bottom, closeTo(1, 0.02));
     expect(shape[2].left, closeTo(2 / 3, 0.02), reason: 'tile 3: right column');
-    expect(shape[3].top, closeTo(1 / 2, 0.02), reason: 'tile 4 is under tile 1');
-    expect(shape[4].left, closeTo(2 / 3, 0.02), reason: 'tile 5 is under tile 3');
+    expect(
+      shape[3].top,
+      closeTo(1 / 2, 0.02),
+      reason: 'tile 4 is under tile 1',
+    );
+    expect(
+      shape[4].left,
+      closeTo(2 / 3, 0.02),
+      reason: 'tile 5 is under tile 3',
+    );
     expect(shape[4].bottom, closeTo(1, 0.02));
   });
 
@@ -176,17 +188,18 @@ void main() {
     expect(PanePreset.byId(null), isNull);
   });
 
-  testWidgets('two tiles are separated by exactly one line', (tester) async {
-    // The point of the whole change. Before it there were three lines between
-    // every pair — the wall, plus the 1px border each tile drew around itself —
-    // sitting inside a 9px grab strip. One wall, one pixel, shared.
+  testWidgets('two tiles are separated by exactly one gap', (tester) async {
+    // Measured against [kPaneGap] rather than against a number typed here:
+    // these three tests asserted a 1px line for a release after the grid
+    // stopped drawing one, which is what a test holding its own copy of a
+    // design value always eventually does.
     final notifier = _withPanes(2);
     notifier.setPreset(2, PanePreset.columns);
     await _layout(tester, notifier);
 
     final left = tester.getRect(find.byKey(notifier.panes[0].cellKey));
     final right = tester.getRect(find.byKey(notifier.panes[1].cellKey));
-    expect(right.left - left.right, closeTo(1, 0.01));
+    expect(right.left - left.right, closeTo(kPaneGap, 0.01));
   });
 
   testWidgets('and so are two rows', (tester) async {
@@ -196,10 +209,13 @@ void main() {
 
     final top = tester.getRect(find.byKey(notifier.panes[0].cellKey));
     final bottom = tester.getRect(find.byKey(notifier.panes[1].cellKey));
-    expect(bottom.top - top.bottom, closeTo(1, 0.01));
+    expect(bottom.top - top.bottom, closeTo(kPaneGap, 0.01));
   });
 
-  testWidgets('a big grid keeps the same single wall', (tester) async {
+  testWidgets('a big grid keeps the same single gap', (tester) async {
+    // One gap between neighbours whichever way you cross it, and the same one
+    // a two-tile grid uses — the lattice must not double it where a row and a
+    // column meet.
     final notifier = _withPanes(6);
     notifier.setPreset(6, PanePreset.cols3);
     await _layout(tester, notifier);
@@ -207,8 +223,16 @@ void main() {
     final first = tester.getRect(find.byKey(notifier.panes[0].cellKey));
     final second = tester.getRect(find.byKey(notifier.panes[1].cellKey));
     final below = tester.getRect(find.byKey(notifier.panes[3].cellKey));
-    expect(second.left - first.right, closeTo(1, 0.01), reason: 'column wall');
-    expect(below.top - first.bottom, closeTo(1, 0.01), reason: 'row wall');
+    expect(
+      second.left - first.right,
+      closeTo(kPaneGap, 0.01),
+      reason: 'column gap',
+    );
+    expect(
+      below.top - first.bottom,
+      closeTo(kPaneGap, 0.01),
+      reason: 'row gap',
+    );
   });
 
   testWidgets('no boundary offers a resize cursor', (tester) async {

@@ -93,6 +93,21 @@ void main() {
     });
   }
 
+  // The provider pill used to stand on the rail's floor; a row here briefly
+  // replaced it, and that went too. Settings is the one door onto the pane —
+  // two rows opening one screen, one directly above the other, is two rows that
+  // are both right and neither of which says which to press.
+  testWidgets('no provider row: Settings is the only way to that pane', (
+    tester,
+  ) async {
+    await pumpMenu(tester, brightness: Brightness.dark);
+
+    expect(find.byKey(const Key('providers-menu-item')), findsNothing);
+    expect(find.text('Where new agents run…'), findsNothing);
+    expect(find.text('Providers'), findsNothing);
+    expect(find.byKey(const Key('settings-menu-item')), findsOneWidget);
+  });
+
   testWidgets('the summary names the account above its address', (tester) async {
     await pumpMenu(tester, brightness: Brightness.dark);
 

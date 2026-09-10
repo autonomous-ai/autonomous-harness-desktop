@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'analytics/analytics_lifecycle.dart';
 import 'core/crash_log.dart';
 import 'core/desktop_window.dart';
+import 'grid/grid_session.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'state/app_state.dart';
@@ -31,6 +32,12 @@ Future<void> main() async {
   CrashLog.install();
   appLog.info('app', 'launched');
   await loadPersistedSettings();
+  // Keep reading the Grid CLI's credential file, rather than holding the copy
+  // taken a line ago for the life of the process. Here and not in
+  // `loadPersistedSettings` because this is a live subscription and not a
+  // setting: that function is what the tests call, and a watch left running on
+  // the developer's own `~/.grid` is not something a test should start.
+  gridSessionStore.watchForChanges();
   // After the settings: the window shows itself once it is ready, and the
   // first frame it shows must already wear the saved theme.
   await configureDesktopWindow();

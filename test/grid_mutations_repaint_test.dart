@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -7,6 +9,7 @@ import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/grid/grid_mutations_controller.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
+import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/share/grid_cli.dart';
 import 'package:harness/shared/theme/app_theme.dart';
@@ -66,7 +69,18 @@ void main() {
             AppTheme.brightness.value = Brightness.light;
             return BrightnessScope(
               child: Scaffold(
-                body: GridSection(controller: networks, mutations: mutations),
+                body: GridSection(
+                  controller: networks,
+                  mutations: mutations,
+                  // Its own file: the singleton writes the developer's real
+                  // ~/.harness, and a test run must not.
+                  enablement: ProviderEnablementStore(
+                    file: File(
+                      '${Directory.systemTemp.createTempSync('providers').path}'
+                      '/providers_config.json',
+                    ),
+                  ),
+                ),
               ),
             );
           },
@@ -75,11 +89,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Details for hp-1-1'));
+    // Selecting the row puts its actions in the detail panel beside the rail.
+    await tester.tap(
+      find.byKey(const Key('provider-row-grid-aaf6a46ced4f42f9')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete grid'));
+    await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('grid-delete-confirm')));
+    await tester.tap(find.byKey(const Key('provider-delete-confirm')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 

@@ -78,11 +78,12 @@ void main() {
     }
   });
 
-  test('fails only when the platform is neither macOS nor Linux', () async {
+  test('fails only when the platform is neither macOS, Linux nor Windows', () async {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: false,
       isLinux: false,
+      isWindows: false,
       run: (executable, arguments, {environment}) async => result(0),
     );
 
@@ -95,6 +96,68 @@ void main() {
       EnvironmentStepStatus.failed,
     );
     expect(readiness.message, contains('macOS and Linux only'));
+  });
+
+  test('verifies rather than installs on Windows, and boots without tmux', () async {
+    final commands = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      isWindows: true,
+      run: (executable, arguments, {environment}) async {
+        commands.add('$executable ${arguments.join(' ')}');
+        if (arguments.contains('auth') && arguments.contains('status')) {
+          return result(0, stdout: '{"loggedIn":true}');
+        }
+        if (arguments.contains('--version')) return result(0, stdout: 'grid 0.3.45');
+        return result(1);
+      },
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isTrue);
+    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.ready);
+    expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
+    // tmux cannot exist here, so it is reported and stepped over rather than blocking the boot.
+    expect(readiness.steps[EnvironmentStep.tmux], EnvironmentStepStatus.unavailable);
+    // Nothing POSIX was ever shelled out to: no shell, no package manager, no
+    // installer script.
+    //
+    // ⚠️ This used to read `c.contains('/bin/')`, and that passed on CI while
+    // failing on any machine that actually has a CLI at `~/.local/bin/harness`
+    // — the path `HarnessCliRunner` legitimately resolves on every platform,
+    // and one the fake `run` above never executes anyway. The assertion is
+    // about what the provisioner CHOSE to run, not about where the binary it
+    // found happens to live; a test that reads the developer's home directory
+    // is a test that only fails for whoever installed the CLI.
+    expect(commands.any((c) => c.startsWith('/bin/')), isFalse);
+    expect(
+      commands.any((c) => c.contains('/bin/sh') || c.contains('/bin/bash')),
+      isFalse,
+    );
+    expect(
+      commands.any((c) => c.contains('brew') || c.contains('apt-get')),
+      isFalse,
+    );
+    expect(commands.any((c) => c.contains('install.sh')), isFalse);
+  });
+
+  test('reports the Harness CLI as failed on Windows when it does not answer', () async {
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: false,
+      isWindows: true,
+      run: (executable, arguments, {environment}) async => result(1),
+    );
+
+    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+
+    expect(readiness.isReady, isFalse);
+    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.failed);
+    expect(readiness.message, contains('scripts/install-cli.sh'));
   });
 
   test('provisions on Linux', () async {

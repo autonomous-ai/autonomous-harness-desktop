@@ -10,8 +10,12 @@ import '../logging/debug_surface.dart';
 /// rail, the search filter and the pane all read this list, so a section cannot
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
-  grid(LucideIcons.zap300, 'Your grids'),
-  shareIntelligence(LucideIcons.share2300, 'Share this computer'),
+  grid(LucideIcons.zap300, 'Providers'),
+  // ⚠️ `main` renamed this to "Share this computer" while this branch was
+  // renaming its neighbour to Providers. Kept as it was: the two rows are one
+  // group, and "Share Intelligence" is the name the pane itself, the setup
+  // step (`EnvironmentStep.grid`) and the Grid product all use.
+  shareIntelligence(LucideIcons.share2300, 'Share Intelligence'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   usage(LucideIcons.chartNoAxesColumn300, 'Usage'),
@@ -85,7 +89,7 @@ List<SettingsGroup> settingsGroupsFor({
 /// second list of "which ones are hidden" is how the two would drift apart.
 const _kDeveloperSections = {SettingsSection.debug, SettingsSection.tracking};
 
-/// The two Grid sections, hidden together for a different reason: not furniture
+/// The two provider sections, hidden together for a different reason: not furniture
 /// nobody but us wants, but a feature not finished being one. Kept apart from
 /// [_kDeveloperSections] so a build can show either set without the other.
 const _kGridSections = {
@@ -105,9 +109,9 @@ bool _isVisible(
 
 const _kSettingsGroups = [
   // The two directions of the same relationship, and the only run here about
-  // something outside this Mac: which grids this account can talk to, and what
-  // this computer gives back to the one that is picked.
-  SettingsGroup('Grid', [
+  // something outside this Mac: which providers this account can talk to, and
+  // what this computer gives back to the one that is picked.
+  SettingsGroup('Providers', [
     SettingsSection.grid,
     SettingsSection.shareIntelligence,
   ]),
@@ -137,7 +141,7 @@ const _kSettingsGroups = [
 /// The section Settings opens on — the first row of the first group, so the
 /// screen never opens on a pane its rail doesn't show as selected.
 ///
-/// Derived, not named: the first group is Grid, which a shipped build hides, and
+/// Derived, not named: the first group is Providers, which a shipped build hides, and
 /// a constant pointing at it would open Settings on a pane with no row lit in
 /// the rail beside it.
 SettingsSection get kDefaultSettingsSection =>

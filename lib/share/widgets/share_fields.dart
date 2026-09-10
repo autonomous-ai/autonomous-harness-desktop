@@ -323,10 +323,22 @@ class ShareSelect extends StatefulWidget {
     this.placeholder = 'Choose one',
     this.badge,
     this.enabled = true,
+    this.valueStyle,
   });
 
   /// What is selected, or null for nothing yet.
   final String? value;
+
+  /// How the CHOSEN value reads, when [ShareType.fieldValue] is not enough.
+  ///
+  /// Every select on this page is a step inside a form and wears the same
+  /// weight as the boxes around it — which is right, until one of them is not a
+  /// step but the page's answer. The grid picker in the rail is that one: it
+  /// decides who this computer serves, and at field weight it read as the
+  /// quietest thing on a screen it is the most consequential control on. The
+  /// placeholder is deliberately NOT covered — a hint that borrowed the value's
+  /// weight is a hint mistaken for a value.
+  final TextStyle? valueStyle;
 
   /// The rows, each a value and the chip that goes with it.
   final List<ShareOption> options;
@@ -422,7 +434,7 @@ class _ShareSelectState extends State<ShareSelect> {
                   overflow: TextOverflow.ellipsis,
                   style: selected == null
                       ? ShareType.fieldPlaceholder
-                      : ShareType.fieldValue,
+                      : (widget.valueStyle ?? ShareType.fieldValue),
                 ),
               ),
               if (widget.badge != null) ...[

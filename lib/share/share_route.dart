@@ -68,6 +68,13 @@ class ShareRouteOffer {
 
 /// The routes this machine can take, in the order the rail shows them.
 ///
+/// **Ordered by what it costs the reader to say yes**, which is why the engine
+/// route sits second and the API key one last. The first two are answered by
+/// hardware already on this desk — a model already downloaded, an engine
+/// already installed — and the third asks for a credential and a bill. Someone
+/// scanning three cards should meet the cheapest thing they can do before the
+/// one that spends money.
+///
 /// A route the machine cannot take is left out rather than drawn disabled: a
 /// greyed row still has to be read, and "you can't do this" is not something a
 /// first-time reader can act on.
@@ -98,18 +105,6 @@ List<ShareRouteOffer> buildShareRouteOffers({
             ? 'One download first · nothing to pay'
             : 'Already downloaded · nothing to pay',
       ),
-    if (keyProviders.isNotEmpty)
-      ShareRouteOffer(
-        route: ShareRoute.key,
-        title: 'Share frontier models via your API key',
-        cost: 'No download · billed to your key',
-        // The provider is named from what the installed CLI whitelists, never a
-        // hopeful list: "your OpenAI key" on a build that serves someone else's
-        // points at a provider this machine cannot reach.
-        line:
-            'Nothing to download. Bring your own ${_and(keyProviders)} key, '
-            'and pay for what the grid uses.',
-      ),
     ShareRouteOffer(
       route: ShareRoute.server,
       // The verb is about the route, not the moment: on the common machine the
@@ -128,6 +123,18 @@ List<ShareRouteOffer> buildShareRouteOffers({
         _ => 'Point Grid at any OpenAI-compatible engine on this computer.',
       },
     ),
+    if (keyProviders.isNotEmpty)
+      ShareRouteOffer(
+        route: ShareRoute.key,
+        title: 'Share frontier models via your API key',
+        cost: 'No download · billed to your key',
+        // The provider is named from what the installed CLI whitelists, never a
+        // hopeful list: "your OpenAI key" on a build that serves someone else's
+        // points at a provider this machine cannot reach.
+        line:
+            'Nothing to download. Bring your own ${_and(keyProviders)} key, '
+            'and pay for what the grid uses.',
+      ),
   ];
 }
 

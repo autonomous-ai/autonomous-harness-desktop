@@ -77,7 +77,7 @@ class PaneGrid extends StatelessWidget {
             // The same space outside as between the tiles. Without it the edge
             // tiles run into the window and only the INNER boundaries read as
             // deliberate.
-            padding: const EdgeInsets.all(_Gap.thickness),
+            padding: const EdgeInsets.all(kPaneGap),
             child: _arrange(cells),
           ),
         );
@@ -254,7 +254,7 @@ class _Lattice extends StatelessWidget {
         // measured at six tiles in 736px, which is 115px each against a 46px
         // header. Nine usable tiles behind a scrollbar beat nine unusable ones
         // in view.
-        final needed = rows * minTile.height + _Gap.thickness * (rows - 1);
+        final needed = rows * minTile.height + kPaneGap * (rows - 1);
         final scrolls = needed > constraints.maxHeight;
 
         final grid = _Axis(
@@ -371,6 +371,23 @@ class _MinTile {
   }
 }
 
+/// The space between two tiles.
+///
+/// Wide enough to read as a deliberate separation rather than a rendering seam,
+/// narrow enough that four tiles do not lose a tile's worth of room to the
+/// space between them.
+///
+/// Was 10, taken in 30% on the owner's call once the separation was actually
+/// visible: the gap only had to be that wide while it was doing the work of
+/// showing itself, and with the field behind it reading properly, less space
+/// says the same thing and gives it back to the terminals.
+///
+/// Public because `test/pane_preset_test.dart` measures the lattice against it.
+/// A test carrying its own copy of this number is a second place the design
+/// lives, and the one that goes stale — which is exactly what happened when the
+/// grid stopped separating its tiles with a 1px line.
+const double kPaneGap = 7;
+
 /// What shows through the gaps.
 ///
 /// Space only separates when the two sides differ, and every tile is the
@@ -421,20 +438,10 @@ class _Gap extends StatelessWidget {
   /// vertical, and this is [Axis.horizontal].
   final Axis axis;
 
-  /// Wide enough to read as a deliberate separation rather than a rendering
-  /// seam, narrow enough that four tiles do not lose a tile's worth of room to
-  /// the space between them.
-  ///
-  /// Was 10, taken in 30% on the owner's call once the separation was actually
-  /// visible: the gap only had to be that wide while it was doing the work of
-  /// showing itself, and with the field behind it reading properly, less space
-  /// says the same thing and gives it back to the terminals.
-  static const double thickness = 7;
-
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: axis == Axis.horizontal ? thickness : null,
-    height: axis == Axis.horizontal ? null : thickness,
+    width: axis == Axis.horizontal ? kPaneGap : null,
+    height: axis == Axis.horizontal ? null : kPaneGap,
   );
 }
 

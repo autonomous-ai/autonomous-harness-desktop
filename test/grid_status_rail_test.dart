@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/core/local_key_value_store.dart';
+import 'package:harness/auth/auth_session.dart';
+import 'package:harness/core/config.dart';
 import 'package:harness/grid/grid_api_client.dart';
+import 'package:harness/shared/theme/app_theme.dart' as grid;
+import 'package:harness/state/app_state.dart';
+import 'package:harness/theme/app_theme.dart';
 import 'package:harness/grid/grid_credentials.dart';
 import 'package:harness/grid/grid_overview.dart';
 import 'package:harness/grid/grid_overview_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
+import 'package:harness/grid/provider_enablement_store.dart';
 import 'package:harness/grid/managed_network_member.dart';
 import 'package:harness/grid/member_usage.dart';
 import 'package:harness/usage/usage_controller.dart';
@@ -142,13 +150,34 @@ Future<GridOverviewController> _pump(
     // Long enough that no test ever races its own timer.
     interval: const Duration(hours: 1),
   );
+  // The rail's provider pill needs one for its settings row; nothing in these
+  // tests opens Settings, so a bare notifier is enough.
+  final notifier = AppNotifier(
+    config: AppConfig.dev,
+    authSession: AuthSession(),
+    configStore: null,
+  );
+  addTearDown(notifier.dispose);
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: Column(
           children: [
             const Spacer(),
-            GridStatusRail(controller: controller, usage: usage),
+            GridStatusRail(
+              notifier: notifier,
+              controller: controller,
+              usage: usage,
+              // The same store the controller reads, or the pill would name a
+              // provider whose figures the rail is not showing.
+              selection: selection,
+              enablement: ProviderEnablementStore(
+                file: File(
+                  '${Directory.systemTemp.createTempSync('providers').path}'
+                  '/providers_config.json',
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -218,6 +247,50 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('a nearly-spent window colours its own figure', (tester) async {
+    // The whole point of looking down here unprompted. `19% used` and
+    // `92% used` used to print in exactly the same ink, which made the strip
+    // useless for the one question it can answer at a glance.
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        // Two, not three: at this window width a third figure overflows the
+        // rail, and this test is about ink rather than layout.
+        windows: [
+          UsageWindow(label: 'Session', usedPercent: 12),
+          UsageWindow(label: 'Fable', usedPercent: 92),
+        ],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(tester, usage: usage, withGrid: false);
+
+    Color inkOf(String text) =>
+        tester.widget<Text>(find.text(text)).style!.color!;
+    expect(inkOf('12% used'), grid.AppPalette.textSecondary);
+    expect(inkOf('92% used'), AppColors.danger);
+    controller.dispose();
+  });
+
+  testWidgets('and warns in amber before it turns red', (tester) async {
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        windows: [UsageWindow(label: 'Weekly', usedPercent: 84)],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(tester, usage: usage, withGrid: false);
+
+    expect(
+      tester.widget<Text>(find.text('84% used')).style!.color,
+      grid.AppPalette.warn,
+    );
+    controller.dispose();
+  });
+
   testWidgets('an account nobody signed into here leaves the strip empty', (
     tester,
   ) async {
@@ -283,6 +356,58 @@ void main() {
     controller.dispose();
   });
 
+  // The bug this pins: the work figure is `Flexible`, and a flex child is given
+  // the free space as its constraint. Without an `Align` inside it the figure
+  // centres itself in that space, and `93.9M tokens / 24h` drifts out to the
+  // middle of the strip with a gap on either side — worse the wider the window,
+  // which is why this measures against the rail's own width rather than against
+  // a pixel count that happens to hold at one size.
+  testWidgets('the work figure stays left, beside the cluster it follows', (
+    tester,
+  ) async {
+    final controller = await _pump(tester);
+    // Wider than `_pump`'s default: free space is what a stretching child
+    // misuses, and the real window has far more of it than 1000px.
+    //
+    // ⚠️ `devicePixelRatio` and `reset` are BOTH load-bearing, and this test
+    // shipped without either. The test view defaults to a ratio of 3, so a
+    // physical 1900 is 633 LOGICAL pixels — narrower than the 800 it started
+    // from, which is the opposite of what the line above says it is doing, and
+    // the rail overflowed by 102px. Without the reset the next test inherited
+    // that window and overflowed too, which is how one missing line failed two
+    // tests in a file that gets both right everywhere else.
+    tester.view.physicalSize = const Size(1900, 460);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpAndSettle();
+
+    final memory = tester.getRect(find.text('1 / 1.7 TB'));
+    final work = tester.getRect(find.textContaining('92.4M'));
+    final counts = tester.getRect(find.text('33'));
+
+    // It sits against the block it follows, not adrift between that block and
+    // the counts at the far end. Measured as a share of the space between the
+    // two, so the assertion means the same at any window width: centred in the
+    // flex the figure lands near the middle of that span, and against the
+    // cluster it lands at the very start of it.
+    final span = counts.left - memory.right;
+    // The gap to the block before it is the SAME gap the counts keep between
+    // each other — `RailHoverTarget`'s own padding, twice, which is how every
+    // pair on this strip is spaced. That is the real assertion: not a pixel
+    // count, but that this figure is spaced like its neighbours rather than
+    // pushed out into the middle by the Spacer past it.
+    final nodes = tester.getRect(find.text('8'));
+    final betweenCounts = nodes.left - counts.right;
+    expect(
+      work.left - memory.right,
+      lessThan(betweenCounts * 2),
+      reason: 'the figure is spaced like a figure, not adrift mid-rail',
+    );
+    // And it is nowhere near the middle of the run to the counts.
+    expect((work.left - memory.right) / span, lessThan(0.35));
+    controller.dispose();
+  });
+
   testWidgets('a roster we may not read shows no member figure', (
     tester,
   ) async {
@@ -308,7 +433,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 
@@ -338,7 +463,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
@@ -346,7 +471,9 @@ void main() {
     // Into the dead band between the two.
     final rail = tester.getRect(find.byType(GridStatusRail));
     final panel = tester.getRect(find.byType(PillPanelSurface));
-    await gesture.moveTo(Offset(panel.center.dx, (panel.bottom + rail.top) / 2));
+    await gesture.moveTo(
+      Offset(panel.center.dx, (panel.bottom + rail.top) / 2),
+    );
     await tester.pump(const Duration(milliseconds: 60));
     expect(find.byType(PillPanelSurface), findsOneWidget);
 
@@ -365,7 +492,7 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.byType(PillPanelSurface), findsOneWidget);
@@ -383,10 +510,10 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('autonomous.ai').first);
+    await tester.tap(find.text('1 / 1.7 TB').first);
     await tester.pumpAndSettle();
 
     // Pointer well away, panel still up.
@@ -403,7 +530,9 @@ void main() {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('autonomous.ai')));
+    // The memory reading, not the name: the name is the provider pill now, and
+    // a button that opens a menu must not also open a panel on hover.
+    await gesture.moveTo(tester.getCenter(find.text('1 / 1.7 TB')));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
 

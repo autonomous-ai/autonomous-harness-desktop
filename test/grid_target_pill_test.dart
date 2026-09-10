@@ -55,6 +55,43 @@ void main() {
       }
     });
 
+    // The switch in Settings ▸ Providers MEANS "do not offer me this one", and
+    // this menu is what it acts on. Dropped rather than dimmed: a disabled row
+    // here would be a second, unexplained place to discover a choice made on
+    // another screen.
+    test('a provider switched off is not offered', () {
+      final options = gridTargetMenuOptions(
+        _ready(),
+        isEnabled: (id) => id != 'grid-e3b210eacc5b4cdf',
+      );
+      expect(options.map((o) => o.label), [kNoGridTargetLabel, 'hp-1-1']);
+    });
+
+    // "Every provider is off" and "this account is on no providers" are
+    // different facts about different things, and only the second one has
+    // anywhere to send the reader.
+    test('every provider off leaves only the subscription row', () {
+      // ⚠️ Says nothing on purpose, and the note it used to print is the
+      // reason: "Every provider is off — turn one on in Settings" read as an
+      // error for a setup that works, and as an order for a state the person
+      // had just chosen. The ticked row above already names what runs.
+      final allOff = gridTargetMenuOptions(_ready(), isEnabled: (_) => false);
+      expect(allOff.map((o) => o.label), [kNoGridTargetLabel]);
+
+      // An account that owns no providers HAS somewhere to be pointed, so it
+      // keeps its line.
+      final none = gridTargetMenuOptions(
+        GridNetworksReady(
+          GridMe(
+            user: GridMe.fromJson(kGridMePayload).user,
+            networks: const [],
+          ),
+        ),
+      );
+      expect(none.last.label, 'This account is on no providers yet');
+      expect(none.last.enabled, isFalse);
+    });
+
     test('every grid on the account is a pick', () {
       final options = gridTargetMenuOptions(_ready());
       expect(options.map((o) => o.label), [
@@ -71,13 +108,13 @@ void main() {
       'waiting, failing and having none each say so, and none is a pick',
       () {
         for (final (state, text) in [
-          (const GridNetworksLoading(), 'Loading grids…'),
+          (const GridNetworksLoading(), 'Loading providers…'),
           (const GridNetworksFailed('token expired'), 'token expired'),
           (
             GridNetworksReady(
               GridMe.fromJson(const {'user': {}, 'networks': []}),
             ),
-            'This account is on no grids',
+            'This account is on no providers yet',
           ),
         ]) {
           final rest = gridTargetMenuOptions(state).skip(1).toList();

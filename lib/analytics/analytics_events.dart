@@ -214,4 +214,55 @@ extension AnalyticsEvents on Analytics {
     'grid_agent_retargeted',
     params: {'outcome': outcome, 'engine': engine, 'model': model},
   );
+
+  // --- Running out of subscription ----------------------------------------
+  //
+  // Two events, and the pair is the point: the first counts the people who
+  // were TOLD their subscription is nearly spent, the second the people who
+  // did something about it. Either one alone answers nothing — a warning
+  // nobody sees and a warning nobody acts on produce the same number of moves.
+
+  /// The strip above the status rail offered a way past a nearly-spent limit.
+  ///
+  /// [window] is the vendor's own name for it (`Session`, `Weekly`, `5h`) and
+  /// [percent] is rounded, because a limit is not a measurement anybody needs
+  /// to two places. Sent once per window per cycle — the same rule the strip
+  /// itself follows — so this counts occasions rather than polls.
+  void usageLimitWarned({
+    required String provider,
+    required String window,
+    required int percent,
+    required String action,
+  }) => track(
+    'usage_limit_warned',
+    params: {
+      'provider': provider,
+      'window': window,
+      'percent': percent,
+      'action': action,
+    },
+  );
+
+  /// Somebody pressed it. [action] is the offer that was on the button —
+  /// `moveAgents` or `chooseProvider` — and [agents] how many were about to
+  /// move, which is what separates "one agent, idly" from "this was the whole
+  /// session's work".
+  void usageLimitOffer({
+    required String provider,
+    required String action,
+    required int agents,
+  }) => track(
+    'usage_limit_offer',
+    params: {'provider': provider, 'action': action, 'agents': agents},
+  );
+
+  /// The strip was closed without being taken. Without this, a warning somebody
+  /// waved away and one that was never drawn are the same absence in the funnel.
+  void usageLimitDismissed({
+    required String provider,
+    required String window,
+  }) => track(
+    'usage_limit_dismissed',
+    params: {'provider': provider, 'window': window},
+  );
 }

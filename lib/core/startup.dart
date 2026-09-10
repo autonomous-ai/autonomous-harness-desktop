@@ -1,8 +1,12 @@
 import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
+import '../grid/model_recents_store.dart';
+import '../grid/provider_enablement_store.dart';
+import '../share/share_target_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_font_store.dart';
+import '../usage/usage_nudge_store.dart';
 
 /// Every preference that has to be in place BEFORE the first frame.
 ///
@@ -20,8 +24,12 @@ Future<void> loadPersistedSettings({
   TerminalFontStore? terminalFont,
   GridSelectionStore? gridSelection,
   GridSessionStore? gridSession,
+  ProviderEnablementStore? providerEnablement,
+  ModelRecentsStore? modelRecents,
+  ShareTargetStore? shareTarget,
   AppearancePrefsStore? appearance,
   HarnessStats? stats,
+  UsageNudgeStore? usageNudges,
 }) async {
   await (terminalFont ?? terminalFontStore).load();
   // The sidebar names the chosen grid in its first frame; loading this later
@@ -32,6 +40,20 @@ Future<void> loadPersistedSettings({
   // session that arrived a frame later would show the sign-in prompt and then
   // snap away from under whoever was reaching for it.
   await (gridSession ?? gridSessionStore).load();
+  // Before the first frame too: the sidebar's provider pill lists only enabled
+  // providers, so a set that landed a frame later would show the full list and
+  // then drop rows out from under a menu somebody had already opened.
+  await (providerEnablement ?? providerEnablementStore).load();
+  // Before the first frame for the same reason as the two above, and it is the
+  // model picker's top section: recents that landed a frame late would push
+  // every provider's rows down under a pointer already on its way to one.
+  await (modelRecents ?? modelRecentsStore).load();
+  // Not needed for the first frame — Share Intelligence is several clicks away
+  // — but loaded with the rest so the page never opens on Providers' default
+  // and then swaps to the pinned grid a moment later. On this page that flicker
+  // is not cosmetic: for the half-second it lasts, the screen names the wrong
+  // grid as the one this computer serves.
+  await (shareTarget ?? shareTargetStore).load();
   // Last but not optional. Every control box in the app is sized from
   // `AppControl.heightScaled`/`paddingScaled`, so a UI size that arrived after
   // the first frame would relayout the whole window one frame in — a worse
@@ -42,4 +64,10 @@ Future<void> loadPersistedSettings({
   // as soon as an agent does, and a load that landed after the first
   // `onAgentSpawned` would overwrite it with the number from disk.
   await (stats ?? harnessStats).load();
+  // Not for the first frame either, but for the opposite reason to the stores
+  // above: this one has to be in place before the first usage poll LANDS, which
+  // is roughly a second after launch. A load that arrived later would find the
+  // card already on screen for a window somebody closed yesterday — and closing
+  // it again would be the second time they were asked.
+  await (usageNudges ?? usageNudgeStore).load();
 }

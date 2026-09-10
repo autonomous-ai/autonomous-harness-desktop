@@ -125,6 +125,7 @@ class AppMenuItem extends StatefulWidget {
     this.leading,
     this.trailing,
     this.metrics = AppMenuRowMetrics.compact,
+    this.highlighted = false,
   });
 
   /// The leading glyph. Null for a row in a list that PICKS one of several — the
@@ -179,6 +180,15 @@ class AppMenuItem extends StatefulWidget {
 
   final VoidCallback onPressed;
 
+  /// Drawn as though the pointer were on it, for a list walked by the KEYBOARD
+  /// — the picker in `widgets/model_picker_dialog.dart`, where ↑/↓ move a
+  /// highlight the mouse never touches.
+  ///
+  /// Deliberately the hover treatment and not [selected]'s: the two mean
+  /// different things and a list shows both at once — the tick says where the
+  /// agent IS, the highlight says what Enter would do next.
+  final bool highlighted;
+
   /// Tints the row red and gives it a red hover wash — for the row that
   /// destroys something.
   final bool danger;
@@ -196,9 +206,10 @@ class _AppMenuItemState extends State<AppMenuItem> {
     AppTheme.watch(context);
     final error = Theme.of(context).colorScheme.error;
     // A danger row is already red at rest, so it deepens rather than climbs.
+    final lit = _hovered || widget.highlighted;
     final tint = widget.danger
         ? error
-        : (_hovered || widget.selected
+        : (lit || widget.selected
               ? AppPalette.textPrimary
               : AppPalette.textSecondary);
     // The tick takes the leading slot when this row is the choice; otherwise the
@@ -225,9 +236,15 @@ class _AppMenuItemState extends State<AppMenuItem> {
           splashFactory: NoSplash.splashFactory,
           child: Ink(
             decoration: BoxDecoration(
+              // The keyboard's highlight wears the same fill the pointer's does,
+              // so a row reached either way reads the same. `selected` outranks
+              // it: an accent wash says "this is where you are", which stays
+              // true under a highlight that is only passing through.
               color: widget.selected
                   ? AppSurface.accentWash
-                  : Colors.transparent,
+                  : (widget.highlighted
+                        ? AppSurface.hoverFill
+                        : Colors.transparent),
               borderRadius: BorderRadius.circular(8),
             ),
             padding: widget.metrics.padding,
@@ -260,9 +277,7 @@ class _AppMenuItemState extends State<AppMenuItem> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: widget.danger
-                              ? error
-                              : AppPalette.textPrimary,
+                          color: widget.danger ? error : AppPalette.textPrimary,
                           fontFamily: AppFont.sans,
                           fontFamilyFallback: AppFont.sansFallback,
                           fontSize: widget.metrics.fontSize,
@@ -371,11 +386,7 @@ class AppMenuNote extends StatelessWidget {
     // column starts after.
     final textWidth = panelWidth == null
         ? null
-        : panelWidth! -
-              12 -
-              metrics.padding.horizontal -
-              metrics.iconSize -
-              9;
+        : panelWidth! - 12 - metrics.padding.horizontal - metrics.iconSize - 9;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       child: Padding(

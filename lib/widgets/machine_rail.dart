@@ -7,7 +7,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'window_chrome.dart';
 
 import '../core/models.dart';
-import '../grid/grid_surface.dart';
 import '../shared/layouts/widgets/sidebar_item.dart';
 import '../shared/layouts/widgets/sidebar_timeline.dart';
 import '../shared/theme/app_theme.dart' as grid;
@@ -19,7 +18,6 @@ import '../state/app_state.dart';
 import 'agent_drag.dart';
 import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
-import 'grid_target_pill.dart';
 import 'engine_identity.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
@@ -223,16 +221,13 @@ class _MachineRailState extends State<MachineRail> {
                       ),
                     ),
             ),
-            // Above the account pill, and only on the WIDE rail: a grid's name does not fit in
-            // 72px any more than a machine's does — see MachineRailMini for that judgement.
-            // Gone entirely in a shipped build, along with Settings ▸ Grid — see
-            // [kGridSurfaceEnabled], which also keeps the selection it writes from being read
-            // there, so nothing is left pointing at a grid this build does not admit to.
-            if (kGridSurfaceEnabled)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
-                child: GridTargetPill(notifier: widget.notifier),
-              ),
+            // ⚠️ The provider pill used to sit here, above the account row. It is
+            // gone from the rail entirely: the way to a provider is now the
+            // account menu's own row, which opens Settings ▸ Providers. The rail
+            // is a list of MACHINES, and a second, unrelated picker standing on
+            // its floor was one permanent row spent on a setting most people
+            // change once. `GridTargetPill` is kept in the tree for the reason
+            // `GridHero` is — see `settings/sections/provider_split_pane.dart`.
             AccountFooter(notifier: widget.notifier),
           ],
         );

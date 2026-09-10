@@ -46,6 +46,28 @@ const String kNetworkTypePermissionedPublic = 'permissioned-public';
 /// Open to anyone at all.
 const String kNetworkTypePermissionless = 'permissionless';
 
+/// Whether this app will let an owner rename [network].
+///
+/// **No for a `private-domain` grid, and it is not a nicety.** That grid's
+/// `name` IS the email domain: the control plane matches a member's address
+/// against it (`grid_networks/store.py`, "whether email's domain matches this
+/// private-domain grid (whose name IS the domain)"), and refuses to CREATE one
+/// under any other name. What it does not do is check on the way back out —
+/// `PATCH /networks/{id}` writes `name` straight through for any admin — so a
+/// rename here would quietly change **who may join a grid**, log nobody out,
+/// and leave the pane above printing "@my-new-name emails" as the rule.
+///
+/// The one place this is decided, beside the type constants it turns on, so the
+/// button and whatever asks next cannot disagree.
+bool gridCanBeRenamed(GridNetwork network) =>
+    network.networkType != kNetworkTypePrivateDomain;
+
+/// Why a grid this account owns still cannot be renamed, or null when it can.
+String? gridRenameRefusal(GridNetwork network) => gridCanBeRenamed(network)
+    ? null
+    : 'Named after the email domain that may join it — renaming would change '
+          'who can use this provider.';
+
 /// The rule [network] is under, in the words the share sheet prints.
 ///
 /// The domain is taken from the grid's own name rather than from the viewer's
@@ -65,7 +87,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
         // rule reading as an exclusion: the allowlist keeps working beside it,
         // which is why this grid's roster holds both kinds of row.
         description:
-            'Anyone with an @$domain email can use this grid, or start an AI '
+            'Anyone with an @$domain email can use this provider, or start an AI '
             'node to power it, as well as the people you invite.',
       );
     case kNetworkTypePermissioned:
@@ -73,7 +95,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
       return (
         label: 'Invite only',
         description:
-            'Only the people listed above can use this grid, or start an AI '
+            'Only the people listed above can use this provider, or start an AI '
             'node to power it.',
       );
     case kNetworkTypePermissionedProviders:
@@ -90,7 +112,7 @@ GridAccessRule? gridAccessRule(GridNetwork network) {
       return (
         label: 'Public',
         description:
-            'Anyone can use this grid, or start an AI node to power it.',
+            'Anyone can use this provider, or start an AI node to power it.',
       );
     default:
       return null;

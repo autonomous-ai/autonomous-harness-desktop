@@ -206,14 +206,32 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   real credential in the repo, and every build made from that branch read one person's grids.
   Response fields were read off the live API, not the OpenAPI spec, whose `/v1/grid/me` response
   schema is empty.
-- **Picking a grid retargets NEW agents only.** `gridSelectionStore` (`lib/grid/`, persisted like
-  `themeModeStore`, loaded in `loadPersistedSettings`) holds the chosen grid, and only the grid —
-  **two** controls write it and they are the same store: the sidebar's grid pill
-  (`widgets/grid_target_pill.dart`, above the account footer — one menu, where the answer is already
-  on screen) and Settings ▸ Grid, which keeps the table because that is where a grid is *compared*
-  rather than merely picked. Both list `gridNetworksController`, the shared singleton, so neither
-  holds a half-stale copy. The label for "no grid" is `kNoGridTargetLabel` beside the store — four
-  places print it. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
+- **The surface is called PROVIDERS, and a "grid" is what the code still calls one.** Settings ▸
+  Providers, `New provider`, `Filter providers` — the rename is copy and rail labels only; every
+  type, store, controller and API path is still `Grid*`/`grid_*`, because the control plane's
+  vocabulary is `grid` and a half-renamed data layer is worse than an honestly split one. **"Grid"
+  survives in the copy wherever it names the PRODUCT** — the sign-in card, `harness grid login`,
+  "Join one from the Grid app" — since that is a real, separate account a person signs into.
+- **Picking a provider retargets NEW agents only, and ENABLED is a second, separate question.**
+  `gridSelectionStore` (`lib/grid/`, persisted like `themeModeStore`, loaded in
+  `loadPersistedSettings`) holds the DEFAULT — the one provider new agents launch against — and
+  `providerEnablementStore` (`grid/provider_enablement_store.dart`) holds which providers this
+  computer will offer at all, of which many can be on. They were one radio before, which made "stop
+  offering me this provider" impossible to say without also moving every new agent. **Turning the
+  default OFF hands the default to the next enabled provider** rather than refusing the click, and
+  clears it when there is none left — `ProviderAllOffBanner` is what then says so, because the
+  consequence lands on agents launched later and nothing on screen would otherwise look wrong.
+  **Enablement is a CLIENT-side filter and calls no API**: the grid keeps running, this account stays
+  a member, and only the pickers skip it. Its file is its OWN — `~/.harness/desktop-app/
+  providers_config.json`, not `state.json` — because it is a *set* whose membership is the point, and
+  it stores only the **disabled** ids, so a provider it has never heard of is enabled and a fresh
+  install needs no file. Both stores are read by the sidebar's provider pill
+  (`widgets/grid_target_pill.dart` — `gridTargetMenuOptions` takes `isEnabled` and DROPS a
+  switched-off provider rather than dimming it) and by Settings ▸ Providers. Both list
+  `gridNetworksController`, the shared singleton, so neither holds a half-stale copy. The label for
+  "no provider" is `kNoGridTargetLabel` beside the selection store — **the pill still prints it, and
+  Settings no longer does**: a picker may offer "use nothing", but a roster of providers must not
+  carry a row that is not one. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
   `grid/grid_surface.dart` — `kDebugMode` or `--dart-define=HARNESS_GRID_SURFACE=true`): it is a
   feature still being built, so its own flag rather than `kDebugSurfaceEnabled`, which is developer
   furniture and must be switchable apart from it. Four places read it — the two Settings rows
@@ -226,12 +244,48 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   has everything switched on, and `kDefaultSettingsSection` is derived from the visible list rather
   than named (it used to name Grid, the first row a shipped build drops).
   The model is chosen per agent, not globally, and **only once the agent exists**: the agent view's
-  header menu (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
+  header pill (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
   dialog offers no model at all — every new agent launches on Auto (no `model` on the wire, the grid
   chooses), because a model picked before there is an agent to apply it to is a second door onto a
-  setting the header menu already owns. That header menu draws **nothing at all** when no grid is
-  picked: every choice it offers needs a grid to move the agent onto, so a dimmed pill there would
-  be one more word in the header to decode with nothing behind it. At create time the New agent
+  setting the header already owns. **The pill prints one word — `Model` — not the model id**
+  (`kModelPillLabel`): a pane header already carries the agent's name, a status dot, a transport
+  badge and the pane's own buttons, so four panes side by side leave it ~150px and a real id
+  ellipsized to `DeepSeek-V4-F…`, which answers nothing and costs the width anyway. The answer is
+  on hover, where the tooltip leads with the model and follows with the caveat, and in the picker,
+  where the row the agent is on is ticked. **⇧⌘M opens the same picker for the focused pane** — never plain ⌘M, which is
+  Minimize and is matched by AppKit before the keystroke reaches Flutter (the trap that once ate
+  ⌘V in a terminal pane). Both doors run one function, `pickAgentModel`, and share one in-flight
+  set, `retargetingAgents` (keyed `machineId/agentId`): it is what stops a second restart landing
+  on the first, and what draws the pill's skeleton for a restart the keyboard started. It draws
+  **nothing at all** only where there are no providers in the build (`kGridSurfaceEnabled`, taken as a `@visibleForTesting` argument so the
+  shipped shape can be asserted). It used to leave whenever the SIDEBAR had picked no default,
+  which was right while the menu could only offer that one grid's models — with the picker listing
+  every provider, that hid the door for exactly the people who had not found the sidebar's picker.
+  **The choices themselves are a DIALOG, grouped by provider**
+  (`widgets/model_picker_dialog.dart`, rows from the pure `grid/model_picker_options.dart`), the
+  shape OpenCode's model picker uses: a search that crosses providers, the last five picks under
+  `Recent` (`grid/model_recents_store.dart`, loaded by `loadPersistedSettings` because it is drawn
+  on the frame the panel opens), then one group per provider with the models it serves, and ↑/↓/↵.
+  It replaced a dropdown that could only list the models of the ONE provider the sidebar had
+  picked, which made "run this agent on that other provider" a trip to the sidebar that also
+  changed where every future agent launched. A pick therefore carries **both halves** — a
+  `ModelChoice` is a provider *and* a model, because a model id names nothing without the relay
+  that answers for it — so one restart can do what two used to, and the sidebar's default is not
+  touched by moving one agent. `gridModelsController` is keyed **per network** for the same reason:
+  a single slot had each provider's answer evicting the last one's. The highlight is held as a
+  choice, never as a row number, since a provider answering late inserts rows above it — and it is
+  re-placed on the agent's own row until the reader takes the keyboard, because that row does not
+  exist on the frame the panel opens on. `Auto` and
+  the no-provider row (`kNoGridTargetLabel`) are different rows on purpose (the relay's own virtual
+  `auto` id is dropped from every list — see `kAutoModelId`), and a provider switched off in
+  Settings ▸ Providers is not offered here either. ⚠️ **A provider with nothing to pick is dropped
+  from the list entirely** — still loading, failed, or serving no models: header, note and all. An
+  account on four grids opened a panel that was four names over four apologies, none of them a
+  choice. What is still happening is said ONCE, under the list, by `modelPickerModelsNote`
+  (`Loading models…`, or the failure when a load ended in one) — dropping the rows is right,
+  dropping the fact that grids are still being asked is not, since the reader would otherwise watch
+  the list grow with no idea why. A grid serving NOTHING is silent there: it is neither pending nor
+  broken, and there is nothing to wait for or fix. At create time the New agent
   dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
   as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
   always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
@@ -247,24 +301,31 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   the user sees.
 - **A grid launch also hands the agent the grid's WEB TOOLS.** The same `payload.grid` carries
   `mcpUrl` — `grid_web_mcp.dart`, the control plane's `/v1/grid/web-mcp/` — and the CLI's
-  `lib/gridWebMcp.ts` wires it into claude, codex, opencode and hermes as an MCP server named
-  `grid-web`.
+  `lib/gridWebMcp.ts` wires it into claude, codex, copilot, opencode and hermes as an MCP server
+  named `grid-web`.
   **The control plane, not the relay** (grid ADR 0041 D-a: a relay is per-grid, can be asleep, and
   may be a LAN address), built from the *session's* `apiBaseUrl` so a `grid` signed into staging does
   not send agents at production. The address is sent rather than derived because the machine running
   the agent may have no Grid session at all. **No second credential**: ADR 0041 D-b takes the
   per-grid access token and requires no scope of it, `consumer` included, which is exactly what
-  `/networks/{id}/credentials` mints. The three engines are the three `grid mcp config` prints for —
-  the ones whose header handling was measured on the wire. ⚠️ The key still travels only in the
+  `/networks/{id}/credentials` mints. The engines wired are the ones whose header handling was
+  measured on the wire rather than read off a vendor page — the three `grid mcp config` prints for,
+  plus hermes and copilot since. ⚠️ The key still travels only in the
   pane's environment: Claude Code expands `${GRID_API_KEY}` inside `--mcp-config` (the JSON-string
-  form, so no file), Codex reads `env_http_headers` off `-c`, opencode expands `{env:…}` in the
+  form, so no file) and **copilot expands the same `${…}` in the same document** under
+  `--additional-mcp-config`, which augments `~/.copilot/mcp-config.json` rather than replacing it —
+  so both share one builder, `mcpServersConfig`. Codex reads `env_http_headers` off `-c`, opencode
+  expands `{env:…}` in the
   config the launch already writes, and hermes interpolates `${…}` Cursor-style in a **managed-scope
   overlay** (`HERMES_MANAGED_DIR`, deep-merged over the user's `config.yaml` — not `HERMES_HOME`,
   which would move auth, sessions and memory too). That is the OPPOSITE of ADR 0041 D-d, which is
   right about a person pasting into their own dotfile and wrong here, where the daemon owns both
   ends. ⚠️ Hermes' overlay REPLACES `/etc/hermes` rather than adding to it, so `cli.ts` drops it on a
   machine that has one and the agent starts without web tools instead of losing an administrator's
-  policy. An absent `mcpUrl` wires nothing, so an older desktop launches exactly as it did.
+  policy. ⚠️ **The reference syntax is not interchangeable and each one was measured**: copilot sends
+  opencode's `{env:…}` and a `${env:…}` through VERBATIM, so the wrong spelling puts the literal
+  string on the wire and the tools fail authentication with nothing naming why. An absent `mcpUrl`
+  wires nothing, so an older desktop launches exactly as it did.
 - **Share Intelligence is the one place this app drives a SECOND CLI.** `lib/share/` runs the *Grid*
   CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
   `harness` cannot serve inference: the models live in `~/.grid/models`, the engine is
@@ -282,6 +343,21 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   anything this app remembers — and closing Harness does not stop it, which the rail's footnote
   says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
   is the page's own palette, copied value-for-value from Grid — keep the two in step.
+- **Which grid this computer SERVES is not `GridSelectionStore`.** It is
+  `share/share_target_store.dart`, and the split is the point: Providers' `DEFAULT` answers "where do
+  the agents I start get credentials" (what this machine *consumes*), the share target answers "who
+  do my GPU and my keys answer for" (what it *gives*). One value for both meant pointing the share
+  at a lab grid silently moved every new agent with it. `resolveShareTarget(pin, providersDefault)`
+  is the only place the precedence is written: **an absent pin means "follow Providers", not "no
+  grid"**, so a machine that never opens the picker behaves exactly as it did before the picker
+  existed, and a pin deliberately does NOT track the default afterwards. The page says which of the
+  two produced the grid it is showing in every state (`ShareTargetPicker`) — a reader looking at
+  `Water Grid` has to be able to tell, without leaving the page, whether their agents moved too.
+  The picker **locks while an engine is up**: a join is per-grid and detached, so switching under a
+  live run would leave it serving a grid the page no longer names, with no Stop button anywhere for
+  it (Stop only ever leaves the grid currently on screen). ⚠️ `ShareController.refresh` takes a
+  **nullable** grid id on purpose — what this machine can offer is a fact about the machine, so the
+  probe runs before any grid is chosen and the rail (which holds the picker) can draw itself.
   **Manage models is the one part of this feature that is NOT the Grid CLI**: the shelf is
   `POST /v1/grid/catalog` on the control plane (`GridApiClient.catalog`/`catalogDetail`, the same
   bearer as the Grid tab), because `grid catalog` answers with two or three picks ranked for THIS
@@ -336,6 +412,54 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   That is also what keeps `flutter test` honest: `kUnderTest` (`core/test_run.dart`, shared with
   `AnalyticsConfig`) stops the poll auto-starting, since a `Timer.periodic` is a `pumpAndSettle` that
   never settles and these sources would otherwise shell out to `security` and open real sockets.
+- **A nearly-spent subscription is the ONE thing this app says unprompted**
+  (`lib/usage/usage_pressure.dart`, `usage_offer.dart`, `usage_nudge_store.dart`;
+  `widgets/usage_limit_notice.dart` + `usage_limit_card.dart` + `usage_offer_actions.dart`).
+  Two thresholds, one meaning each: **80% changes a colour, 90% speaks**. The rail figure and
+  `UsageBar` share both through `usagePressureOf`, so a window cannot be amber in the strip and
+  plain in the panel that expands it — `19% used` and `92% used` used to print in identical ink,
+  which made the readout useless for the one question it answers at a glance.
+  ⚠️ **It is deliberately NOT a modal.** These panes are terminals: a dialog takes focus off
+  whichever one has it, so keystrokes meant for a running agent land nowhere — and 90% of a window
+  arrives precisely when somebody is deep in a turn. It is also not full-bleed like `_ErrorStrip`:
+  a row in the shell's `Column` would SIGWINCH every pty on screen to deliver a message, so it
+  floats at bottom-left, over the figure it is about, taking no layout.
+  **It never draws without something to press.** `usageOfferFor` answers null in four cases —
+  a build with no providers (`kGridSurfaceEnabled`), an engine this computer does not run at all,
+  a provider chosen with every candidate mid-turn (the CLI would answer `AGENT_BUSY`), and below
+  the threshold. ⚠️ **The two offers ask DIFFERENT questions of `UsageAgentTally`**, and reading
+  both off `candidates` was a real hole: a computer whose only Codex agent had been moved onto a
+  provider by hand watched that account hit 97% and was offered nothing, while `New agent` would
+  have launched the next one straight back onto the spent subscription because no DEFAULT was
+  picked. Moving asks `candidates` ("what is on that subscription now"); choosing a default asks
+  `present` ("does this computer run that engine at all"), and an agent parked on a provider
+  answers yes. In every one of those cases the amber figure has already said the only thing left
+  to say, and a warning the reader can only agree with is not worth interrupting for.
+  ⚠️ **The silence names itself**: `resolveUsageOffer` returns a `UsageOfferBlocked` beside the
+  offer and the notice logs it (`app` category, so Settings ▸ Debug shows it live). Four unrelated
+  facts about a machine produce the identical blank and each is fixed somewhere else entirely, so
+  a red figure with nothing beside it reads as a broken feature — this is what tells whoever is
+  looking which of the four it is. It is also what caught the `candidates`/`present` hole above.
+  With a default provider the button MOVES
+  the idle agents (`applyAgentModel` per agent, Auto model, sequential — a retarget respawns the
+  pane in place with `--resume`, so this is not destructive); with none it opens Settings ▸
+  Providers. ⚠️ **Only the MOVE closes the card.** Choosing a provider does not answer the
+  question, it changes which offer applies — the card should come back reading `Move 3 agents to
+  Water Grid`, which is the step that gets the work going again; silencing it there would strand
+  somebody one click short. ⚠️ **Any dismissal buys `kUsageNudgeCoolOff` of quiet from the notice as a whole**, not just
+  from the window it closed: two accounts can be over the threshold at once, and closing the first
+  used to put the second on screen in the same place under the pointer that had just clicked — so
+  the second click landed on a card nobody had read. No timer behind it; the poll rebuilds this
+  once a minute anyway.
+  **Once per rate-limit window**: `UsageNudgeStore` keys a dismissal by
+  `provider|label` — deliberately WITHOUT the reset time, which both vendors recompute on every
+  answer, so a key carrying it would change under a once-a-minute poll — and expires it at the
+  window's own reset, or `kUsageDismissGrace` when the vendor sent none. **Every entry expires**,
+  which is why there is no permanent opt-out and why the file cannot grow. The `UsageController`
+  moved to `_HomeScreenState`: the notice and the rail read the SAME poller, or the card could
+  name a percentage the figure under it disagreed with. Three events —
+  `usage_limit_warned`/`_offer`/`_dismissed` — because a warning nobody sees and a warning nobody
+  acts on produce the same number of moves.
 - **The token ledger is the OTHER usage feature, and the two must not be merged** (`lib/usage/ledger/`,
   Settings ▸ Usage in `settings/sections/usage_section.dart` + `usage_panels.dart`). The rail's readout
   above asks the vendors *how much of your rate limit is left* — a percentage, scoped to an **account**,
@@ -532,6 +656,18 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   in memory and never written to disk — a stream that measures the app must not become a second
   thing the app writes on every click — which is also why recording is right even for a user who
   opted out: their choice is about what we *send*, and this sends nothing.
+- **Settings ▸ Providers is a SPLIT, not a table** (`settings/sections/provider_split_pane.dart`,
+  framed by `grid_section.dart`): a rail of every provider on the left, and on the right everything
+  about whichever one the rail has selected. Selecting a row READS a provider; `Make default` is
+  what changes where agents launch — separated because the table's row-as-radio made looking at a
+  provider indistinguishable from moving every new agent onto it. The panel prints what the old
+  per-row drawer hid (id, signaling, owner, the router's models **by name**, created) with one
+  deliberate omission: **`Provider type` is gone**, since it is the control plane's wire spelling
+  (`permissioned-public`) of the rule "Who can join" states two rows above in words. Under 820px the
+  two halves stack. ⚠️ **`GridHero` and `GridNetworkTable` are the pane this replaced and nothing
+  builds them any more** — kept, not deleted, so the design can come back without being rewritten
+  from the log; `grid_hero_test.dart` builds `GridHero` directly, which is the only way left to
+  reach it, and is what stops it rotting silently.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `settingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a

@@ -7,6 +7,8 @@
 // with nothing" — which is the bug a bare empty list always has.
 import 'dart:async';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
@@ -16,7 +18,8 @@ import 'package:harness/core/models.dart';
 import 'package:harness/grid/grid_network.dart';
 import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/grid/grid_selection_store.dart';
-import 'package:harness/settings/sections/grid_network_table.dart';
+import 'package:harness/grid/provider_enablement_store.dart';
+import 'package:harness/settings/sections/provider_split_pane.dart';
 import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
@@ -71,10 +74,10 @@ const _machine = Machine(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('Settings ▸ Grid', () {
+  group('Settings ▸ Providers', () {
     testWidgets(
-      'the table is a table before the grids arrive, and the strip is already '
-      'real',
+      'the split is a split before the providers arrive, and nothing moves '
+      'when they land',
       (tester) async {
         tester.view.physicalSize = const Size(1200, 800);
         tester.view.devicePixelRatio = 1;
@@ -85,35 +88,45 @@ void main() {
         final selection = GridSelectionStore(storage: _MemoryStore());
 
         await tester.pumpWidget(
-          _themed(GridSection(controller: controller, selection: selection)),
+          _themed(
+            GridSection(
+              controller: controller,
+              selection: selection,
+              // Its own file: the singleton writes the developer's real
+              // ~/.harness, and a test run must not.
+              enablement: ProviderEnablementStore(
+                file: File(
+                  '${Directory.systemTemp.createTempSync('providers').path}'
+                  '/providers_config.json',
+                ),
+              ),
+            ),
+          ),
         );
         await tester.pump();
 
-        // The frame, the header and the way back to no grid at all are known
-        // before the control plane answers, so they are drawn in ink.
-        expect(find.byKey(const Key('grid-table-skeleton')), findsOneWidget);
-        expect(find.text('GRID'), findsOneWidget);
-        expect(find.text(kNoGridTargetLabel), findsWidgets);
-        // The strip reads the choice off disk, not the network.
-        expect(find.text('NEW AGENTS USE'), findsOneWidget);
+        // The frame and the header are known before the control plane answers,
+        // so they are drawn in ink around a placeholder of the right shape.
+        expect(
+          find.byKey(const Key('provider-split-skeleton')),
+          findsOneWidget,
+        );
         // A count nobody knows yet is a bar, not the number 0.
         expect(find.byKey(const Key('grid-count-skeleton')), findsOneWidget);
-        expect(find.text('2 grids'), findsNothing);
+        expect(find.textContaining('2 providers'), findsNothing);
 
-        final tableBefore = tester.getRect(
-          find.byKey(const Key('grid-table-skeleton')),
+        final splitBefore = tester.getRect(
+          find.byKey(const Key('provider-split-skeleton')),
         );
-        final stripBefore = tester.getRect(find.text('NEW AGENTS USE'));
 
         api.release();
         await tester.pumpAndSettle();
 
-        expect(find.byKey(const Key('grid-table-skeleton')), findsNothing);
-        expect(find.text('2 grids'), findsOneWidget);
-        expect(find.text('hp-1-1'), findsOneWidget);
+        expect(find.byKey(const Key('provider-split-skeleton')), findsNothing);
+        expect(find.text('2 providers · 2 enabled'), findsOneWidget);
+        expect(find.text('hp-1-1'), findsWidgets);
         // Nothing moved: the answer landed in the room the placeholder held.
-        expect(tester.getRect(find.byType(GridNetworkTable)), tableBefore);
-        expect(tester.getRect(find.text('NEW AGENTS USE')), stripBefore);
+        expect(tester.getRect(find.byType(ProviderSplitPane)), splitBefore);
       },
     );
   });

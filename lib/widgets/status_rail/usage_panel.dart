@@ -1,18 +1,39 @@
 import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../usage/usage_offer.dart';
+import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
 import '../engine_identity.dart';
+import 'usage_ink.dart';
 
 /// What one account has spent, window by window.
 ///
 /// The panel behind a figure on the status rail: the same numbers the strip
 /// prints, given the room to say which window each belongs to and when it
 /// starts over.
+///
+/// With a window nearly spent it also carries [offer] — the same offer the
+/// strip above the rail makes, in the one place that is always reachable. The
+/// strip appears once per window and can be closed for good; this cannot, so
+/// somebody who waved it away an hour ago still has a door.
 class UsagePanelContent extends StatelessWidget {
-  const UsagePanelContent({super.key, required this.reading});
+  const UsagePanelContent({
+    super.key,
+    required this.reading,
+    this.offer,
+    this.onAct,
+  });
 
   final ProviderUsage reading;
+
+  /// What this account's nearly-spent window is worth doing about, or null when
+  /// there is nothing worth pressing — see `resolveUsageOffer`.
+  final UsageOffer? offer;
+
+  /// Runs [offer]. Null drops the footer entirely rather than drawing a button
+  /// that goes nowhere.
+  final VoidCallback? onAct;
 
   @override
   Widget build(BuildContext context) {
@@ -43,9 +64,62 @@ class UsagePanelContent extends StatelessWidget {
             ),
           ),
         ],
+        if (offer case final offer? when onAct != null) ...[
+          const SizedBox(height: 12),
+          _OfferFooter(offer: offer, onAct: onAct!),
+        ],
       ],
     );
   }
+}
+
+/// The way out of a nearly-spent window, under the windows themselves.
+///
+/// Deliberately below the figures rather than above them: the panel is opened
+/// to read a number, and an offer that pushed that number down the panel would
+/// be answering a question nobody asked first.
+class _OfferFooter extends StatelessWidget {
+  const _OfferFooter({required this.offer, required this.onAct});
+
+  final UsageOffer offer;
+  final VoidCallback onAct;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Divider(height: 13, color: grid.AppPalette.divider),
+      Text(
+        offer.detail,
+        style: TextStyle(
+          color: grid.AppPalette.textSecondary,
+          fontSize: 11,
+          height: 1.4,
+        ),
+      ),
+      const SizedBox(height: 8),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          onPressed: onAct,
+          style: FilledButton.styleFrom(
+            backgroundColor: grid.AppPalette.accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            textStyle: TextStyle(
+              fontFamily: grid.AppFont.sans,
+              fontSize: 12,
+              fontWeight: grid.AppFont.medium,
+            ),
+          ),
+          child: Text(offer.actionLabel),
+        ),
+      ),
+    ],
+  );
 }
 
 /// The account this panel is about, and how fresh its figures are.
@@ -168,9 +242,13 @@ class _WindowRow extends StatelessWidget {
 /// most of their life it was invisible: the figure beside it was doing all the
 /// work and the bar was decoration that could not be seen.
 ///
-/// Turns amber past [_warnAt]. The figure is already exact, so the colour is
-/// not carrying the number — it is carrying the moment the number starts to
-/// matter, which a bar that never changes hue cannot.
+/// Turns amber past [kUsageWarnPercent] and red past [kUsageCriticalPercent].
+/// The figure is already exact, so the colour is not carrying the number — it
+/// is carrying the moment the number starts to matter, which a bar that never
+/// changes hue cannot. Both thresholds come from `usage_pressure.dart`, shared
+/// with the rail figure this panel expands: a bar that went amber at a
+/// different number from the figure above it would make one window look like
+/// two readings.
 class UsageBar extends StatelessWidget {
   const UsageBar({
     super.key,
@@ -181,13 +259,11 @@ class UsageBar extends StatelessWidget {
 
   final double usedPercent;
 
-  /// The account's colour. Overridden by [_warn] once the window is nearly
-  /// spent, because "which account" matters less at that point than "how close".
+  /// The account's colour. Overridden once the window is nearly spent, because
+  /// "which account" matters less at that point than "how close".
   final Color color;
 
   final double height;
-
-  static const double _warnAt = 80;
 
   /// The narrowest the filled part may be drawn.
   ///
@@ -201,7 +277,7 @@ class UsageBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final fill = usedPercent >= _warnAt ? grid.AppPalette.warn : color;
+    final fill = usagePressureInk(usagePressureOf(usedPercent), color);
     return ClipRRect(
       borderRadius: BorderRadius.circular(height / 2),
       child: SizedBox(
