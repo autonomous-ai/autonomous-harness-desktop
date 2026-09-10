@@ -279,7 +279,6 @@ class UsageBreakdownCard extends StatelessWidget {
       '${row.sessions} ${row.sessions == 1 ? 'session' : 'sessions'}',
       '${row.turns} ${row.turns == 1 ? 'turn' : 'turns'}',
       if (row.costUsd != null) formatCost(row.costUsd),
-      if (row.hasUnpricedModel) 'unpriced',
     ];
     return parts.join(' · ');
   }

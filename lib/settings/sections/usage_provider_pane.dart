@@ -73,9 +73,7 @@ class _UsageProviderPaneState extends State<UsageProviderPane> {
           _Notice(message: state.message ?? 'No figures.')
         else if (!report.hasData)
           _Notice(
-            message: state.status == LedgerStatus.scanning
-                ? 'Reading local logs…'
-                : 'No ${provider.label} usage in this range.',
+            message: 'No ${provider.label} usage in this range.',
           )
         else ...[
           _Figures(report: report),
@@ -161,9 +159,6 @@ class _Figures extends StatelessWidget {
         label: 'Est. cost',
         value: formatCost(report.costUsd),
         icon: LucideIcons.coins300,
-        footnote: report.hasUnpricedModel
-            ? 'at least — some models unpriced'
-            : null,
       ),
     ];
 
