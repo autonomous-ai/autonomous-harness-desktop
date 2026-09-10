@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/grid/grid_api_client.dart';
 import 'package:harness/share/backend_detector.dart';
 import 'package:harness/share/catalog_models.dart';
+import 'package:harness/share/engine_reachability.dart';
 import 'package:harness/share/grid_cli.dart';
 import 'package:harness/share/local_models.dart';
 import 'package:harness/share/model_manager_controller.dart';
@@ -90,6 +91,7 @@ ShareCapabilities _caps({
 Future<ShareController> _pumpServerForm(
   WidgetTester tester, {
   DetectedBackend? backend,
+  EngineFetch? fetch,
 }) async {
   final controller = ShareController(cli: _Cli(), readRuns: (_) => const [])
     ..bindGridForTest('grid-1', _caps(backend: backend));
@@ -102,6 +104,13 @@ Future<ShareController> _pumpServerForm(
             child: ServeServerForm(
               controller: controller,
               gridName: 'autonomous.ai',
+              // Never null here, even for the tests that type nothing: without
+              // it a typed address reaches a real HttpClient, and a unit test
+              // that dials localhost is a test whose result depends on what
+              // else is running on the machine.
+              fetch:
+                  fetch ??
+                  (_) async => (200, '{"data":[{"id":"qwen3","meta":{}}]}'),
             ),
           ),
         ),
@@ -399,20 +408,17 @@ void main() {
     ) async {
       final controller = await _pumpServerForm(tester);
 
-      expect(
-        find.text('Add an endpoint and a model id to continue.'),
-        findsOneWidget,
-      );
+      expect(find.text('Fill in the server address to start.'), findsOneWidget);
       await tester.enterText(
         find.widgetWithText(TextField, 'http://localhost:8080/v1'),
         'http://localhost:8080/v1',
       );
-      await tester.enterText(
-        find.widgetWithText(TextField, 'The id the server answers to'),
-        'qwen3',
-      );
+      // Past the typing pause, so the check the address now triggers can land.
+      await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();
 
+      // The server answered with one model, so it filled itself in and the
+      // helper drops back to the general sentence.
       expect(
         find.text('Its models, quantization and flags are shared as they are.'),
         findsOneWidget,

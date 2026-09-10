@@ -367,6 +367,30 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   it (Stop only ever leaves the grid currently on screen). ⚠️ `ShareController.refresh` takes a
   **nullable** grid id on purpose — what this machine can offer is a fact about the machine, so the
   probe runs before any grid is chosen and the rail (which holds the picker) can draw itself.
+- **A typed engine address is ASKED before it is joined** (`share/engine_endpoint.dart`,
+  `share/engine_reachability.dart`) — ported by hand from the Grid app
+  (`autonomous-grid-app`, commit `2742acea`); the two repos share this page's design and no code,
+  so a fix in one does not reach the other. `grid join --at` takes any address happily: one missing
+  `/v1` used to register a node that went green, advertised its model, and then failed **every**
+  message — twice over, because the capability probe travels the same address, so the node also
+  registered as supporting no tools and no vision and the router refused chat before a request was
+  made. One wrong address, two unrelated-looking errors two minutes apart.
+  ⚠️ **`readEngineAddress` never ADDS anything** — not `/v1`, not a scheme, not a guess. It trims,
+  drops trailing slashes and cuts one trailing OpenAI endpoint (longest first: `/chat/completions`
+  also ends with `/completions`, and cutting the short one leaves `…/v1/chat`, which looks plausible
+  and answers nothing). Trying `<url>/models` **and** `<url>/v1/models` and keeping whichever
+  answers is the tempting version and it breaks the one invariant here: **what gets tested is what
+  gets called.** For the same reason `_start` joins `EngineAddressReady.base`, never
+  `_endpoint.text`. The check runs on a 600ms debounce as soon as the address parses — **not** on
+  Start, where it deadlocks (the button waits for a model; the model list only exists once the
+  server has been asked) — and is tokened against a newer check and tied to the base it was about.
+  Start is **fail-closed**: an address that parses is not enough, the server has to have answered.
+  Model becomes a picker only when the `/models` body was *recognised* (`ProbedEngine`, named that
+  because `share/engine_run.dart` already has an `EngineKind` meaning something else); an
+  unrecognised body may still carry a usable list, but a picker built from one nobody recognised
+  might be listing the wrong thing. Context: only vLLM's `max_model_len` is read — llama.cpp's
+  `meta.n_ctx_train` is the window the MODEL was trained at, not the one the server was launched
+  with, and the router picks nodes on this number, so an inflated one wins work it cannot do.
   **Manage models is the one part of this feature that is NOT the Grid CLI**: the shelf is
   `POST /v1/grid/catalog` on the control plane (`GridApiClient.catalog`/`catalogDetail`, the same
   bearer as the Grid tab), because `grid catalog` answers with two or three picks ranked for THIS

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
@@ -5,6 +7,8 @@ import '../../shared/theme/share_page_theme.dart';
 import '../backend_detector.dart';
 import '../context_ladder.dart';
 import '../context_length.dart';
+import '../engine_endpoint.dart';
+import '../engine_reachability.dart';
 import '../node_identity.dart';
 import '../share_controller.dart';
 import '../share_discovery.dart';
@@ -31,10 +35,16 @@ class ServeServerForm extends StatefulWidget {
     super.key,
     required this.controller,
     required this.gridName,
+    this.fetch,
   });
 
   final ShareController controller;
   final String gridName;
+
+  /// How the typed address is asked what it serves. Null in the app, which
+  /// means a real request; a test passes one so every branch of the check can
+  /// be driven without a socket.
+  final EngineFetch? fetch;
 
   @override
   State<ServeServerForm> createState() => _ServeServerFormState();
@@ -46,7 +56,36 @@ class _ServeServerFormState extends State<ServeServerForm> {
   final _advertise = TextEditingController();
   final _nodeName = TextEditingController(text: thisComputerName);
 
-  int _context = defaultContextLength(defaultServerContextCeiling);
+  /// The window the reader chose, or null while they have not chosen one.
+  ///
+  /// Nullable so "untouched" is a state the code can see. A server that reports
+  /// `max_model_len` settles the question for an untouched field — but a number
+  /// somebody picked on purpose is not ours to move.
+  int? _contextChoice;
+
+  /// How long to sit still before asking the server anything.
+  ///
+  /// Somebody typing an address passes through a dozen strings that are not an
+  /// address yet, so a check per keystroke would be a burst of requests at
+  /// whatever machine they eventually name.
+  static const _typingPause = Duration(milliseconds: 600);
+
+  Timer? _debounce;
+
+  /// True from the moment a check is scheduled until its answer lands — the
+  /// debounce included, so Start never flickers to "ready" in the gap between
+  /// the last keystroke and the request.
+  bool _checking = false;
+
+  /// The last answer, and the base it was about. The pair is what makes a
+  /// result trustworthy: an answer for an address the user has since edited
+  /// says nothing about the one now in the field.
+  EngineReach? _reach;
+  String? _checkedBase;
+
+  /// Rises with every check started, so an answer that arrives after a newer
+  /// check began is dropped instead of overwriting it.
+  int _checkToken = 0;
 
   /// Which engine step 2 is answering with: a detected backend's kind, or null
   /// for the typed address. Starts on whatever was found, because a machine
@@ -61,7 +100,7 @@ class _ServeServerFormState extends State<ServeServerForm> {
   @override
   void initState() {
     super.initState();
-    _endpoint.addListener(_onEdited);
+    _endpoint.addListener(_onEndpointEdited);
     _model.addListener(_onEdited);
     _kind = _external.firstOrNull?.kind;
   }
@@ -69,6 +108,97 @@ class _ServeServerFormState extends State<ServeServerForm> {
   void _onEdited() {
     if (mounted) setState(() {});
   }
+
+  void _onEndpointEdited() {
+    if (!mounted) return;
+    setState(() {});
+    _scheduleCheck();
+  }
+
+  /// Ask the server what it serves, as soon as the address looks like one.
+  ///
+  /// **Not** on Start, which is where this began in the Grid app and where it
+  /// deadlocked: the button is blocked until a model is chosen, and the model
+  /// list only exists once the server has been asked. Nothing could ever run.
+  void _scheduleCheck() {
+    final address = readEngineAddress(_endpoint.text);
+    _debounce?.cancel();
+    if (address is! EngineAddressReady) {
+      // Half-typed or refused: drop whatever a previous address answered, and
+      // make sure an in-flight reply cannot land on top of it.
+      _checkToken++;
+      setState(() {
+        _checking = false;
+        _reach = null;
+        _checkedBase = null;
+      });
+      return;
+    }
+    if (address.base == _checkedBase) return;
+    setState(() => _checking = true);
+    _debounce = Timer(_typingPause, () => unawaited(_check(address)));
+  }
+
+  /// One look at [address], recorded only if it is still the address on screen.
+  Future<void> _check(EngineAddressReady address) async {
+    final token = ++_checkToken;
+    final reach = await probeEngine(address, fetch: widget.fetch);
+    if (!mounted || token != _checkToken) return;
+    setState(() {
+      _checking = false;
+      _reach = reach;
+      _checkedBase = address.base;
+    });
+    _adoptAnswers(reach);
+  }
+
+  /// Fill in what the server just told us, without touching what the reader has
+  /// already typed — a prefill that overwrites is worse than no prefill.
+  void _adoptAnswers(EngineReach reach) {
+    if (reach is! EngineReachable) return;
+    // One model is not a choice, it is the answer.
+    if (reach.models.length == 1 &&
+        reach.canOfferModels &&
+        _model.text.trim().isEmpty) {
+      _model.text = reach.models.single;
+    }
+    // A server that states its window has settled the question: the ladder's
+    // ceiling becomes what it serves, and the value lands inside it.
+    if (reach.contextLength case final served? when _contextChoice == null) {
+      setState(() => _contextChoice = defaultContextLength(served));
+    }
+  }
+
+  /// The answer that is about the address currently in the field, or null.
+  ///
+  /// Guarding on the base is what stops a stale reply describing a server the
+  /// reader has since typed away from.
+  EngineReach? get _reachForCurrent {
+    final address = readEngineAddress(_endpoint.text);
+    if (address is! EngineAddressReady) return null;
+    return address.base == _checkedBase ? _reach : null;
+  }
+
+  /// The most this engine can be told it holds.
+  ///
+  /// The server's own figure when it gave one, so the ladder cannot offer more
+  /// than it actually serves. Otherwise a plain ceiling: nothing here knows the
+  /// real limit, and a ladder still has to end somewhere.
+  int get _contextMax => switch (_reachForCurrent) {
+    EngineReachable(:final contextLength?) => contextLength,
+    _ => defaultServerContextCeiling,
+  };
+
+  /// The window that will be sent, clamped into what the server admits to.
+  int get _context => (_contextChoice ?? defaultContextLength(_contextMax))
+      .clamp(minContextTokens, _contextMax);
+
+  /// The names the Model field can offer, or empty for the text box.
+  List<String> get _offeredModels => switch (_reachForCurrent) {
+    EngineReachable(:final models, :final canOfferModels) when canOfferModels =>
+      models,
+    _ => const [],
+  };
 
   @override
   void didUpdateWidget(ServeServerForm oldWidget) {
@@ -79,7 +209,8 @@ class _ServeServerFormState extends State<ServeServerForm> {
 
   @override
   void dispose() {
-    _endpoint.removeListener(_onEdited);
+    _debounce?.cancel();
+    _endpoint.removeListener(_onEndpointEdited);
     _model.removeListener(_onEdited);
     _endpoint.dispose();
     _model.dispose();
@@ -102,10 +233,39 @@ class _ServeServerFormState extends State<ServeServerForm> {
     return null;
   }
 
-  bool get _typedReady =>
-      _endpoint.text.trim().isNotEmpty && _model.text.trim().isNotEmpty;
+  bool get _typedReady => _typedBlockedReason() == null;
 
   bool get _ready => _chosen != null || _typedReady;
+
+  /// Why Start cannot be pressed for the typed address, or null when it can.
+  ///
+  /// The address is judged by the same reader the field itself uses, so the
+  /// button and the line under the field can never disagree about whether an
+  /// address is usable.
+  ///
+  /// Start needs a server that **answered**, not merely an address that parses.
+  /// That is the fail-closed half of this screen: `grid join --at` will happily
+  /// take an address nothing is listening on, and the node it registers then
+  /// fails every message while looking perfectly healthy — green in the list,
+  /// model advertised, and every request answering `404`.
+  String? _typedBlockedReason() {
+    if (_checking) return 'Checking the server…';
+    return switch (readEngineAddress(_endpoint.text)) {
+      EngineAddressEmpty() => 'Fill in the server address to start.',
+      EngineAddressRejected(:final message) => message,
+      EngineAddressReady() => switch (_reachForCurrent) {
+        // The detail is already spelled out under the field; repeating it on
+        // the button would say the same sentence twice on one screen.
+        EngineUnreachable() => "The grid couldn't reach that server.",
+        EngineReachable() when _model.text.trim().isEmpty =>
+          'Choose the model this server runs.',
+        EngineReachable() => null,
+        // No answer yet and not checking — reachable only for the instant
+        // between the address becoming valid and the check being scheduled.
+        null => 'Checking the server…',
+      },
+    };
+  }
 
   /// Start the share, whichever answer step 2 holds.
   ///
@@ -115,8 +275,15 @@ class _ServeServerFormState extends State<ServeServerForm> {
   Future<void> _start() async {
     final backend = _chosen;
     if (backend == null) {
+      // The BASE, never the raw text. This is the invariant the whole check
+      // rests on: the address that was asked `/models` is the address that gets
+      // joined. Sending `_endpoint.text.trim()` here would let a green tick sit
+      // over a URL nothing had verified — which is exactly the bug this file
+      // was changed to close.
+      final address = readEngineAddress(_endpoint.text);
+      if (address is! EngineAddressReady) return;
       await widget.controller.startExternal(
-        endpoint: _endpoint.text.trim(),
+        endpoint: address.base,
         model: _model.text.trim(),
         advertiseAs: _advertise.text,
         nodeName: _nodeName.text,
@@ -242,30 +409,73 @@ class _ServeServerFormState extends State<ServeServerForm> {
     );
   }
 
-  Widget _typedFields() => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        child: ShareField(
-          label: 'Endpoint',
-          child: ShareTextField(
-            controller: _endpoint,
-            hint: 'http://localhost:8080/v1',
+  Widget _typedFields() {
+    final offered = _offeredModels;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ShareField(
+            label: 'Endpoint',
+            note: _addressNote(),
+            child: ShareTextField(
+              key: const Key('server-endpoint-field'),
+              controller: _endpoint,
+              hint: 'http://localhost:8080/v1',
+            ),
           ),
         ),
-      ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: ShareField(
-          label: 'Model id',
-          child: ShareTextField(
-            controller: _model,
-            hint: 'The id the server answers to',
+        const SizedBox(width: 16),
+        Expanded(
+          child: ShareField(
+            label: 'Model id',
+            // A picker only for an engine whose body was recognised — see
+            // [EngineReachable.canOfferModels]. Everything else keeps the text
+            // box it always had.
+            child: offered.isEmpty
+                ? ShareTextField(
+                    key: const Key('server-model-field'),
+                    controller: _model,
+                    hint: 'The id the server answers to',
+                  )
+                : ShareSelect(
+                    key: const Key('server-model-select'),
+                    value: _model.text.trim().isEmpty
+                        ? null
+                        : _model.text.trim(),
+                    options: [for (final id in offered) ShareOption(id)],
+                    placeholder: 'Choose one of its models',
+                    onSelected: (id) => _model.text = id,
+                  ),
           ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
+
+  /// The line under the Endpoint field: what the app made of what was typed.
+  ///
+  /// Three things it can say that the field never said before — the URL the
+  /// grid will actually call, echoed as you type so it is comparable against
+  /// your own server's docs; why an address was refused; and, on a failure, the
+  /// URL that was really requested. Nothing server-side records that last one,
+  /// so support has had nothing to ask but "what did you type?".
+  String? _addressNote() {
+    final address = readEngineAddress(_endpoint.text);
+    return switch (address) {
+      EngineAddressEmpty() => null,
+      EngineAddressRejected(:final message) => message,
+      EngineAddressReady() => switch ((_checking, _reachForCurrent)) {
+        (true, _) => 'Asking ${address.modelsUrl}…',
+        (_, EngineUnreachable(:final message)) => message,
+        (_, EngineReachable(:final models)) when models.isEmpty =>
+          'Answered, but named no models. The grid will call '
+              '${address.chatUrl}',
+        (_, EngineReachable()) => 'The grid will call ${address.chatUrl}',
+        _ => null,
+      },
+    };
+  }
 
   Widget _startStep() {
     final joining = widget.controller.status == ShareStatus.starting;
@@ -315,15 +525,15 @@ class _ServeServerFormState extends State<ServeServerForm> {
                   value: formatContextLength(_context),
                   options: [
                     for (final rung in contextLadder(
-                      max: defaultServerContextCeiling,
+                      max: _contextMax,
                       current: _context,
                     ))
                       ShareOption(formatContextLength(rung)),
                   ],
                   onSelected: (label) => setState(() {
-                    _context =
+                    _contextChoice =
                         contextLadder(
-                          max: defaultServerContextCeiling,
+                          max: _contextMax,
                           current: _context,
                         ).firstWhere(
                           (rung) => formatContextLength(rung) == label,
@@ -334,11 +544,17 @@ class _ServeServerFormState extends State<ServeServerForm> {
                 ),
               ),
               const SizedBox(height: 7),
-              Text(
-                'What you tell the grid this engine can hold. Claim more than '
-                'it serves and questions come back empty.',
-                style: ShareType.note,
-              ),
+              Text(switch (_reachForCurrent) {
+                // The server settled it, so the ladder stops where it does
+                // and the sentence says whose number that is.
+                EngineReachable(:final contextLength?) =>
+                  'This server reports it serves '
+                      '${formatContextLength(contextLength)}, so that is as '
+                      'high as this goes.',
+                _ =>
+                  'What you tell the grid this engine can hold. Claim more '
+                      'than it serves and questions come back empty.',
+              }, style: ShareType.note),
             ],
           ),
           const SizedBox(height: 18),
@@ -346,13 +562,15 @@ class _ServeServerFormState extends State<ServeServerForm> {
             label: 'Start sharing',
             // The helper says what is *missing* while it is, because a disabled
             // button with a general sentence beside it is a puzzle.
-            note: switch ((_ready, backend, backend?.running)) {
-              (false, _, _) => 'Add an endpoint and a model id to continue.',
-              (_, final found?, false) =>
+            note: switch ((backend, backend?.running, _typedBlockedReason())) {
+              (final found?, false, _) =>
                 'Starts ${found.label}, then puts it on ${widget.gridName}.',
-              (_, final found?, _) =>
+              (final found?, _, _) =>
                 'Puts ${found.label} on ${widget.gridName}, with its models, '
                     'quantization and flags exactly as they are.',
+              // Named, not general: a disabled button beside "something is
+              // missing" is a puzzle, and the reason is already known here.
+              (_, _, final reason?) => reason,
               _ => 'Its models, quantization and flags are shared as they are.',
             },
             onPressed: _ready && !busy ? _start : null,
