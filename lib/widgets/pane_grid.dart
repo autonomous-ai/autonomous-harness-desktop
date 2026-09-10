@@ -16,7 +16,6 @@ import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
-import 'engine_identity.dart';
 import 'harness_join_guide_screen.dart';
 import 'new_agent_dialog.dart';
 import 'terminal_panel.dart';
@@ -78,15 +77,11 @@ class PaneGrid extends StatelessWidget {
         // all six; the field and the outer margin came from that one branch and
         // so appeared in one. Two tiles — the common case — showed gaps the
         // exact colour of the tiles either side of them, which is no gap at all.
-        return _GridField(
-          child: Padding(
-            // The same space outside as between the tiles. Without it the edge
-            // tiles run into the window and only the INNER boundaries read as
-            // deliberate.
-            padding: const EdgeInsets.all(kPaneGap),
-            child: _arrange(cells),
-          ),
-        );
+        // JUST THE TILES. The field behind them and the margin around them belong to the content row
+        // now (see home_screen), because the rail is a card on that same field — a gradient that
+        // started where the rail ended would be two backgrounds meeting at a seam, which is the thing
+        // being fixed.
+        return _arrange(cells);
       },
     );
   }
@@ -392,7 +387,7 @@ class _MinTile {
 /// A test carrying its own copy of this number is a second place the design
 /// lives, and the one that goes stale — which is exactly what happened when the
 /// grid stopped separating its tiles with a 1px line.
-const double kPaneGap = 7;
+const double kPaneGap = 9;
 
 /// What shows through the gaps.
 ///
@@ -405,24 +400,48 @@ const double kPaneGap = 7;
 /// curve is a few antialiased pixels wide, and against a background almost the
 /// same colour it does not read as a curve at all, it reads as a dirty notch.
 /// So the field is a deliberate step, not a nudge.
-class _GridField extends StatelessWidget {
-  const _GridField({required this.child});
+class GridField extends StatelessWidget {
+  const GridField({super.key, required this.child});
+
+  /// `linear-gradient(160deg, …)`. A CSS angle runs clockwise from north, so 160° points down and to
+  /// the right — which is (sin160, cos160) as an alignment pair, give or take the sign convention.
+  static const _plum = LinearGradient(
+    begin: Alignment(-0.342, -0.940),
+    end: Alignment(0.342, 0.940),
+    colors: [Color(0xFF3A1F2E), Color(0xFF4A2438), Color(0xFF1E1224)],
+    stops: [0, 0.5, 1],
+  );
+
+  /// `radial-gradient(55% 60% at 80% 18%, rgba(255,200,140,.6) 0, transparent 62%)`. A CSS percentage
+  /// position maps to an Alignment as `2p - 1`: 80% → 0.6, 18% → -0.64.
+  static const _amber = RadialGradient(
+    center: Alignment(0.6, -0.64),
+    radius: 0.55,
+    colors: [Color(0x99FFC88C), Color(0x00FFC88C)],
+    stops: [0, 0.62],
+  );
+
+  /// `radial-gradient(50% 55% at 12% 88%, rgba(230,90,110,.5) 0, transparent 62%)`.
+  static const _rose = RadialGradient(
+    center: Alignment(-0.76, 0.76),
+    radius: 0.5,
+    colors: [Color(0x80E65A6E), Color(0x00E65A6E)],
+    stops: [0, 0.62],
+  );
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    return ColoredBox(
-      // Dark: above the tiles. Light: below them. Both are the familiar way
-      // round for cards on a page in that theme.
-      color: grid.AppTheme.pick(
-        const Color(0xFFEDEDEB),
-        const Color(0xFF262626),
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(gradient: _plum),
+    child: DecoratedBox(
+      decoration: const BoxDecoration(gradient: _rose),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(gradient: _amber),
+        child: child,
       ),
-      child: child,
-    );
-  }
+    ),
+  );
 }
 
 /// The space between two tiles.
@@ -451,10 +470,13 @@ class _Gap extends StatelessWidget {
   );
 }
 
-/// How round a pane's corners are. Matches the cards elsewhere in the window so
-/// a terminal does not read as a different KIND of surface from everything
-/// around it.
-const double _paneRadius = 10;
+/// How round a card's corners are — a pane, and the rail beside it. Public for the same reason
+/// [kPaneGap] is: the rail is a card now, and two places typing 10 is how they drift apart.
+const double kPaneRadius = 10;
+
+/// How round a pane's corners are — the shared card radius, so a terminal does not read as a different
+/// KIND of surface from the rail beside it.
+const double _paneRadius = kPaneRadius;
 
 class _PaneCell extends StatelessWidget {
   const _PaneCell({
@@ -510,9 +532,7 @@ class _PaneCell extends StatelessWidget {
             //
             // Only meaningful with company: a ring around the only tile would
             // be decoration, since there is nowhere else focus could be.
-            color: !_single && focused
-                ? engineBand(_engineOf(notifier, pane))
-                : AppColors.border,
+            color: !_single && focused ? AppColors.accent : AppColors.border,
             width: 1,
           ),
         ),
@@ -544,87 +564,40 @@ class _PaneCell extends StatelessWidget {
           // TerminalPanel opens with a ColoredBox across its whole box, and
           // that is what was reaching the corners.
           borderRadius: BorderRadius.circular(_paneRadius - 1),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // The engine's colour, across the top of its own pane.
-              //
-              // Inside the clip so it follows the rounded corners, and ABOVE the header rather than
-              // behind it, so it reads as a band on the card and not a tint on the title row. Two
-              // pixels: findable across a grid at a glance, silent up close.
-              //
-              // This is the one thing on a pane that says WHAT IS RUNNING before you read a word of
-              // it, which is the whole job — with four terminals open, the names are the slow way to
-              // tell Claude from Codex and the colour is the fast one.
-              SizedBox(
-                height: _engineBandHeight,
-                // Always the engine's colour, focused or not. The band no longer has to get out of
-                // the ring's way, because the ring is now the same colour it is.
-                child: ColoredBox(color: engineBand(_engineOf(notifier, pane))),
-              ),
-              Expanded(
-                child: RepaintBoundary(
-                  child: _FileDropZone(
-                    notifier: notifier,
-                    pane: pane,
-                    child: _SwapZone(
+          child: RepaintBoundary(
+            child: _FileDropZone(
+              notifier: notifier,
+              pane: pane,
+              child: _SwapZone(
+                notifier: notifier,
+                paneId: pane.id,
+                child: _DropZone(
+                  notifier: notifier,
+                  paneId: pane.id,
+                  dragging: dragging,
+                  child: ValueListenableBuilder<PaneDragRef?>(
+                    valueListenable: paneDragging,
+                    // The tile being carried fades where it sits, so the grid shows
+                    // where it came FROM while the ghost shows where it is going.
+                    builder: (context, inFlight, child) => Opacity(
+                      opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                      child: child,
+                    ),
+                    child: _PaneContent(
                       notifier: notifier,
-                      paneId: pane.id,
-                      child: _DropZone(
-                        notifier: notifier,
-                        paneId: pane.id,
-                        dragging: dragging,
-                        child: ValueListenableBuilder<PaneDragRef?>(
-                          valueListenable: paneDragging,
-                          // The tile being carried fades where it sits, so the grid shows
-                          // where it came FROM while the ghost shows where it is going.
-                          builder: (context, inFlight, child) => Opacity(
-                            opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
-                            child: child,
-                          ),
-                          child: _PaneContent(
-                            notifier: notifier,
-                            pane: pane,
-                            single: _single,
-                          ),
-                        ),
-                      ),
+                      pane: pane,
+                      single: _single,
                     ),
                   ),
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 }
-
-/// Which engine a pane is running, or null while that is still resolving.
-///
-/// Read here as well as inside [_PaneContent] because the band belongs to the CARD, not to whatever
-/// the card is currently able to show: a pane still attaching, or one whose machine has not answered
-/// yet, is already known to be a Codex pane and should already wear Codex's colour.
-String? _engineOf(AppNotifier notifier, TerminalPane pane) {
-  final agentId = pane.agentId;
-  if (agentId == null) return null;
-  final machine = notifier.stateOf(pane.machineId);
-  if (machine == null) return null;
-  for (final agent in machine.agents) {
-    if (agent.id == agentId) return agent.engine;
-  }
-  return null;
-}
-
-/// How thick the engine band is.
-///
-/// One pixel, halved from two, and the halving is what lets the same line go around the focused pane
-/// without shouting: at two it was a bar, and four bars around one card would have been a frame. At one
-/// it matches the rim it continues into, so the focused pane reads as the SAME line simply running
-/// further — which is the whole idea. It survives as a line rather than a seam because it is coloured
-/// and everything beside it is not.
-const double _engineBandHeight = 1;
 
 class _PaneContent extends StatelessWidget {
   const _PaneContent({
@@ -886,10 +859,12 @@ class _FileDropZoneState extends State<_FileDropZone> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  static String _mb(int bytes) => '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
+  static String _mb(int bytes) =>
+      '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
 
   /// Reads just enough of the file to sniff its format (see [looksLikeImage]) without loading a
   /// large drop fully into memory before deciding which ceiling even applies to it.
@@ -935,7 +910,9 @@ class _FileDropZoneState extends State<_FileDropZone> {
       await _dropImage(images.first, machine, session);
       if (images.length > 1) {
         final ignored = images.length - 1;
-        _toast('$ignored more image${ignored > 1 ? 's' : ''} ignored — drop one image at a time');
+        _toast(
+          '$ignored more image${ignored > 1 ? 's' : ''} ignored — drop one image at a time',
+        );
       }
     }
 
@@ -967,7 +944,9 @@ class _FileDropZoneState extends State<_FileDropZone> {
       return;
     }
     if (png.length > terminalLocalImagePasteMaxPayloadBytes) {
-      _toast('${item.name} is larger than ${_mb(terminalLocalImagePasteMaxPayloadBytes)}');
+      _toast(
+        '${item.name} is larger than ${_mb(terminalLocalImagePasteMaxPayloadBytes)}',
+      );
       return;
     }
     await session.pasteImage(png);
@@ -1000,7 +979,9 @@ class _FileDropZoneState extends State<_FileDropZone> {
       return;
     }
     if (bytes.length > terminalLocalPasteFileMaxPayloadBytes) {
-      _toast('${item.name} is larger than ${_mb(terminalLocalPasteFileMaxPayloadBytes)}');
+      _toast(
+        '${item.name} is larger than ${_mb(terminalLocalPasteFileMaxPayloadBytes)}',
+      );
       return;
     }
     await session.pasteFile(item.name, bytes);

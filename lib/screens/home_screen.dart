@@ -317,44 +317,58 @@ class _HomeScreenState extends State<HomeScreen> {
                                   .toDouble();
                               final railWidth = (_railWidth ?? defaultWidth)
                                   .clamp(minWidth, maxWidth);
-                              return Row(
-                                children: [
-                                  _RailFold(
-                                    notifier: notifier,
-                                    collapsed: _collapsed,
-                                    wideWidth: railWidth,
-                                    onCollapse: () =>
-                                        setState(() => _collapsed = true),
-                                    onExpand: () =>
-                                        setState(() => _collapsed = false),
+                              // THE FIELD RUNS UNDER EVERYTHING, rail included, and one margin
+                              // holds the lot. It used to start where the rail ended, so the two
+                              // surfaces met along a hard seam that belonged to neither: every tile
+                              // floated as a card while the rail alone stayed bolted to the window
+                              // with square corners.
+                              return GridField(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(kPaneGap),
+                                  child: Row(
+                                    children: [
+                                      _RailFold(
+                                        notifier: notifier,
+                                        collapsed: _collapsed,
+                                        wideWidth: railWidth,
+                                        onCollapse: () =>
+                                            setState(() => _collapsed = true),
+                                        onExpand: () =>
+                                            setState(() => _collapsed = false),
+                                      ),
+                                      // Only the full rail can be dragged wider. Folded, the
+                                      // width is the fold's to decide, and a handle there
+                                      // would offer a resize that snaps back.
+                                      // Folded there is nothing to resize and nothing to divide: the
+                                      // seam that used to sit here was seven more pixels of chrome beside
+                                      // a rail that had just gone to zero, which is most of what folding
+                                      // was supposed to give back.
+                                      if (!_collapsed)
+                                        _ResizeHandle(
+                                          onDrag: (dx) => setState(() {
+                                            // Accumulate against the STATE field, not the
+                                            // `railWidth` local above: that local is a
+                                            // snapshot from the last completed rebuild, and
+                                            // several drag-update events can fire before
+                                            // Flutter gets around to rebuilding (routine
+                                            // under fast mouse movement). Basing each step
+                                            // on the same stale snapshot silently drops all
+                                            // but the last delta in that batch, which is
+                                            // exactly the lag/drift this fixes.
+                                            final current =
+                                                _railWidth ?? defaultWidth;
+                                            _railWidth = (current + dx).clamp(
+                                              minWidth,
+                                              maxWidth,
+                                            );
+                                          }),
+                                        ),
+                                      Expanded(
+                                        child: PaneGrid(notifier: notifier),
+                                      ),
+                                    ],
                                   ),
-                                  // Only the full rail can be dragged wider. Folded, the
-                                  // width is the fold's to decide, and a handle there
-                                  // would offer a resize that snaps back.
-                                  if (_collapsed)
-                                    const _RailSeam()
-                                  else
-                                    _ResizeHandle(
-                                      onDrag: (dx) => setState(() {
-                                        // Accumulate against the STATE field, not the
-                                        // `railWidth` local above: that local is a
-                                        // snapshot from the last completed rebuild, and
-                                        // several drag-update events can fire before
-                                        // Flutter gets around to rebuilding (routine
-                                        // under fast mouse movement). Basing each step
-                                        // on the same stale snapshot silently drops all
-                                        // but the last delta in that batch, which is
-                                        // exactly the lag/drift this fixes.
-                                        final current =
-                                            _railWidth ?? defaultWidth;
-                                        _railWidth = (current + dx).clamp(
-                                          minWidth,
-                                          maxWidth,
-                                        );
-                                      }),
-                                    ),
-                                  Expanded(child: PaneGrid(notifier: notifier)),
-                                ],
+                                ),
                               );
                             },
                           ),
@@ -372,6 +386,17 @@ class _HomeScreenState extends State<HomeScreen> {
                             usage: _usage,
                           ),
                         ),
+                        if (_collapsed)
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _RailReveal(
+                              notifier: notifier,
+                              onExpand: () =>
+                                  setState(() => _collapsed = false),
+                            ),
+                          ),
                         if (notifier.lastError != null)
                           Positioned(
                             left: 0,
@@ -475,12 +500,24 @@ class _RailFold extends StatelessWidget {
       curve: grid.AppMotion.curve,
       builder: (context, open, _) {
         final wide = _fade(open);
-        final mini = _fade(1 - open);
         return SizedBox(
-          width: lerpDouble(MachineRailMini.width, wideWidth, open),
-          child: ColoredBox(
-            color: grid.AppGlass.sidebarFill,
-            child: ClipRect(
+          // FOLDED IS ZERO NOW, not 72. The folded rail held a fold button and an avatar and nothing
+          // else — a column that was empty permanently, which is what made it expensive. Those two
+          // controls moved to the edge reveal ([_RailReveal]), so folding gives the whole width back.
+          width: lerpDouble(0, wideWidth, open),
+          child: DecoratedBox(
+            // A CARD, like the tiles beside it: same fill duty, same corners, same hairline. It was
+            // the one surface running edge to edge with square corners, which read as the app's
+            // chrome rather than as one more thing on the field.
+            decoration: BoxDecoration(
+              color: grid.AppGlass.sidebarFill,
+              borderRadius: BorderRadius.circular(kPaneRadius),
+              border: Border.all(color: AppColors.border, width: 1),
+            ),
+            // Rounded, not square: the rail's own rows run to its edge, and a square clip would let
+            // them square off the corners the rim just rounded — the same notch the panes had.
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(kPaneRadius - 1),
               child: Stack(
                 children: [
                   // Both hang off the LEFT edge — the edge that doesn't move.
@@ -507,23 +544,6 @@ class _RailFold extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (mini > 0)
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: MachineRailMini.width,
-                      child: Opacity(
-                        opacity: mini,
-                        child: Transform.translate(
-                          offset: Offset(-_drift * open, 0),
-                          child: MachineRailMini(
-                            notifier: notifier,
-                            onExpand: onExpand,
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -538,18 +558,86 @@ class _RailFold extends StatelessWidget {
 ///
 /// Same painting as [_ResizeHandle] so folding the rail does not change the
 /// line between it and the pane — only whether that line can be grabbed.
-class _RailSeam extends StatelessWidget {
-  const _RailSeam();
+/// The folded rail, which is not on screen until you reach for it.
+///
+/// Folding used to leave a 72px column carrying a fold button and an avatar — permanently, on every
+/// window, whether or not anyone was going to touch either. This is the same two controls with the
+/// column deleted: a narrow strip along the left edge that costs nothing until the pointer arrives,
+/// then slides the real [MachineRailMini] out over the grid on a scrim.
+///
+/// The cost of hiding a control is that a new user cannot find it, and that is answered here by the
+/// keyboard: `toggleRail` is bound and listed in the shortcuts sheet as "Show or hide the sidebar", so
+/// the rail is reachable without knowing this strip exists at all.
+class _RailReveal extends StatefulWidget {
+  const _RailReveal({required this.notifier, required this.onExpand});
+
+  final AppNotifier notifier;
+  final VoidCallback onExpand;
+
+  /// How far in from the edge counts as reaching for it. Wide enough to catch a deliberate move to the
+  /// edge, narrow enough to sit inside the grid's own margin — so crossing it does not mean crossing
+  /// anything a person was aiming at.
+  static const double _reach = 12;
+
+  @override
+  State<_RailReveal> createState() => _RailRevealState();
+}
+
+class _RailRevealState extends State<_RailReveal> {
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: grid.AppPalette.windowBg,
-        border: Border(left: BorderSide(color: grid.AppPalette.divider)),
+    return MouseRegion(
+      // NOT opaque, and that is the whole trick: while the strip is hidden this is twelve pixels lying
+      // over the first pane, and an opaque region there would quietly eat every click that landed on
+      // that edge — a terminal that ignores you along one stripe, with nothing on screen to explain it.
+      opaque: false,
+      onEnter: (_) => setState(() => _open = true),
+      onExit: (_) => setState(() => _open = false),
+      child: AnimatedContainer(
+        duration: grid.AppMotion.fold,
+        curve: grid.AppMotion.curve,
+        width: _open ? MachineRailMini.width : _RailReveal._reach,
+        child: IgnorePointer(
+          // The buttons still hit-test at zero opacity, so they are taken out of the tree's reach
+          // rather than merely faded — otherwise the hidden strip would swallow clicks the same way an
+          // opaque region would, just less obviously.
+          ignoring: !_open,
+          child: AnimatedOpacity(
+            duration: grid.AppMotion.fold,
+            curve: grid.AppMotion.curve,
+            opacity: _open ? 1 : 0,
+            child: ClipRect(
+              child: OverflowBox(
+                // Laid out at its full width even while the container is 12px, so the icons inside do
+                // not reflow on the way in — they slide out already in their final places.
+                alignment: Alignment.centerLeft,
+                minWidth: MachineRailMini.width,
+                maxWidth: MachineRailMini.width,
+                child: DecoratedBox(
+                  // A SCRIM, not a panel. The sidebar's own fill would be a solid column landing back
+                  // on top of the grid — the same 72px this change was about removing, just appearing
+                  // and disappearing. Dark at the edge and gone by the far side, so the controls have
+                  // something to sit on while the panes stay visible underneath them.
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [Color(0x8C000000), Color(0x00000000)],
+                    ),
+                  ),
+                  child: MachineRailMini(
+                    notifier: widget.notifier,
+                    onExpand: widget.onExpand,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
-      child: const SizedBox(width: 7, height: double.infinity),
     );
   }
 }
@@ -565,21 +653,14 @@ class _ResizeHandle extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
-        // Painted, and painted in the PANE's colour. It used to be a bare
-        // 7px box with a rule down the middle, which let the scaffold show
-        // through — a strip darker than the rail on one side and the pane on
-        // the other, reading as a gap between them rather than as a seam.
+        // UNPAINTED, and that is the point: it is the gap between two cards, so what belongs in it is
+        // the field, the same as every gap inside the grid.
         //
-        // The hairline sits on the LEFT edge, against the rail, so the eye
-        // reads rail → line → pane with nothing in between. Down the middle it
-        // would leave 3px of pane stranded on the rail's side of the line.
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: grid.AppPalette.windowBg,
-            border: Border(left: BorderSide(color: grid.AppPalette.divider)),
-          ),
-          child: const SizedBox(width: 7, height: double.infinity),
-        ),
+        // It used to paint the pane's colour with a hairline down its left edge — a seam, drawn back
+        // when the rail was chrome butted against the grid and something had to divide them. Two cards
+        // do not need dividing; the space already does it. All that survives is the width and the
+        // drag, which is all this was ever for.
+        child: const SizedBox(width: kPaneGap, height: double.infinity),
       ),
     );
   }
