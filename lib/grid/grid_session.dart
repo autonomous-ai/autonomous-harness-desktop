@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../core/harness_cli_runner.dart';
+import 'grid_surface.dart';
 
 /// The Grid account this computer is signed in to.
 ///
@@ -66,13 +67,23 @@ class GridSession {
 /// or `grid logout` run in a terminal is picked up by [refresh] instead of
 /// leaving the app confidently wrong.
 class GridSessionStore extends ValueNotifier<GridSession?> {
-  GridSessionStore({File? file, HarnessCliRunner? runner})
-    : _file = file ?? File(defaultCredentialsPath()),
-      _runner = runner ?? HarnessCliRunner(),
-      super(null);
+  GridSessionStore({
+    File? file,
+    HarnessCliRunner? runner,
+    // A compile-time const in the app, which makes the shipped build's own
+    // behaviour — a sign-in that never happens — unreachable from a test run,
+    // where it is always true. Passed in so that case can be asserted, exactly
+    // as `GridSelectionStore` takes it.
+    @visibleForTesting this.gridSurface = kGridSurfaceEnabled,
+  }) : _file = file ?? File(defaultCredentialsPath()),
+       _runner = runner ?? HarnessCliRunner(),
+       super(null);
 
   final File _file;
   final HarnessCliRunner _runner;
+
+  /// See the constructor: [kGridSurfaceEnabled], and only a test passes another.
+  final bool gridSurface;
 
   /// True once [load] has run, whatever it found. Without it "still reading"
   /// and "signed out" render the same, and the Grid pane would offer a sign-in
@@ -222,6 +233,18 @@ class GridSessionStore extends ValueNotifier<GridSession?> {
   /// rather than re-worded here — this app is not the second place that has an
   /// opinion about why a sign-in did not happen.
   Future<String?> signIn({String? account}) async {
+    // ⚠️ A build that hides Grid never MINTS one. This is called unprompted on
+    // every bootstrap (`AppNotifier._ensureGridSession`), and every call that
+    // gets through puts a fresh 365-day session on the person's Grid account
+    // and revokes nothing — with `grid logout --everywhere`, all-or-nothing
+    // across every machine, as the only way back. In a build with no Settings ▸
+    // Grid that is a credential the owner can neither see, explain, nor undo
+    // from inside the app, minted for a feature they were never shown.
+    //
+    // [load] is deliberately NOT gated with it: a session already on disk was
+    // written by `grid login` in a terminal and directs nothing on its own,
+    // and nothing in a shipped build ever draws or spends it.
+    if (!gridSurface) return 'This build does not include Grid';
     // Re-read first: something may have signed in since we last looked — the
     // bootstrap, a `grid login` in a terminal, or the other caller.
     await load();

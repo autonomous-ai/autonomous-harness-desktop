@@ -142,9 +142,12 @@ void main() {
       // before the keystroke reaches Flutter at all. A binding on it would look
       // right in this list and do nothing but minimise the window, which is the
       // same trap that once ate ⌘V in a terminal pane.
-      final model = kAppShortcuts.firstWhere(
-        (s) => s.action == ShortcutAction.changeModel,
-      );
+      // Read off the const rather than out of `kAppShortcuts`: the key moved
+      // behind `kGridSurfaceEnabled` (a build with no providers has no picker
+      // for it to open), so `appShortcuts()` is where it reaches a binding and
+      // this is where it is declared.
+      const model = kChangeModelShortcut;
+      expect(appShortcuts(), contains(model));
       expect(model.activator.trigger, LogicalKeyboardKey.keyM);
       expect(model.activator.meta, isTrue);
       expect(model.activator.shift, isTrue);
