@@ -306,25 +306,20 @@ no running app and no public page will ever look:
 ```bash
 git push origin HEAD:internal/<name>     # builds that commit: Grid on, Debug off
 gh workflow run internal-build.yml --ref <branch> -f grid_surface=true -f debug_surface=false
-bash scripts/internal-build-link.sh <commit>    # the two .dmg links, once it has finished
 ```
 
 (`workflow_dispatch` only exists once the file is on `main`; the `internal/**` push works from any
-branch that carries it.) Each build is a `Harness-<commit>-macos[-arm64].dmg`.
+branch that carries it.) The run prints one `.dmg` link per build — as a notice at the top of the run
+page, and in its summary — named `Harness-macos[-arm64]-<next version>-<commit>.dmg`.
 
-- **The links are never printed by CI — this repository is public**, and so is every log and run
-  summary it produces. Each build's path is `harness/desktop-internal/<token>/`, where the token is
-  `HMAC-SHA256(INTERNAL_BUILD_KEY, "<commit>/<variant>")`. `scripts/internal-build-link.sh` works it
-  out — the workflow calls that same script and masks the result — so whoever holds the key has the
-  link for any commit, and nobody else can find one: the bucket refuses anonymous listing.
-- **One-time setup:** a repository secret `INTERNAL_BUILD_KEY` (any long random string —
-  `openssl rand -base64 32`), and the same value on the machine that runs the script, as an
-  environment variable or once in the keychain:
-  `security add-generic-password -U -s harness-internal-build-key -a "$USER" -w`. Without the
-  secret the workflow stops in its first seconds rather than notarizing a build nobody can be sent.
-- **Unlisted, not private.** Anyone a link is forwarded to can download that build. The script also
-  prints how to take one back (`gsutil -m rm -r gs://…/harness/desktop-internal/<token>`); the
-  workflow strips the release's year-long cache headers from these files so a deletion sticks.
+- **Unlisted, not private — and this repository is public.** The files sit under
+  `harness/desktop-internal/<128 random bits>/` and the bucket refuses anonymous listing, so a build
+  cannot be found by guessing. The run page that prints its link is public, though, so anyone who
+  opens it can download the build. The team chose that on 2026-09-10 over a key-derived link that only
+  key holders could work out; if it stops being acceptable, that is the design to go back to.
+- Take a build back with `gsutil -m rm -r gs://s3-autonomous-upgrade-3/harness/desktop-internal/<token>`
+  (the summary prints it); the workflow strips the release's year-long cache headers from these files
+  so a deletion sticks.
 - **It never updates itself.** `DESKTOP_UPDATE_METADATA_URL` points at a manifest nothing writes,
   so a tester stays on the build they were asked to test rather than being moved onto the next
   public release. The next internal build is installed by its own link.

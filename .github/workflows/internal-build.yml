@@ -5,16 +5,14 @@ name: Internal build
 #
 #   git push origin HEAD:internal/grid-demo      # builds that commit, Grid on, Debug off
 #   Actions -> Internal build -> Run workflow    # any branch, with the two flags below
-#   bash scripts/internal-build-link.sh <sha>    # then, on your machine: the download links
 #
-# THIS REPOSITORY IS PUBLIC, and so is every log and run summary it produces, so the links are never
-# printed here. Each build's path carries HMAC-SHA256(INTERNAL_BUILD_KEY, "<commit>/<variant>"),
-# worked out by scripts/internal-build-link.sh — the same script a person runs to find the link,
-# holding the same key — and masked the moment it exists. The bucket refuses anonymous LISTING
-# (checked 2026-09-10: storage.objects.list is denied to allUsers on the JSON API, the XML API and
-# the CDN), so without the key there is no way to find a build, and with it the link for any commit
-# is one command away. The upload step drops the release's year-long cache headers, so deleting a
-# build takes it back.
+# The run prints both .dmg links: as notices at the top of the run page, and in its summary. THIS
+# REPOSITORY IS PUBLIC, so that page is too — anyone who opens it can download the build. The path
+# carries 128 random bits and the bucket refuses anonymous listing (checked 2026-09-10), so a build is
+# reached through its run page or a forwarded link and not by guessing: unlisted, not private. The team
+# chose that on 2026-09-10 over a key-derived link only key holders could work out; if it ever stops
+# being acceptable, that is the design to go back to. Take a build back by deleting its prefix (the
+# summary says how); the upload step drops the release's year-long cache headers so a deletion sticks.
 #
 # Built by the release's own code, so it IS what a release would ship, flags aside:
 # scripts/publish-macos-variant.sh --build-only builds and pins each renderer (Intel on Skia, Apple
@@ -29,7 +27,7 @@ name: Internal build
 #
 # The version is the one the next release would take (scripts/release-desktop.sh --dry-run): the
 # scripts insist on X.Y.Z, and with the updater pinned nothing compares it. The file name carries the
-# commit.
+# commit as well.
 
 on:
   push:
@@ -66,6 +64,8 @@ jobs:
     outputs:
       version: ${{ steps.plan.outputs.version }}
       flutter_version: ${{ steps.plan.outputs.flutter_version }}
+      prefix: ${{ steps.plan.outputs.prefix }}
+      short_sha: ${{ steps.plan.outputs.short_sha }}
       grid_surface: ${{ steps.plan.outputs.grid_surface }}
       debug_surface: ${{ steps.plan.outputs.debug_surface }}
     steps:
@@ -77,17 +77,11 @@ jobs:
         # Through env, never `${{ }}` inline in run: — a ref name may carry quotes and $().
         env:
           REF_NAME: ${{ github.ref_name }}
-          HAS_KEY: ${{ secrets.INTERNAL_BUILD_KEY != '' }}
           # A push has no inputs: it gets what a Grid tester needs, Grid on and Debug off.
           GRID_SURFACE: ${{ github.event_name == 'push' || inputs.grid_surface }}
           DEBUG_SURFACE: ${{ github.event_name != 'push' && inputs.debug_surface }}
         run: |
           set -euo pipefail
-          # Seconds in rather than after 25 minutes of notarizing a build nobody could be sent.
-          if [ "$HAS_KEY" != true ]; then
-            echo "::error::The repository secret INTERNAL_BUILD_KEY is not set. Without it a public repository has no private way to hand out the link — RELEASE.md, \"Internal builds\"."
-            exit 1
-          fi
           # The next release's version, by that script's own reasoning (tags AND the live manifest)
           # rather than a second copy of it. --dry-run tags nothing and pushes nothing.
           plan="$(BRANCH="$REF_NAME" bash scripts/release-desktop.sh --dry-run)"
@@ -101,9 +95,13 @@ jobs:
           # restated here, where it would drift.
           flutter="$(sed -n "s/^  FLUTTER_VERSION: '\([^']*\)'.*/\1/p" .github/workflows/release.yml)"
           [ -n "$flutter" ] || { echo "::error::FLUTTER_VERSION not found in release.yml"; exit 1; }
+          # Keeps a build from being found by guessing: only its run page, or a forwarded link, leads to it.
+          token="$(openssl rand -hex 16)"
           {
             echo "version=$version"
             echo "flutter_version=$flutter"
+            echo "prefix=harness/desktop-internal/$token"
+            echo "short_sha=${GITHUB_SHA::7}"
             echo "grid_surface=$GRID_SURFACE"
             echo "debug_surface=$DEBUG_SURFACE"
           } >> "$GITHUB_OUTPUT"
@@ -116,27 +114,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { variant: intel, ota_key: desktop-macos, label: 'Intel, on Skia (runs on any Mac)' }
-          - { variant: apple-silicon, ota_key: desktop-macos-arm64, label: 'Apple Silicon, on Impeller' }
+          - { variant: intel, artifact: Harness-macos, ota_key: desktop-macos, label: 'Intel, on Skia (runs on any Mac)' }
+          - { variant: apple-silicon, artifact: Harness-macos-arm64, ota_key: desktop-macos-arm64, label: 'Apple Silicon, on Impeller' }
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      PREFIX: ${{ needs.prepare.outputs.prefix }}
       VARIANT: ${{ matrix.variant }}
       GRID_SURFACE: ${{ needs.prepare.outputs.grid_surface }}
       DEBUG_SURFACE: ${{ needs.prepare.outputs.debug_surface }}
+      # The file a tester downloads names the build it is: version AND commit.
+      ARTIFACT: ${{ matrix.artifact }}-${{ needs.prepare.outputs.version }}-${{ needs.prepare.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v7
-
-      # First, before any other step can print it. The path goes through $GITHUB_ENV rather than a
-      # job output: a masked value is dropped from outputs, and an unmasked one is public.
-      - name: Work out this build's unlisted path
-        env:
-          INTERNAL_BUILD_KEY: ${{ secrets.INTERNAL_BUILD_KEY }}
-        run: |
-          set -euo pipefail
-          object="$(bash scripts/internal-build-link.sh --object "$GITHUB_SHA" "$VARIANT")"
-          token="${object#harness/desktop-internal/}"
-          echo "::add-mask::${token%%/*}"
-          echo "OBJECT=$object" >> "$GITHUB_ENV"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -171,8 +160,6 @@ jobs:
         run: |
           set -euo pipefail
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          # A fixed path nothing ever writes — never the build's own, which would put its link
-          # inside the binary.
           bash scripts/publish-macos-variant.sh "$VARIANT" "$VERSION" --build-only \
             --dart-define=HARNESS_GRID_SURFACE="$GRID_SURFACE" \
             --dart-define=HARNESS_DEBUG_SURFACE="$DEBUG_SURFACE" \
@@ -188,32 +175,37 @@ jobs:
           set -euo pipefail
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # upload-desktop.sh's own overrides, every path moved off the release's. The manifest it
-          # always writes lands beside the build: read by nothing, it records what was published.
-          export GCS_PATH="$OBJECT.zip"
-          export DMG_GCS_PATH="$OBJECT.dmg"
-          export METADATA_PATH="${OBJECT%/*}/manifest.json"
+          # always writes lands under the prefix too: read by nothing, it records what was published.
+          export GCS_PATH="$PREFIX/$ARTIFACT.zip"
+          export DMG_GCS_PATH="$PREFIX/$ARTIFACT.dmg"
+          export METADATA_PATH="$PREFIX/manifest-$VARIANT.json"
           bash scripts/upload-desktop.sh --no-build "$VERSION"
           # upload-desktop.sh uploads with a year-long immutable cache: right for a release path
           # nobody ever changes, wrong for a build that may have to be taken back.
           gsutil -m setmeta -h "Cache-Control:private, max-age=0, no-store" \
             "gs://${GCS_BUCKET}/${GCS_PATH}" "gs://${GCS_BUCKET}/${DMG_GCS_PATH}"
 
-      # Everything a tester may know, and nothing that finds the build: this page is public.
-      - name: Say what was built
+      - name: Hand out the link
         env:
           LABEL: ${{ matrix.label }}
         run: |
           set -euo pipefail
+          url="https://storage.googleapis.com/${GCS_BUCKET}/${PREFIX}/${ARTIFACT}.dmg"
           sha="$(shasum -a 256 "build/Harness-macos-${VERSION}.dmg" | awk '{print $1}')"
+          # A notice as well as the summary: it sits at the top of the run page, where it is found.
+          echo "::notice title=macOS ${VARIANT}::${url}"
           {
             echo "### macOS — ${LABEL}"
+            echo
+            echo "**[${ARTIFACT}.dmg](${url})**"
             echo
             echo "${VERSION} · \`${GITHUB_SHA::7}\` on \`${GITHUB_REF_NAME}\` · Grid ${GRID_SURFACE} · Debug ${DEBUG_SURFACE} · self-update off"
             echo
             echo "dmg sha256 \`${sha}\`"
             echo
-            echo "The link is deliberately not printed: this repository, and this page, are public."
-            echo "With INTERNAL_BUILD_KEY: \`bash scripts/internal-build-link.sh ${GITHUB_SHA}\`"
+            echo "Unlisted, not private: this repository is public, so anyone who opens this page can"
+            echo "download the build. Take it back with \`gsutil -m rm -r gs://${GCS_BUCKET}/${PREFIX}\`"
+            echo "(both builds of this run)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the signing keychain

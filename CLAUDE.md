@@ -63,9 +63,8 @@ website download also read), Apple Silicon on Impeller under `desktop-macos-arm6
 `scripts/publish-macos-variant.sh` — RELEASE.md, "Two macOS builds", has the why. An **internal**
 build for testers — both macOS builds, signed and notarized by CI, behind an unlisted link, with
 self-update off — is `git push origin HEAD:internal/<name>` (`.github/workflows/internal-build.yml`,
-RELEASE.md "Internal builds"); never cut one by hand. **This repository is public**, logs and run
-summaries included, so CI never prints the link: `scripts/internal-build-link.sh <commit>` derives it
-from the `INTERNAL_BUILD_KEY` secret. All platforms
+RELEASE.md "Internal builds"); never cut one by hand. The run prints the links, and **this repository
+is public**, run pages included — so they are unlisted, not private. All platforms
 publish to the same GCS `metadata.json` under different keys and share one version
 number by default; `pubspec.yaml`'s `version:` is a placeholder and is never bumped — Linux instead
 gets a `version.txt` written into the built bundle at package time (see `lib/core/app_version.dart`,
