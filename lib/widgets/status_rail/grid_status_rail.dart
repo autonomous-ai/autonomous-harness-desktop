@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
@@ -125,9 +124,10 @@ class _GridStatusRailState extends State<GridStatusRail> {
     return SizedBox(
       height: GridStatusRail.height,
       child: Padding(
-        // Less on the right: the version mark carries its own hover inset, so
-        // 10 there lands on the same optical margin as 12 on the left.
-        padding: EdgeInsets.only(left: kGridSurfaceEnabled ? 4 : 12, right: 10),
+        // Even on both sides now. The right was 10 to offset the version mark's
+        // own hover inset, and that mark is gone — leaving 10 would be a
+        // two-pixel lean nothing accounts for any more.
+        padding: EdgeInsets.only(left: kGridSurfaceEnabled ? 4 : 12, right: 12),
         child: Row(
           children: [
             // The left of this strip answers whichever question this build
@@ -157,7 +157,6 @@ class _GridStatusRailState extends State<GridStatusRail> {
                 ),
               ),
             ),
-            const _VersionMark(),
           ],
         ),
       ),
@@ -1237,55 +1236,6 @@ class _EmptyProviderActionState extends State<_EmptyProviderAction> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _VersionMark extends StatefulWidget {
-  const _VersionMark();
-
-  @override
-  State<_VersionMark> createState() => _VersionMarkState();
-}
-
-class _VersionMarkState extends State<_VersionMark> {
-  // Read once per mount, not once per rebuild: the rail rebuilds on every
-  // refresh, and a future built in `build` would put the placeholder back for
-  // a frame each time. Not a static either — a future outlives the zone it
-  // was made in, and its callbacks are delivered to that zone, which is a
-  // problem the moment two tests share a process.
-  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    const style = TextStyle(fontSize: 10.5);
-    return FutureBuilder<PackageInfo>(
-      future: _info,
-      builder: (context, snapshot) {
-        final version = snapshot.data?.version;
-        // Answered with nothing (a bundle with no version, a plugin that is
-        // not there): say nothing, as before. A skeleton is a promise that
-        // something is coming, and here nothing is.
-        if (version == null &&
-            snapshot.connectionState == ConnectionState.done) {
-          return const SizedBox.shrink();
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: version == null
-              // Blank at the width of a version string, so the figures to
-              // its left do not shift right when it lands.
-              ? const SkeletonText(style: style, width: 34)
-              : Text(
-                  'v$version',
-                  style: style.copyWith(
-                    // Quiet is spent on size and weight, not ink.
-                    color: grid.AppPalette.textFaint,
-                  ),
-                ),
-        );
-      },
     );
   }
 }
