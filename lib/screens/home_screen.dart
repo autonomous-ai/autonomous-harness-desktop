@@ -295,35 +295,44 @@ class _HomeScreenState extends State<HomeScreen> {
               // Not the theme's: that one is still the old terminal palette, and it
               // is what showed through the seam above.
               backgroundColor: grid.AppPalette.windowBg,
-              body: Column(
-                children: [
-                  // The window's own strip, above the rail AND the grid. It
-                  // exists so the content below it starts clear of the
-                  // transparent title bar — see HarnessTopBar, which explains
-                  // why anything drawn up there cannot be dragged by Flutter.
-                  const HarnessTopBar(),
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final defaultWidth = (constraints.maxWidth * 0.18)
-                                  .clamp(252.0, 300.0)
-                                  .toDouble();
-                              final minWidth = 220.0;
-                              final maxWidth = (constraints.maxWidth * 0.5)
-                                  .clamp(minWidth, 520.0)
-                                  .toDouble();
-                              final railWidth = (_railWidth ?? defaultWidth)
-                                  .clamp(minWidth, maxWidth);
-                              // THE FIELD RUNS UNDER EVERYTHING, rail included, and one margin
-                              // holds the lot. It used to start where the rail ended, so the two
-                              // surfaces met along a hard seam that belonged to neither: every tile
-                              // floated as a card while the rail alone stayed bolted to the window
-                              // with square corners.
-                              return GridField(
-                                child: Padding(
+              // THE FIELD SPANS THE BODY, so it runs behind the status rail as well as the grid.
+              //
+              // Wrapped any further in and the gradient stops where the grid stops — which is what
+              // made the transparent rail look unchanged: with no fill of its own it simply showed
+              // the scaffold's flat colour, a shade off the one it had just given up. The top bar
+              // paints its own opaque fill over this, so nothing changes up there.
+              body: GridField(
+                child: Column(
+                  children: [
+                    // The window's own strip, above the rail AND the grid. It
+                    // exists so the content below it starts clear of the
+                    // transparent title bar — see HarnessTopBar, which explains
+                    // why anything drawn up there cannot be dragged by Flutter.
+                    const HarnessTopBar(),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final defaultWidth =
+                                    (constraints.maxWidth * 0.18)
+                                        .clamp(252.0, 300.0)
+                                        .toDouble();
+                                final minWidth = 220.0;
+                                final maxWidth = (constraints.maxWidth * 0.5)
+                                    .clamp(minWidth, 520.0)
+                                    .toDouble();
+                                final railWidth = (_railWidth ?? defaultWidth)
+                                    .clamp(minWidth, maxWidth);
+                                // THE FIELD RUNS UNDER EVERYTHING, rail included, and one margin
+                                // holds the lot. It used to start where the rail ended, so the two
+                                // surfaces met along a hard seam that belonged to neither: every tile
+                                // floated as a card while the rail alone stayed bolted to the window
+                                // with square corners.
+                                // The margin only. The field itself is up at the body now, so
+                                // one gradient covers the window instead of one per region.
+                                return Padding(
                                   padding: const EdgeInsets.all(kPaneGap),
                                   child: Row(
                                     children: [
@@ -368,74 +377,74 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ],
                                   ),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                        // Floating, not a row in the Column: taking layout
-                        // here would resize every pane — a real SIGWINCH to
-                        // every pty on screen — to deliver a message. Bottom
-                        // left, so it sits directly over the usage figure it
-                        // is about.
-                        Positioned(
-                          left: UsageLimitNotice.inset,
-                          bottom: UsageLimitNotice.inset,
-                          child: UsageLimitNotice(
-                            notifier: notifier,
-                            usage: _usage,
-                          ),
-                        ),
-                        if (_collapsed)
+                          // Floating, not a row in the Column: taking layout
+                          // here would resize every pane — a real SIGWINCH to
+                          // every pty on screen — to deliver a message. Bottom
+                          // left, so it sits directly over the usage figure it
+                          // is about.
                           Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: _RailReveal(
+                            left: UsageLimitNotice.inset,
+                            bottom: UsageLimitNotice.inset,
+                            child: UsageLimitNotice(
                               notifier: notifier,
-                              onExpand: () =>
-                                  setState(() => _collapsed = false),
+                              usage: _usage,
                             ),
                           ),
-                        if (notifier.lastError != null)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 0,
-                            child: _ErrorStrip(
-                              message: notifier.lastError!,
-                              retryable: notifier.lastErrorRetryable,
-                              onRetry: notifier.retryMachines,
-                              onDismiss: notifier.dismissError,
+                          if (_collapsed)
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              child: _RailReveal(
+                                notifier: notifier,
+                                onExpand: () =>
+                                    setState(() => _collapsed = false),
+                              ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // What this grid is made of, along the very bottom. Outside
-                  // the Expanded above so it is full-bleed under the machine
-                  // rail as well as the panes — a strip that started after the
-                  // rail would put a step in the window's bottom edge.
-                  GridStatusRail(
-                    // Two things need it, for one reason: the rail holds no
-                    // `AppNotifier` and both of these open Settings.
-                    notifier: notifier,
-                    // The shell's, shared with the card above — see [_usage].
-                    usage: _usage,
-                    // The node dashboard's empty state offers to put THIS
-                    // computer on the grid, and the screen that does it is a
-                    // Settings pane — which needs the notifier the shell holds
-                    // and the rail does not.
-                    onShareIntelligence: () => unawaited(
-                      showSettingsScreen(
-                        context,
-                        notifier,
-                        initialSection: SettingsSection.shareIntelligence,
-                        source: 'node_dashboard',
+                          if (notifier.lastError != null)
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              top: 0,
+                              child: _ErrorStrip(
+                                message: notifier.lastError!,
+                                retryable: notifier.lastErrorRetryable,
+                                onRetry: notifier.retryMachines,
+                                onDismiss: notifier.dismissError,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    // What this grid is made of, along the very bottom. Outside
+                    // the Expanded above so it is full-bleed under the machine
+                    // rail as well as the panes — a strip that started after the
+                    // rail would put a step in the window's bottom edge.
+                    GridStatusRail(
+                      // Two things need it, for one reason: the rail holds no
+                      // `AppNotifier` and both of these open Settings.
+                      notifier: notifier,
+                      // The shell's, shared with the card above — see [_usage].
+                      usage: _usage,
+                      // The node dashboard's empty state offers to put THIS
+                      // computer on the grid, and the screen that does it is a
+                      // Settings pane — which needs the notifier the shell holds
+                      // and the rail does not.
+                      onShareIntelligence: () => unawaited(
+                        showSettingsScreen(
+                          context,
+                          notifier,
+                          initialSection: SettingsSection.shareIntelligence,
+                          source: 'node_dashboard',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

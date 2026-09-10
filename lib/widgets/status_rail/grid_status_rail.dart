@@ -116,55 +116,49 @@ class _GridStatusRailState extends State<GridStatusRail> {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        // The rail's own fill, matching the machine rail it runs under — both
-        // are window furniture, and a third tone here would read as a third
-        // pane.
-        color: grid.AppGlass.sidebarFill,
-        border: Border(top: BorderSide(color: grid.AppPalette.divider)),
-      ),
-      child: SizedBox(
-        height: GridStatusRail.height,
-        child: Padding(
-          // Less on the right: the version mark carries its own hover inset, so
-          // 10 there lands on the same optical margin as 12 on the left.
-          padding: EdgeInsets.only(
-            left: kGridSurfaceEnabled ? 4 : 12,
-            right: 10,
-          ),
-          child: Row(
-            children: [
-              // The left of this strip answers whichever question this build
-              // can. With a grid chosen it is the grid's figures; with none —
-              // or in a build that hides Grid altogether — it is what the agent
-              // accounts on this machine have spent, which is true either way
-              // because a rate limit belongs to an account rather than a grid.
-              // It used to read "No grid chosen", a sentence that tells someone
-              // what they already know and hands a riddle to anyone who cannot
-              // pick one.
-              Expanded(
-                child: ListenableBuilder(
-                  // `_controller` is `late` and must stay untouched in a build
-                  // that hides Grid — see [dispose]. The `if` guards the read,
-                  // not just the listening.
-                  listenable: Listenable.merge([
-                    if (kGridSurfaceEnabled) _controller,
-                    _usage,
-                  ]),
-                  builder: (context, _) => _Readout(
-                    controller: kGridSurfaceEnabled ? _controller : null,
-                    usage: _usage,
-                    notifier: widget.notifier,
-                    selection: widget.selection,
-                    enablement: widget.enablement,
-                    onShareIntelligence: widget.onShareIntelligence,
-                  ),
+    // NO FILL, NO RULE — the strip is its text and nothing else.
+    //
+    // It used to paint AppGlass.sidebarFill with a hairline on top, matching the machine rail it ran
+    // under: both were window furniture and a third tone would have read as a third pane. That rail is
+    // a floating card on a gradient field now, so what this matched no longer exists, and a flat grey
+    // slab laid across the bottom of the window was the one surface that did not belong to anything.
+    return SizedBox(
+      height: GridStatusRail.height,
+      child: Padding(
+        // Less on the right: the version mark carries its own hover inset, so
+        // 10 there lands on the same optical margin as 12 on the left.
+        padding: EdgeInsets.only(left: kGridSurfaceEnabled ? 4 : 12, right: 10),
+        child: Row(
+          children: [
+            // The left of this strip answers whichever question this build
+            // can. With a grid chosen it is the grid's figures; with none —
+            // or in a build that hides Grid altogether — it is what the agent
+            // accounts on this machine have spent, which is true either way
+            // because a rate limit belongs to an account rather than a grid.
+            // It used to read "No grid chosen", a sentence that tells someone
+            // what they already know and hands a riddle to anyone who cannot
+            // pick one.
+            Expanded(
+              child: ListenableBuilder(
+                // `_controller` is `late` and must stay untouched in a build
+                // that hides Grid — see [dispose]. The `if` guards the read,
+                // not just the listening.
+                listenable: Listenable.merge([
+                  if (kGridSurfaceEnabled) _controller,
+                  _usage,
+                ]),
+                builder: (context, _) => _Readout(
+                  controller: kGridSurfaceEnabled ? _controller : null,
+                  usage: _usage,
+                  notifier: widget.notifier,
+                  selection: widget.selection,
+                  enablement: widget.enablement,
+                  onShareIntelligence: widget.onShareIntelligence,
                 ),
               ),
-              const _VersionMark(),
-            ],
-          ),
+            ),
+            const _VersionMark(),
+          ],
         ),
       ),
     );
