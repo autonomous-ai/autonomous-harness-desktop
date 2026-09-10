@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'local_key_value_store.dart';
+import 'viewer_mode.dart';
 
 /// Versioned Harness desktop state stored under the user's Harness home.
 ///
@@ -11,9 +12,13 @@ import 'local_key_value_store.dart';
 /// POSIX platforms. Values are never logged.
 class HarnessFileStore implements LocalKeyValueStore {
   static const schemaVersion = 1;
-  // Keep this legacy namespace stable across the product rename so existing
-  // credentials and E2EE pairing state remain available after upgrading.
-  static const directoryName = 'desktop-app';
+
+  /// A desktop build keeps the legacy `desktop-app` namespace stable across the product rename, so
+  /// existing credentials and E2EE pairing state remain available after upgrading. A viewer build
+  /// is a different product holding a different session — its own SSO tokens and its own E2EE
+  /// identity — so it lives beside that one rather than in it: on a Mac, where the viewer path is
+  /// developed, the two would otherwise overwrite each other's state.
+  static final String directoryName = kViewerMode ? 'viewer-app' : 'desktop-app';
   static const fileName = 'state.json';
   static const lockFileName = 'state.lock';
 
@@ -43,6 +48,8 @@ class HarnessFileStore implements LocalKeyValueStore {
     if (home == null || home.isEmpty) {
       throw StateError('Could not resolve the current user home directory');
     }
+    // An iOS app's HOME is its sandbox container, whose root it may not write to.
+    if (Platform.isIOS) home = _join(_join(home, 'Library'), 'Application Support');
     return _join(_join(home, '.harness'), name ?? directoryName);
   }
 
@@ -175,8 +182,10 @@ class HarnessFileStore implements LocalKeyValueStore {
 
   Future<void> _makePrivateFile(File file) => _chmod(file.path, '600');
 
+  /// Windows has no POSIX modes, and iOS neither needs one — the app's sandbox is already private
+  /// to it — nor can spawn `/bin/chmod` at all.
   Future<void> _chmod(String path, String mode) async {
-    if (Platform.isWindows) return;
+    if (Platform.isWindows || Platform.isIOS) return;
     final result = await Process.run('/bin/chmod', [mode, path]);
     if (result.exitCode != 0) {
       throw FileSystemException('Could not set mode $mode', path);

@@ -13,7 +13,11 @@ import 'package:window_manager/window_manager.dart';
 ///
 /// The sizes are Grid's too, so the two apps open to the same frame on a desk
 /// where both are running.
+///
+/// A phone has no window to shape, and `window_manager` has no iOS half to ask:
+/// there this returns before touching the plugin.
 Future<void> configureDesktopWindow() async {
+  if (!(Platform.isMacOS || Platform.isLinux || Platform.isWindows)) return;
   await windowManager.ensureInitialized();
   final options = WindowOptions(
     size: const Size(1280, 800),

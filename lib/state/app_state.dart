@@ -4,18 +4,20 @@ import 'dart:io' show exit, pid;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../analytics/analytics.dart';
 import '../api/api_client.dart';
 import '../auth/auth_session.dart';
 import '../auth/cli_link.dart';
 import '../auth/cli_login.dart';
+import '../auth/peer_link_client.dart';
+import '../auth/sign_in_client.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/engine_availability.dart';
 import '../core/models.dart';
 import '../core/retry.dart';
+import '../core/viewer_mode.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_session.dart';
 import '../logging/app_log.dart';
@@ -28,6 +30,8 @@ import 'terminal_pane.dart';
 import '../terminal/terminal_binary.dart';
 import '../update/desktop_updater.dart';
 import '../update/manual_update_check.dart';
+import '../viewer/sign_in_browser.dart';
+import '../viewer/viewer_services.dart';
 import '../ws/ws_conn.dart';
 import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
@@ -193,8 +197,20 @@ class AppNotifier extends ChangeNotifier {
   final AuthSession session;
   AppConfig config;
   late ApiClient api;
-  final CliLogin cliLogin;
+
+  /// Signs in, and says whether this computer is signed in: the harness CLI in a desktop build,
+  /// [ViewerServices.login] in a viewer build — which has no CLI — under one name, so every call
+  /// site reads the same in both.
+  late final SignInClient cliLogin;
   final CliLink cliLink;
+
+  /// Links to other machines by remote password: [cliLink] in a desktop build, the app itself in a
+  /// viewer. THIS machine's own remote password stays on [cliLink] — a viewer is not a machine, and
+  /// has no password for anyone to link to.
+  late final PeerLinkClient peerLinks;
+
+  /// A viewer build's stand-ins for the harness CLI (`lib/viewer/`); null on a desktop build.
+  final ViewerServices? viewer;
   final ConfigStore? _store;
 
   /// Spoken tasks waiting for a palette. Broadcast because the screen subscribes and unsubscribes with
@@ -354,19 +370,34 @@ class AppNotifier extends ChangeNotifier {
     this.localCliDiscovery,
     this.environmentProvisioner,
     this.desktopUpdater,
-    CliLogin? cliLogin,
+    SignInClient? cliLogin,
     CliLink? cliLink,
+    PeerLinkClient? peerLinks,
+    ViewerServices? viewer,
     PaneLayoutStore? paneLayoutStore,
     this.turnActivityTimeout = const Duration(seconds: 12),
   }) : _paneLayout = paneLayoutStore,
        session = authSession,
        _store = configStore,
-       cliLogin = cliLogin ?? CliLogin(),
        cliLink = cliLink ?? CliLink(),
-       config = configStore?.config ?? config {
+       config = configStore?.config ?? config,
+       viewer =
+           viewer ??
+           (kViewerMode
+               ? ViewerServices(
+                   config: configStore?.config ?? config,
+                   session: authSession,
+                 )
+               : null) {
+    this.cliLogin = cliLogin ?? this.viewer?.login ?? CliLogin();
+    this.peerLinks = peerLinks ?? this.viewer?.links ?? this.cliLink;
     _autonomousEnv = this.config.autonomousEnv;
-    api = ApiClient(config: this.config, session: session);
+    api = _newApiClient();
   }
+
+  /// Through the local CLI in a desktop build; straight to the backend, signed, in a viewer.
+  ApiClient _newApiClient() =>
+      ApiClient(config: config, session: session, auth: viewer?.auth);
 
   String? get lastError => _lastError;
   bool get lastErrorRetryable => _lastErrorRetryable;
@@ -483,6 +514,9 @@ class AppNotifier extends ChangeNotifier {
   /// Fire-and-forget, and only for a tile that has an agent: a machine tile is not somewhere the
   /// dial can go.
   void _announceFocusToDial() {
+    // The dial hangs off a machine's own CLI. A viewer has none, and over the relay this frame
+    // would cross in the clear, naming an agent.
+    if (viewer != null) return;
     final pane = focusedPane;
     final agentId = pane?.agentId;
     if (pane == null || agentId == null) return;
@@ -517,6 +551,8 @@ class AppNotifier extends ChangeNotifier {
   /// roster lets that one judge; the others store a list they never use, which
   /// costs nothing and saves the window from having to know which is which.
   void _announceOpenPanesToDial() {
+    // As [_announceFocusToDial]: no dial behind a viewer, and nothing for the relay to read.
+    if (viewer != null) return;
     final pool = _pool;
     if (pool == null) return;
     final agentIds = <String>[for (final pane in panes) ?pane.agentId];
@@ -733,13 +769,17 @@ class AppNotifier extends ChangeNotifier {
         // history) — a stale `stag` value saved before that removal must
         // never silently resurrect it.
         _autonomousEnv = 'prod';
-        api = ApiClient(config: config, session: session);
+        api = _newApiClient();
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
         _environmentSetupVersion = _store.environmentSetupVersion;
       }
-      _startUpdateChecking();
-      final environmentReady = await _prepareEnvironment();
-      if (!environmentReady) return;
+      // A viewer installs nothing and is updated by its store: provisioning and the updater both
+      // serve a computer that runs the harness CLI.
+      if (viewer == null) {
+        _startUpdateChecking();
+        final environmentReady = await _prepareEnvironment();
+        if (!environmentReady) return;
+      }
       await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint('bootstrap: fallback to login after error: $error\n$stack');
@@ -836,9 +876,9 @@ class AppNotifier extends ChangeNotifier {
   /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
   /// load and update-check startup, which already ran on the launch that got stuck here.
   Future<void> _continueAfterEnvironmentReady() async {
-    // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
-    // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
-    // asks the CLI whether this computer is currently signed in.
+    // Auth lives with the local `harness` CLI — it owns the SSO session on disk and refreshes it
+    // itself, and this app just asks it whether this computer is signed in. The exception is a
+    // viewer build, which has no CLI: there `cliLogin` is the session the app holds itself.
     final authStatus = await cliLogin.checkStatus();
     if (!authStatus.loggedIn) {
       currentUser = null;
@@ -916,7 +956,7 @@ class AppNotifier extends ChangeNotifier {
   void _bootstrapLocalManual(LocalManualFixture fixture) {
     _autonomousEnv = 'prod';
     config = AppConfig(apiBaseUrl: fixture.apiBaseUrl);
-    api = ApiClient(config: config, session: session);
+    api = _newApiClient();
     currentUser = const CurrentUserProfile.local();
     final machine = Machine(
       machineId: fixture.machineId,
@@ -949,7 +989,7 @@ class AppNotifier extends ChangeNotifier {
     // race `harness start`'s own backend handshake and surface a bogus 30s "Could not load
     // machines" timeout. A daemon that never comes up still gets a home screen below, with
     // the failure shown there as before, since that's where the retry affordance lives.
-    _bootStatusMessage = 'Starting local service…';
+    _bootStatusMessage = viewer == null ? 'Starting local service…' : null;
     notifyListeners();
     // Before the machines, deliberately: the tiles are intent, they render as
     // "waiting for that machine" on their own, and each attaches as its machine
@@ -1026,6 +1066,8 @@ class AppNotifier extends ChangeNotifier {
   /// must not have its login reported as a failure over it — the Grid pane
   /// still has its own button, and says why when it cannot.
   Future<void> _ensureGridSession() async {
+    // Grid's sign-in runs `harness grid login`, and a viewer has no harness CLI to run it with.
+    if (viewer != null) return;
     try {
       // `signIn` is "make sure there is one FOR THIS ACCOUNT" — it re-reads and
       // returns early on a machine already signed in as `account`, so the guard
@@ -1047,6 +1089,8 @@ class AppNotifier extends ChangeNotifier {
   /// machine's WsConn now uses. Public (like [refreshMachines]) so a test subclass can stub it
   /// without shelling out to a real `harness` binary.
   Future<void> ensureCliDaemonReady() async {
+    // A viewer has no daemon to start: it reaches every machine through the relay.
+    if (viewer != null) return;
     final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
     final endpoint = await discovery.ensureRunning();
     if (endpoint == null) {
@@ -1200,9 +1244,7 @@ class AppNotifier extends ChangeNotifier {
           // Must be the system browser, not an embedded webview: this SSO page's Google button uses
           // Google's popup-based Identity Services flow (a real popup window posts the result back to
           // its opener), which only a real browser can satisfy.
-          unawaited(
-            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-          );
+          unawaited(openSignInPage(Uri.parse(url)));
         },
       );
       await _finishBootstrapSignedIn();
@@ -1224,6 +1266,7 @@ class AppNotifier extends ChangeNotifier {
         error is CliNotAvailableException ? 'cli_missing' : 'failed',
       );
     } finally {
+      unawaited(closeSignInPage());
       pendingAuthorizeUrl = null;
       // Cleared last, and only here: everything above may still be running when the URL goes, and
       // dropping the flag any earlier is what put a bare spinner over the user's own screen.
@@ -1251,11 +1294,13 @@ class AppNotifier extends ChangeNotifier {
     // the account they asked to leave. Said out loud rather than swallowed —
     // when it fails the credential is still there, which is exactly the thing
     // the user needs to know.
-    unawaited(
-      gridSessionStore.signOut().then((failure) {
-        if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
-      }),
-    );
+    if (viewer == null) {
+      unawaited(
+        gridSessionStore.signOut().then((failure) {
+          if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
+        }),
+      );
+    }
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();
@@ -1286,20 +1331,28 @@ class AppNotifier extends ChangeNotifier {
     _pool = WsPool(
       wsBaseUrl: config.wsBaseUrl,
       autonomousEnv: _autonomousEnv,
-      // Every real WsConn now dials the local CLI's loopback WS (transportKind.localPlaintext, see
-      // _conn()), which never calls this — only the compile-time-only local-manual dev fixture (see
-      // LocalManualFixture) still dials a backend directly with a token.
-      accessTokenProvider: (_, _) async {
+      // A desktop build's WsConns dial the local CLI's loopback WS (transportKind.localPlaintext,
+      // see _conn()), which never calls this. Only a viewer build — which dials the relay itself —
+      // and the compile-time-only local-manual dev fixture (see LocalManualFixture) need a token.
+      accessTokenProvider: (force, failedToken) async {
+        final directAuth = viewer?.auth;
+        if (directAuth != null) {
+          return directAuth.accessToken(force: force, failedToken: failedToken);
+        }
         final fixture = localManualFixture;
         if (fixture != null) return fixture.apiKey;
         throw StateError(
-          'unreachable: only the local-manual dev fixture uses a token-bearing WS transport',
+          'unreachable: only a viewer build and the local-manual dev fixture use a token-bearing WS transport',
         );
       },
+      relayCodecs: viewer?.relayCodecs,
       onAuthFailure: _signedOutAtRuntime,
       onLocalFailure: (machineId, code, reason) {
         final machine = machineStates[machineId];
         if (machine == null || code != 4404) return;
+        // The machine no longer trusts this device (`harness unpair` on its side), so the pin is
+        // stale too — kept, it would only have the next dial refused again.
+        if (reason == 'E2E_DENIED') unawaited(viewer?.keys.unlink(machineId));
         // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
         // A `harness link connect` run in a terminal (or another app instance) has no way to notify
         // this one directly, so poll every few seconds until it's picked up instead of waiting for
@@ -1391,11 +1444,17 @@ class AppNotifier extends ChangeNotifier {
   }
 
   Future<void> _refreshMachines() async {
-    final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
+    // No machine is "this computer" to a viewer, which has no local CLI: every one — even the one
+    // it runs on — is reached through the relay.
+    final discovery = viewer == null
+        ? localCliDiscovery ?? LocalCliDiscovery(config: config)
+        : null;
     // The CLI computer id is the local identity source of truth. The loopback
     // status endpoint is trusted only when it advertises that same identity.
-    final localComputerId = await discovery.computerId();
-    final localFuture = discovery.discover(expectedComputerId: localComputerId);
+    final localComputerId = await discovery?.computerId();
+    final localFuture =
+        discovery?.discover(expectedComputerId: localComputerId) ??
+        Future<LocalCliEndpoint?>.value();
     final list = await _fetchMachines();
     final localEndpoint = await localFuture;
     machines = list
@@ -1603,17 +1662,17 @@ class AppNotifier extends ChangeNotifier {
   Future<void> retryOfflineMachine(String machineId) =>
       _pollOfflineMachine(machineId);
 
-  /// Runs `harness link connect <machineId> --stdin --json` (via [CliLink]) for a machine the
-  /// relay reported `NO_PEER_LINK` for, then reconnects it. Returns null on success, or an error
-  /// message to show inline. The app never sees the password's cryptographic use — this just
-  /// pipes it to the CLI on stdin, the same as typing it at a terminal prompt would.
+  /// Links a machine the relay reported `NO_PEER_LINK` for, then reconnects it. Returns null on
+  /// success, or an error message to show inline. Through [peerLinks]: a desktop build pipes the
+  /// password to `harness link connect --stdin`, the same as typing it at a terminal prompt; a
+  /// viewer build runs the same password exchange itself.
   Future<String?> connectWithPassword(
     String machineId,
     String password, {
     void Function(String stage)? onProgress,
   }) async {
     if (password.isEmpty) return 'Enter the remote password first';
-    final result = await cliLink.connect(
+    final result = await peerLinks.connect(
       machineId,
       password,
       onProgress: onProgress,
@@ -1655,7 +1714,7 @@ class AppNotifier extends ChangeNotifier {
   Future<void> refreshLinkedMachines() async {
     linkedMachinesLoading = true;
     notifyListeners();
-    final result = await cliLink.list();
+    final result = await peerLinks.list();
     linkedMachinesLoading = false;
     linkedMachinesError = result.error;
     linkedMachines = result.machines;
@@ -1664,7 +1723,7 @@ class AppNotifier extends ChangeNotifier {
 
   /// Removes a linked machine's trust pin, then refreshes the list. Returns null on success.
   Future<String?> unlinkMachine(String machineId) async {
-    final error = await cliLink.unlink(machineId);
+    final error = await peerLinks.unlink(machineId);
     if (error == null) await refreshLinkedMachines();
     return error;
   }
@@ -1855,8 +1914,9 @@ class AppNotifier extends ChangeNotifier {
     // `harness` CLI involved) — keep it on the old direct-cloud dial. Every other (real) machine now
     // goes through the local CLI daemon regardless of whether it's this computer's own machine or a
     // relayed one: the CLI proxies foreign machines to backend transparently (see `remoteRelay.ts` in
-    // the harness CLI repo), so this app never dials backend's WS directly anymore.
-    final connection = localManualFixture != null
+    // the harness CLI repo), so this app never dials backend's WS directly — except in a viewer
+    // build, which has no CLI to go through and holds the E2EE session itself (see ViewerServices).
+    final connection = localManualFixture != null || viewer != null
         ? _pool!.connFor(machineId, transportKind: WsTransportKind.cloudE2ee)
         : _pool!.connFor(
             machineId,

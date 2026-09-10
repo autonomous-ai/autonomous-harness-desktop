@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../core/models.dart';
+import 'relay_codec.dart';
 import 'ws_conn.dart';
 
 /// Owns one SSO-authenticated [WsConn] per machine.
@@ -15,6 +16,9 @@ class WsPool {
   onEvent;
   final void Function(String machineId, ConnectionStatus status) onStatus;
 
+  /// Handed to every relay connection — a viewer build's E2EE sessions (see [RelayCodec]).
+  final RelayCodecFactory? relayCodecs;
+
   final Map<String, WsConn> _conns = {};
 
   WsPool({
@@ -25,6 +29,7 @@ class WsPool {
     this.onLocalFailure,
     required this.onEvent,
     required this.onStatus,
+    this.relayCodecs,
   });
 
   WsConn connFor(
@@ -59,6 +64,9 @@ class WsPool {
       localWsUri: localWsUri,
       localApiKey: localApiKey,
       localProtocolVersion: localProtocolVersion,
+      relayCodecs: transportKind == WsTransportKind.cloudE2ee
+          ? relayCodecs
+          : null,
     );
     _conns[machineId] = conn;
     unawaited(conn.connect());
