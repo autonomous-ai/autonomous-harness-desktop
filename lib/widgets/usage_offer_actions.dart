@@ -76,6 +76,9 @@ Future<void> runUsageOffer(
       context,
       notifier,
       initialSection: SettingsSection.grid,
+      // The one door that arrives from a person who has just been told they
+      // are nearly out of quota — which is why it is worth telling apart.
+      source: 'usage_offer',
     );
     return;
   }

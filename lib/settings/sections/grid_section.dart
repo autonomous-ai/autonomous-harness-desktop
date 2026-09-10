@@ -89,14 +89,18 @@ class GridSection extends StatefulWidget {
   /// app, which reads the CLI's own run records.
   final ({String gridId, EngineRunRecord run})? Function()? liveEngine;
 
-  /// Take the reader to another Settings pane.
+  /// Take the reader to another Settings pane, saying which button did it.
   ///
   /// Only [SettingsScreen] can do this — the rail and the pane are siblings —
   /// so it is passed down rather than reached for. Null in a test that is not
   /// asserting about navigation, which leaves `Add model` off the panel
   /// entirely: a button that pins a setting and then goes nowhere would be a
   /// worse lie than no button.
-  final ValueChanged<SettingsSection>? onShowSection;
+  ///
+  /// The source reaches `screen_view`, so "came here from Add model" and "chose
+  /// Share Intelligence in the rail" stay two numbers. They are two different
+  /// visits: one is a person who has just been told a provider serves nothing.
+  final void Function(SettingsSection section, String source)? onShowSection;
 
   @override
   State<GridSection> createState() => _GridSectionState();
@@ -458,7 +462,7 @@ class _GridSectionState extends State<GridSection> {
         networkName: network.displayName,
       ),
     );
-    widget.onShowSection?.call(SettingsSection.shareIntelligence);
+    widget.onShowSection?.call(SettingsSection.shareIntelligence, 'add_model');
   }
 
   /// Invite people to a provider.

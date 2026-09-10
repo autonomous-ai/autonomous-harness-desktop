@@ -212,6 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
         machineId: pane.machineId,
         agentId: agentId,
         engine: engine,
+        source: 'shortcut',
       ),
     );
   }
@@ -278,6 +279,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   context,
                   notifier,
                   initialSection: SettingsSection.debug,
+                  source: 'shortcut',
                 ),
               ),
             },
@@ -404,6 +406,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         context,
                         notifier,
                         initialSection: SettingsSection.shareIntelligence,
+                        source: 'node_dashboard',
                       ),
                     ),
                   ),

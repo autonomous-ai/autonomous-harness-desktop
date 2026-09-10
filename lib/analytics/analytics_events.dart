@@ -29,8 +29,22 @@ extension AnalyticsEvents on Analytics {
   /// A screen was opened. [screen] is the section's stable name, never its
   /// label — labels are rewritten weekly and a renamed label would read as a
   /// new screen.
-  void screenView(String screen) =>
-      track('screen_view', params: {'screen': screen});
+  ///
+  /// [source] is the DOOR that was used, and it is `required` for the reason
+  /// `new_agent_opened`'s is: a screen with several ways in tells you almost
+  /// nothing as a bare count. Settings ▸ Providers alone is reachable from the
+  /// account menu, from either provider pill's `Provider settings…`, and from
+  /// the subscription-limit card's `Choose a provider` — three quite different
+  /// intentions, and the last one arrives from a person who has just been told
+  /// they are nearly out of quota.
+  ///
+  /// Values: `account_menu`, `pill_menu`, `rail_menu`, `usage_offer`,
+  /// `node_dashboard`, `shortcut` (a door that OPENED Settings on this pane);
+  /// `rail` (moved here from another pane, using the settings rail — also the
+  /// node dashboard's own door); `add_model` (Providers ▸ Add model, which
+  /// pins the share target and lands on Share Intelligence).
+  void screenView(String screen, {required String source}) =>
+      track('screen_view', params: {'screen': screen, 'source': source});
 
   // --- Sign-in ------------------------------------------------------------
 
@@ -62,11 +76,17 @@ extension AnalyticsEvents on Analytics {
   // about the one before it. A grid is identified by [networkId] only; its
   // NAME is user-chosen text and never leaves the machine.
 
-  /// The user chose which grid new agents run against. [source] = `pill` (the
-  /// sidebar) or `settings` (Settings ▸ Grid) — the two doors, kept apart so
-  /// the funnel sees which one people take. [networkId] is null for "No
-  /// grid", which is a choice like any other and the one a funnel most needs
-  /// to be able to count.
+  /// The user chose which grid new agents run against.
+  ///
+  /// [source] = `rail` (the provider pill on the status rail) or `settings`
+  /// (Settings ▸ Providers) — the two doors, kept apart so the funnel sees
+  /// which one people take. ⚠️ A third, `pill`, is in the data up to
+  /// 2026-09-09 and can no longer be sent: it was the SIDEBAR pill
+  /// (`GridTargetPill`), which the rail's replaced and which nothing builds
+  /// any more.
+  ///
+  /// [networkId] is null for "No grid", which is a choice like any other and
+  /// the one a funnel most needs to be able to count.
   void gridPicked({required String source, String? networkId}) => track(
     'grid_picked',
     params: {
@@ -200,6 +220,34 @@ extension AnalyticsEvents on Analytics {
   }) => track(
     'app_first_message',
     params: {'from': from, 'seconds_since_login': secondsSinceLogin},
+  );
+
+  /// Somebody asked to change a running agent's model — the `Model` pill in a
+  /// pane header, or ⇧⌘M on the focused pane.
+  ///
+  /// **Fired inside `pickAgentModel`, the one function both doors run**, for
+  /// the reason `new_agent_opened` is fired inside `showNewAgentDialog`: a
+  /// third door must declare itself rather than quietly file itself under an
+  /// existing name. [source] is `required` for the same reason.
+  ///
+  /// ⚠️ **A row is NOT necessarily an opened picker.** [outcome] says what the
+  /// click got: `opened`, or the refusal that took its place — `busy` (the
+  /// agent is mid-turn, the refusal people actually meet), `unsupported` (an
+  /// engine that cannot use a grid at all) or `restarting` (a move already in
+  /// flight). Those reach the keyboard door with no tooltip to have read
+  /// first, so how often they land is a real question. Count
+  /// `outcome='opened'` for the funnel step; the rest is the friction in front
+  /// of it.
+  ///
+  /// What was PICKED is not here — that is [gridAgentRetargeted], which
+  /// already carries the model, the outcome and the CLI's refusal code.
+  void modelChangeRequested({
+    required String source,
+    required String engine,
+    required String outcome,
+  }) => track(
+    'model_change_requested',
+    params: {'source': source, 'engine': engine, 'outcome': outcome},
   );
 
   /// A RUNNING agent was moved onto a grid, or onto a different model.

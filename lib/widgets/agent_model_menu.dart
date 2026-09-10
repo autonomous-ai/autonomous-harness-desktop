@@ -42,6 +42,7 @@ import '../grid/model_recents_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/skeleton.dart';
 import '../shared/widgets/toolbar_pill.dart';
+import '../analytics/analytics.dart';
 import '../state/app_state.dart';
 import 'model_picker_dialog.dart';
 
@@ -122,6 +123,9 @@ Future<void> pickAgentModel(
   required String machineId,
   required String agentId,
   required String engine,
+  // `required`, not defaulted: see [AnalyticsEvents.modelChangeRequested]. A
+  // door that can leave this out is a door that reports as another one.
+  required String source,
   bool gridSurface = kGridSurfaceEnabled,
 }) async {
   // ⚠️ The guard lives HERE, in the one function both doors run, and not only
@@ -129,19 +133,32 @@ Future<void> pickAgentModel(
   // to open, and this is what makes that true for any caller — the shortcut,
   // the pill, and whatever door is added next.
   if (!gridSurface) return;
+  // Above the tracking: a build with no providers draws no pill, so there is no
+  // click to report and nothing here ever runs.
+  void report(String outcome) => analytics.modelChangeRequested(
+    source: source,
+    engine: engine,
+    outcome: outcome,
+  );
   final key = _retargetKey(machineId, agentId);
-  if (retargetingAgents.value.contains(key)) return;
+  if (retargetingAgents.value.contains(key)) {
+    report('restarting');
+    return;
+  }
   // The pill is already disabled for both of these, so they only ever fire from
   // the keyboard — where there is no tooltip to have read first, and a shortcut
   // that answers with nothing is indistinguishable from one that is not bound.
   if (!kGridCapableEngines.contains(engine)) {
+    report('unsupported');
     _say(context, '$engine cannot use a grid');
     return;
   }
   if (notifier.agentIsProcessing(machineId, agentId)) {
+    report('busy');
     _say(context, 'It is running a turn. Change the model when it finishes.');
     return;
   }
+  report('opened');
 
   final current = currentModelChoice(
     agentGridOf(notifier, machineId, agentId),
@@ -494,6 +511,7 @@ class AgentModelMenuState extends State<AgentModelMenu> {
       machineId: widget.machineId,
       agentId: widget.agentId,
       engine: widget.engine,
+      source: 'pill',
     );
     // Guarded: the pane can close under an open dialog — a machine going
     // offline takes its panes with it.

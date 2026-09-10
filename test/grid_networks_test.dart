@@ -200,7 +200,7 @@ void main() {
       String? harnessEmail,
       GridModelsController? models,
       ShareTargetStore? shareTarget,
-      ValueChanged<SettingsSection>? onShowSection,
+      void Function(SettingsSection section, String source)? onShowSection,
       ({String gridId, EngineRunRecord run})? liveEngine,
       // A skeleton breathes forever ([Pulse]), so a pane with one on it never
       // settles. A test that puts a provider in Loading pumps instead.
@@ -565,7 +565,7 @@ void main() {
         tester,
         newController(),
         models: models,
-        onShowSection: (_) {},
+        onShowSection: (_, _) {},
       );
 
       expect(find.text('Add a model to use this provider.'), findsOneWidget);
@@ -609,13 +609,13 @@ void main() {
       final models = GridModelsController(client: FakeGridApi());
       addTearDown(models.dispose);
       final target = ShareTargetStore(storage: _MemoryStore());
-      final opened = <SettingsSection>[];
+      final opened = <(SettingsSection, String)>[];
       await pump(
         tester,
         newController(),
         models: models,
         shareTarget: target,
-        onShowSection: opened.add,
+        onShowSection: (section, source) => opened.add((section, source)),
       );
 
       await tester.tap(find.byKey(const Key('provider-add-model')));
@@ -627,7 +627,9 @@ void main() {
         'hp-1-1',
         reason: 'the share page names the grid before /v1/grid/me answers',
       );
-      expect(opened, [SettingsSection.shareIntelligence]);
+      // Carrying the button that did it, so this visit and one chosen in the
+      // settings rail stay two numbers in `screen_view`.
+      expect(opened, [(SettingsSection.shareIntelligence, 'add_model')]);
     });
 
     // ⚠️ An engine is detached and joined to ONE grid. `Add model` pins the
@@ -642,13 +644,13 @@ void main() {
       final models = GridModelsController(client: FakeGridApi());
       addTearDown(models.dispose);
       final target = ShareTargetStore(storage: _MemoryStore());
-      final opened = <SettingsSection>[];
+      final opened = <(SettingsSection, String)>[];
       await pump(
         tester,
         newController(),
         models: models,
         shareTarget: target,
-        onShowSection: opened.add,
+        onShowSection: (section, source) => opened.add((section, source)),
         liveEngine: (
           gridId: 'grid-e3b210eacc5b4cdf',
           run: const EngineRunRecord(

@@ -174,6 +174,7 @@ class _RailProviderPillState extends State<RailProviderPill> {
             widget.notifier,
             gridNetworks: _networks,
             initialSection: SettingsSection.grid,
+            source: 'rail_menu',
           ),
         );
       },

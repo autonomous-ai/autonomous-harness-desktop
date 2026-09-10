@@ -67,6 +67,7 @@ void main() {
         tester.element(find.byType(Placeholder)),
         notifier,
         gridNetworks: gridNetworks,
+        source: 'account_menu',
       ),
     );
     await tester.pumpAndSettle();

@@ -35,6 +35,11 @@ Future<void> showSettingsScreen(
   AppNotifier notifier, {
   GridNetworksController? gridNetworks,
   SettingsSection? initialSection,
+  // Which door opened Settings — see [AnalyticsEvents.screenView]. `required`,
+  // because a pane reachable six ways is close to meaningless as a bare count,
+  // and the six are not variations on one intention: `usage_offer` arrives from
+  // somebody who has just been told they are nearly out of quota.
+  required String source,
 }) {
   return Navigator.of(context).push<void>(
     PageRouteBuilder<void>(
@@ -44,6 +49,7 @@ Future<void> showSettingsScreen(
         notifier: notifier,
         gridNetworks: gridNetworks,
         initialSection: initialSection,
+        source: source,
       ),
       transitionsBuilder: (context, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
@@ -63,9 +69,15 @@ class SettingsScreen extends StatefulWidget {
     required this.notifier,
     this.gridNetworks,
     this.initialSection,
+    this.source = 'unknown',
   });
 
   final AppNotifier notifier;
+
+  /// The door that opened this screen, reported with the first `screen_view`.
+  /// Defaulted only for tests that build the screen directly; every app door
+  /// goes through [showSettingsScreen], where it is `required`.
+  final String source;
 
   /// Which row Settings opens on. Null takes [kDefaultSettingsSection] — the
   /// first row of the first group, so the screen never opens on a pane its rail
@@ -96,7 +108,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     // The pane Settings opens on is a screen view like any other — without it
     // the section a user lands on is the one section the stream never sees.
-    analytics.screenView(_screenName(_section));
+    // This one carries the door that OPENED Settings; every later view in this
+    // visit came from the rail, or from a button that says which it was.
+    analytics.screenView(_screenName(_section), source: widget.source);
   }
 
   @override
@@ -107,9 +121,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _show(SettingsSection target) {
+  /// Move to another pane. [source] is `rail` for the rail's own rows and
+  /// names the button otherwise — `add_model` is the only one so far, and it
+  /// is the reason this takes a source at all: landing on Share Intelligence
+  /// because a provider had no models is a different visit from choosing it in
+  /// the rail, and the two must not be one number.
+  void _show(SettingsSection target, {String source = 'rail'}) {
     if (target == _section) return;
-    analytics.screenView(_screenName(target));
+    analytics.screenView(_screenName(target), source: source);
     setState(() => _section = target);
   }
 
@@ -147,7 +166,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     section: _section,
                     notifier: widget.notifier,
                     gridNetworks: _gridNetworks,
-                    onShowSection: _show,
+                    // The rail's own rows keep the default source (see
+                    // [SettingsNav] above); a pane that sends the reader
+                    // somewhere passes the button that did it.
+                    onShowSection: (target, source) =>
+                        _show(target, source: source),
                   ),
                 ),
               ],
@@ -179,7 +202,7 @@ class _SettingsBody extends StatelessWidget {
   /// handed down. Providers' `Add model` is the only user of it: putting a
   /// model on a provider happens on Share Intelligence, and the button pins
   /// that pane to the provider before switching to it.
-  final ValueChanged<SettingsSection> onShowSection;
+  final void Function(SettingsSection section, String source) onShowSection;
 
   @override
   Widget build(BuildContext context) {

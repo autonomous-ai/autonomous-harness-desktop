@@ -80,7 +80,9 @@ class _NodeDashboardScreenState extends State<NodeDashboardScreen> {
     // A screen view now that this is a screen. `grid_dashboard_opened` still
     // fires at the call site, because the two answer different questions —
     // which entry point was used, and which screen is being read.
-    analytics.screenView('grid_nodes');
+    // One door — "View dashboard" on the status rail — so the source is a
+    // constant here rather than an argument nobody could pass differently.
+    analytics.screenView('grid_nodes', source: 'rail');
   }
 
   @override

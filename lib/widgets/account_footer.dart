@@ -93,7 +93,13 @@ class _AccountFooterState extends State<AccountFooter> {
           label: 'Settings',
           onPressed: () {
             _menu.close();
-            unawaited(showSettingsScreen(context, widget.notifier));
+            unawaited(
+              showSettingsScreen(
+                context,
+                widget.notifier,
+                source: 'account_menu',
+              ),
+            );
           },
         ),
         const AppMenuDivider(),

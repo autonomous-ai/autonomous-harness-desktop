@@ -121,6 +121,20 @@ List<GridTargetOption> _readyOptions(
 }
 
 /// The rail's provider row: what new agents use, and a menu to change it.
+///
+/// ⚠️ **NOTHING BUILDS THIS ANY MORE.** The status rail's
+/// `RailProviderPill` replaced it (2026-09-09 in the data: `grid_picked`
+/// stops reporting `source='pill'` and starts reporting `source='rail'` on
+/// that day), and the only thing that still constructs this widget is
+/// `test/grid_target_pill_test.dart` — the same arrangement `GridHero` is
+/// kept under, so the design can come back without being rewritten from the
+/// log.
+///
+/// The FILE is very much alive: `gridTargetMenuOptions` above is the pure
+/// menu-row builder the rail pill imports. Only the widget is unreachable.
+///
+/// So its `screen_view` source, `pill_menu`, is a door that cannot be opened
+/// today — see the note beside it. Do not go looking for those rows.
 class GridTargetPill extends StatefulWidget {
   const GridTargetPill({
     super.key,
@@ -243,6 +257,12 @@ class _GridTargetPillState extends State<GridTargetPill> {
             widget.notifier,
             gridNetworks: _networks,
             initialSection: SettingsSection.grid,
+            // ⚠️ Unreachable today — see the class comment: nothing builds
+            // this widget. Kept distinct from the rail pill's `rail_menu`
+            // (the same split `grid_picked` makes between `pill` and `rail`)
+            // so that the day this comes back, its rows arrive already
+            // separated rather than merged into the rail's.
+            source: 'pill_menu',
           ),
         );
       },

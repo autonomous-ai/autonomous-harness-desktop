@@ -225,9 +225,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   a member, and only the pickers skip it. Its file is its OWN — `~/.harness/desktop-app/
   providers_config.json`, not `state.json` — because it is a *set* whose membership is the point, and
   it stores only the **disabled** ids, so a provider it has never heard of is enabled and a fresh
-  install needs no file. Both stores are read by the sidebar's provider pill
-  (`widgets/grid_target_pill.dart` — `gridTargetMenuOptions` takes `isEnabled` and DROPS a
-  switched-off provider rather than dimming it) and by Settings ▸ Providers. Both list
+  install needs no file. Both stores are read by the status rail's provider pill
+  (`widgets/status_rail/rail_provider_pill.dart`, which imports
+  `gridTargetMenuOptions` from `widgets/grid_target_pill.dart` — it takes `isEnabled` and DROPS a
+  switched-off provider rather than dimming it) and by Settings ▸ Providers. ⚠️ **The widget
+  `GridTargetPill` in that file is dead** — the rail's pill replaced it and nothing builds it now,
+  only its own test, the arrangement `GridHero` is kept under. Visible to the day in the analytics:
+  `grid_picked` reports `source='pill'` up to 2026-09-09 and `source='rail'` from 2026-09-09. The
+  FILE is alive for its pure menu-row builder; only the widget is not. Both list
   `gridNetworksController`, the shared singleton, so neither holds a half-stale copy. The label for
   "no provider" is `kNoGridTargetLabel` beside the selection store — **the pill still prints it, and
   Settings no longer does**: a picker may offer "use nothing", but a roster of providers must not
