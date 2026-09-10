@@ -135,7 +135,8 @@ second path.
   v3 — so `TerminalSession` and `AppNotifier` see exactly what the loopback transport hands them. A
   type that must be sealed is REFUSED while the session is not up, never sent in the clear. No pin,
   `e2e_denied`, or a welcome not signed by the pinned identity all end as 4404: the `needsLink` path
-  the CLI's relay already feeds.
+  the CLI's relay already feeds, minus its poll — a viewer's links change only through its own form,
+  which reconnects when it lands.
 - **Linking**: `PeerLinkClient` is `CliLink` or `DirectLink`, which runs the remote-password PAKE
   (`viewer/password_link.dart`, relayClient.ts `connectWithPassword`) and pins the machine in
   `ViewerKeyStore` (identity seed, and rows shaped like `machinePeers.json`'s). Failures read as

@@ -1360,7 +1360,9 @@ class AppNotifier extends ChangeNotifier {
         machine.needsLink = true;
         machine.agentLoadStatus = AgentLoadStatus.needsLink;
         notifyListeners();
-        _startLinkRetry(machineId);
+        // A viewer's links change only through its own link form, which reconnects when it lands —
+        // there is nothing out of band to poll for, and every poll would be one more refused dial.
+        if (viewer == null) _startLinkRetry(machineId);
       },
       onEvent: _handleEvent,
       onStatus: (machineId, nextStatus) {
