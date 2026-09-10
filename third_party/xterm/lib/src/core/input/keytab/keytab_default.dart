@@ -52,8 +52,7 @@ key Backspace   -Control : "\x7f"
 key Backspace  +Control : "\b"
 
 # Arrow keys in VT52 mode
-# shift up/down are reserved for scrolling.
-# shift left/right are reserved for switching between tabs (this is hardcoded).
+# Shift up/down retain their normal-screen scrolling bindings below.
 
 key Up   -Shift-Ansi : "\EA"
 key Down -Shift-Ansi : "\EB"
@@ -89,8 +88,11 @@ key Left  -Shift+Alt-Control+Ansi+Mac  : "\Eb"
 
 key Up    +Shift+AppScreen             : "\E[1;*A"
 key Down  +Shift+AppScreen             : "\E[1;*B"
-key Left  +Shift+AppScreen             : "\E[1;*D"
-key Right +Shift+AppScreen             : "\E[1;*C"
+
+# Horizontal Shift arrows belong to the TUI in either screen buffer.
+# Codex opens queued questions with Shift+Left in the normal screen.
+key Left  +Shift+Ansi                  : "\E[1;*D"
+key Right +Shift+Ansi                  : "\E[1;*C"
 
 # Keypad keys with NumLock ON
 # (see https://web.archive.org/web/20070807181942/http://www.nw.com/nw/WWW/products/wizcon/vt100.html
