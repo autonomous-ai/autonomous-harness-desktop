@@ -20,7 +20,6 @@ import '../widgets/new_agent_dialog.dart';
 import '../widgets/task_palette.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
-import '../widgets/status_rail/grid_status_rail.dart';
 import '../widgets/usage_limit_notice.dart';
 import '../widgets/window_chrome.dart';
 
@@ -338,6 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     children: [
                                       _RailFold(
                                         notifier: notifier,
+                                        usage: _usage,
                                         collapsed: _collapsed,
                                         wideWidth: railWidth,
                                         onCollapse: () =>
@@ -424,41 +424,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     // the Expanded above so it is full-bleed under the machine
                     // rail as well as the panes — a strip that started after the
                     // rail would put a step in the window's bottom edge.
-                    // FOLDS WITH THE RAIL. Collapsing is a request for the whole window, and a strip
-                    // of chrome left running along the bottom answers half of it — the terminals get
-                    // the width and keep paying forty pixels of height for figures nobody folded the
-                    // rail to read.
-                    //
-                    // AnimatedSize rather than a plain `if`: the rail takes AppMotion.fold to get out
-                    // of the way, and a bar that vanished on the first frame of that would read as
-                    // two separate things happening, not one window opening up.
-                    AnimatedSize(
-                      duration: grid.AppMotion.fold,
-                      curve: grid.AppMotion.curve,
-                      alignment: Alignment.topCenter,
-                      child: _collapsed
-                          ? const SizedBox(width: double.infinity, height: 0)
-                          : GridStatusRail(
-                              // Two things need it, for one reason: the rail holds no
-                              // `AppNotifier` and both of these open Settings.
-                              notifier: notifier,
-                              // The shell's, shared with the card above — see [_usage].
-                              usage: _usage,
-                              // The node dashboard's empty state offers to put THIS
-                              // computer on the grid, and the screen that does it is a
-                              // Settings pane — which needs the notifier the shell holds
-                              // and the rail does not.
-                              onShareIntelligence: () => unawaited(
-                                showSettingsScreen(
-                                  context,
-                                  notifier,
-                                  initialSection:
-                                      SettingsSection.shareIntelligence,
-                                  source: 'node_dashboard',
-                                ),
-                              ),
-                            ),
-                    ),
                   ],
                 ),
               ),
@@ -486,6 +451,7 @@ class _HomeScreenState extends State<HomeScreen> {
 class _RailFold extends StatelessWidget {
   const _RailFold({
     required this.notifier,
+    required this.usage,
     required this.collapsed,
     required this.wideWidth,
     required this.onCollapse,
@@ -493,6 +459,9 @@ class _RailFold extends StatelessWidget {
   });
 
   final AppNotifier notifier;
+
+  /// Handed straight through to [MachineRail] for its usage section.
+  final UsageController usage;
 
   final bool collapsed;
   final double wideWidth;
@@ -564,6 +533,7 @@ class _RailFold extends StatelessWidget {
                           offset: Offset(-_drift * (1 - open), 0),
                           child: MachineRail(
                             notifier: notifier,
+                            usage: usage,
                             onCollapse: onCollapse,
                           ),
                         ),

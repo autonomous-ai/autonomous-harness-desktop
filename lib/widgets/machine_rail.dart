@@ -15,6 +15,8 @@ import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/skeleton.dart';
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
+import '../usage/usage_controller.dart';
+import 'rail_usage_section.dart';
 import 'agent_drag.dart';
 import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
@@ -50,7 +52,16 @@ class MachineRail extends StatefulWidget {
   /// nothing is worse than no button.
   final VoidCallback? onCollapse;
 
-  const MachineRail({super.key, required this.notifier, this.onCollapse});
+  /// What the agent accounts on this machine have spent, for the section above
+  /// the account row. Owned by the shell — see [RailUsageSection].
+  final UsageController usage;
+
+  const MachineRail({
+    super.key,
+    required this.notifier,
+    required this.usage,
+    this.onCollapse,
+  });
 
   @override
   State<MachineRail> createState() => _MachineRailState();
@@ -228,6 +239,11 @@ class _MachineRailState extends State<MachineRail> {
             // its floor was one permanent row spent on a setting most people
             // change once. `GridTargetPill` is kept in the tree for the reason
             // `GridHero` is — see `settings/sections/provider_split_pane.dart`.
+            // What the accounts have spent, directly above the account they
+            // belong to. It arrived here when the strip along the bottom of the
+            // window was retired: that surface was the width of the whole app
+            // and carried two readings.
+            RailUsageSection(usage: widget.usage),
             AccountFooter(notifier: widget.notifier),
           ],
         );
