@@ -5,7 +5,7 @@ name: Release
 # Shape (the one autonomous-grid's release.yml uses): every platform builds IN PARALLEL, and the
 # real manifest is written exactly once at the end.
 #
-# metadata.json is a download-modify-reupload, so three jobs each merging their own key would drop
+# metadata.json is a download-modify-reupload, so four jobs each merging their own key would drop
 # each other's. Rather than schedule around that — the first version of this file ran macOS and the
 # two Linux architectures one after another, ~70 minutes of wall clock — each build job is pointed
 # at its OWN scratch manifest under harness/desktop/.ci/<run id>/. Nothing collides because nothing
@@ -14,15 +14,19 @@ name: Release
 # race cannot happen rather than being avoided.
 #
 # scripts/upload-desktop.sh and scripts/upload-desktop-linux.sh are used EXACTLY as they are, with
-# no flags this file invented: METADATA_PATH is an env override they already support.
+# no flags this file invented: METADATA_PATH is an env override they already support. macOS reaches
+# upload-desktop.sh through scripts/publish-macos-variant.sh, which builds, pins the renderer, then
+# calls it with --no-build and that build's keys — a flag and env overrides it already takes.
 #
 # The tag IS the version — CI never auto-bumps. The scripts bump by reading the current version out
-# of the remote metadata.json, so three jobs left to bump on their own would read the same number
-# and publish three different versions under one tag.
+# of the remote metadata.json, so four jobs left to bump on their own would read the same number
+# and publish four different versions under one tag.
 #
-# Publishes the keys running apps poll (lib/update/desktop_updater.dart): desktop-macos,
-# desktop-macos-dmg, desktop-linux-x64, desktop-linux-arm64. A MINOR bump (1.0.x -> 1.1.1) is a
-# forced update — running apps block until it is installed. See RELEASE.md.
+# Publishes the keys running apps poll (lib/update/desktop_updater.dart): desktop-macos and
+# desktop-macos-dmg (the Intel build, on Skia — also what every older install and the website read),
+# desktop-macos-arm64 and desktop-macos-arm64-dmg (Apple Silicon, on Impeller), desktop-linux-x64 and
+# desktop-linux-arm64. A MINOR bump (1.0.x -> 1.1.1) is a forced update — running apps block until it
+# is installed. See RELEASE.md, "Two macOS builds" for why macOS is published twice.
 #
 # Dry run first: Actions -> Release -> Run workflow, with metadata_path = harness/desktop/
 # metadata-test.json. Nothing a real app polls is touched, and there is no undo on the real
@@ -59,6 +63,16 @@ concurrency:
 
 env:
   GCS_BUCKET: s3-autonomous-upgrade-3   # the release scripts read this too — one place, not five
+  # THE toolchain pin for every release artifact, macOS and both Linux architectures alike. Pinned
+  # rather than `channel: stable` unqualified: pubspec.yaml pins `sdk: ^3.13.0`, so anything below
+  # Flutter 3.47 dies at `flutter pub get` with "version solving failed", and a floating stable ships
+  # an engine nobody here has run — the Grid app's "UI tearing itself apart" was exactly that
+  # (autonomous-grid-app 58687e7f). Bump deliberately, alongside the local toolchain.
+  #
+  # It used to live in ci.yml, whose test suite gated every release. That gate was removed by the
+  # team's decision on 2026-09-10 — it had failed every tag since v1.0.92, so none of them reached a
+  # user — and nothing here runs the tests any more: run `flutter analyze` and `flutter test` locally.
+  FLUTTER_VERSION: '3.47.2'
 
 jobs:
   # Resolve and validate before anything expensive starts. A malformed tag fails here in seconds
@@ -90,7 +104,7 @@ jobs:
           echo "Publishing **$ver** to \`$meta\`" >> "$GITHUB_STEP_SUMMARY"
 
   # Uploading is the last thing each build job does, ~25 minutes in. Proving the credential now
-  # means a broken one costs seconds. Runs beside `version` and `tests`, so it is free in wall clock.
+  # means a broken one costs seconds. Runs beside `version`, so it is free in wall clock.
   preflight:
     runs-on: ubuntu-latest
     steps:
@@ -105,19 +119,24 @@ jobs:
           echo "$GITHUB_RUN_ID" | gsutil cp - "$probe"
           gsutil rm "$probe"
 
-  tests:
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
+  # BOTH macOS builds, side by side: one universal app built twice, differing only in its renderer
+  # (Intel on Skia, Apple Silicon on Impeller — RELEASE.md, "Two macOS builds"). A macos-15 runner is
+  # Apple Silicon and neither build needs an Intel host: both are universal, and the renderer is an
+  # Info.plist key, not a compile.
   build-macos:
-    needs: [version, tests, preflight]
+    needs: [version, preflight]
     runs-on: macos-15
-    timeout-minutes: 60   # two notarization submissions per release (zip, then dmg) — see RELEASE.md
+    timeout-minutes: 60   # two notarization submissions per build (zip, then dmg) — see RELEASE.md
+    strategy:
+      # Each build writes its own scratch manifest, so they cannot race — and one failing should say
+      # so on its own rather than cancel the other mid-notarization. `publish` needs both either way.
+      fail-fast: false
+      matrix:
+        variant: [intel, apple-silicon]
     env:
-      # The script's own env override, pointed at this run's scratch file instead of the real
-      # manifest. The artifacts still land on their real GCS paths; only the key lands here.
-      METADATA_PATH: ${{ needs.version.outputs.scratch_prefix }}/macos.json
+      # The script's own env override, pointed at this build's scratch file instead of the real
+      # manifest. The artifacts still land on their real GCS paths; only the keys land here.
+      METADATA_PATH: ${{ needs.version.outputs.scratch_prefix }}/macos-${{ matrix.variant }}.json
     steps:
       - uses: actions/checkout@v7
 
@@ -129,7 +148,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ needs.tests.outputs.flutter-version }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -191,15 +210,18 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build, sign, notarize and upload macOS
+      # SIGN_IDENTITY is read twice here: by publish-macos-variant.sh, re-signing the Intel build once
+      # it pins the renderer, and by upload-desktop.sh, signing the dmg.
+      - name: Build, sign, notarize and upload macOS (${{ matrix.variant }})
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           VERSION: ${{ needs.version.outputs.version }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          bash scripts/upload-desktop.sh "$VERSION"
+          bash scripts/publish-macos-variant.sh "$VARIANT" "$VERSION"
 
       # Free on an ephemeral runner; the whole point the day this moves to a self-hosted Mac.
       - name: Remove the signing keychain
@@ -207,7 +229,7 @@ jobs:
         run: security delete-keychain "$KEYCHAIN_PATH" || true
 
   build-linux:
-    needs: [version, tests, preflight]
+    needs: [version, preflight]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -239,14 +261,12 @@ jobs:
       - uses: subosito/flutter-action@v2
         if: matrix.arch != 'arm64'
         with:
-          flutter-version: ${{ needs.tests.outputs.flutter-version }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
       - name: Install Flutter from git (arm64 has no published archive)
         if: matrix.arch == 'arm64'
-        env:
-          FLUTTER_VERSION: ${{ needs.tests.outputs.flutter-version }}
         run: |
           set -euo pipefail
           git clone --depth 1 --branch "$FLUTTER_VERSION" \
@@ -407,7 +427,8 @@ jobs:
 
           | | |
           |---|---|
-          | macOS (universal) | [Harness-macos.dmg](${base}/Harness-macos.dmg) |
+          | macOS — Apple Silicon (M1 and later) | [Harness-macos-arm64.dmg](${base}/Harness-macos-arm64.dmg) |
+          | macOS — Intel (also runs on Apple Silicon) | [Harness-macos.dmg](${base}/Harness-macos.dmg) |
           | Linux x64 | [Harness-linux-x64.AppImage](${base}/Harness-linux-x64.AppImage) |
           | Linux arm64 | [Harness-linux-arm64.AppImage](${base}/Harness-linux-arm64.AppImage) |
 

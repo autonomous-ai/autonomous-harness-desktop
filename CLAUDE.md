@@ -55,9 +55,13 @@ make terminal-local-e2e
 make terminal-prod-e2e       # opt-in, refuses without PROD_TERMINAL_E2E=1 + release evidence vars
 ```
 
-Release (`make upload-desktop` for macOS, `make upload-desktop-linux` for Linux — the latter must run
-on an Ubuntu host) is documented in RELEASE.md. Both platforms publish to the same GCS
-`metadata.json` under different keys (`desktop-macos` / `desktop-linux-x64`) and share one version
+Release (`make release`, which tags and lets CI build; `make upload-desktop VERSION=…` and
+`make upload-desktop-linux` are the by-hand escape hatches, the latter on an Ubuntu host only) is
+documented in RELEASE.md. **macOS ships TWO builds of one universal app**, differing only in
+`FLTEnableImpeller`: Intel on Skia under the old `desktop-macos` key (which every older install and the
+website download also read), Apple Silicon on Impeller under `desktop-macos-arm64`, both built by
+`scripts/publish-macos-variant.sh` — RELEASE.md, "Two macOS builds", has the why. All platforms
+publish to the same GCS `metadata.json` under different keys and share one version
 number by default; `pubspec.yaml`'s `version:` is a placeholder and is never bumped — Linux instead
 gets a `version.txt` written into the built bundle at package time (see `lib/core/app_version.dart`,
 since `flutter build linux` has no Info.plist-style stamping). Test the updater against a scratch
@@ -771,7 +775,10 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - `lib/flash/` flashes the ESP32-S3 dial through the CLI runner; `SerialPortLease` pauses daemon
   supervision while the port is held so `harness start` cannot steal it mid-write.
 - `lib/update/desktop_updater.dart` self-updates from the GCS manifest (sha256-verified, strictly
-  newer only). `_otaKey` must match `OTA_KEY` in `scripts/upload-desktop.sh`.
+  newer only). Its keys must match what writes the manifest — `_otaKeyMacOS`/`_otaKeyMacOSArm64` the
+  variant table in `scripts/publish-macos-variant.sh`, `desktop-linux-<arch>` the `OTA_KEY` in
+  `scripts/upload-desktop-linux.sh`. An Intel Mac reads only `desktop-macos` (the Skia build); Apple
+  Silicon takes the newer of `desktop-macos-arm64` and `desktop-macos`, arm64 winning a tie.
 
 ## Testing conventions
 

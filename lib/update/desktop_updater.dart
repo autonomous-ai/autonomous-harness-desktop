@@ -19,12 +19,22 @@ const _metadataUrlOverride = String.fromEnvironment(
   'DESKTOP_UPDATE_METADATA_URL',
 );
 
-/// Must match OTA_KEY in scripts/upload-desktop.sh / scripts/upload-desktop-linux.sh.
+/// The macOS build every Mac can run, rendered on Skia: what an Intel Mac installs, what every install
+/// from before the Intel/Apple Silicon split polls on either CPU, and what the website download
+/// serves. Must match the `intel` row of scripts/publish-macos-variant.sh — RELEASE.md, "Two macOS
+/// builds", has the why.
 const _otaKeyMacOS = 'desktop-macos';
 
-String _currentLinuxArchitecture() => switch (Abi.current()) {
-  Abi.linuxArm64 => 'arm64',
-  Abi.linuxX64 => 'x64',
+/// The Apple Silicon build, rendered on Impeller. Must match the `apple-silicon` row of
+/// scripts/publish-macos-variant.sh.
+const _otaKeyMacOSArm64 = 'desktop-macos-arm64';
+
+/// `arm64` or `x64` for the CPU this process runs on: which Linux artifact to fetch, and whether the
+/// Apple Silicon macOS build is on offer. An Apple Silicon Mac running this under Rosetta reports x64
+/// and is offered only the Skia build — harmless, since both macOS builds are universal.
+String _currentArchitecture() => switch (Abi.current()) {
+  Abi.linuxArm64 || Abi.macosArm64 || Abi.windowsArm64 => 'arm64',
+  Abi.linuxX64 || Abi.macosX64 || Abi.windowsX64 => 'x64',
   _ => throw UnsupportedError(
     'Harness Desktop updates do not support ${Abi.current()}',
   ),
@@ -136,7 +146,7 @@ class DesktopUpdater {
   final String _metadataUrlForInstance;
   final bool _releaseMode;
   final bool _isLinux;
-  final String _linuxArchitecture;
+  final String _architecture;
 
   DesktopUpdater({
     Dio? dio,
@@ -152,9 +162,9 @@ class DesktopUpdater {
     // (a single downloaded file, no unpacking) from any host, since that branch needs no extra
     // tooling beyond the standard library, unlike ditto/plutil on macOS.
     bool? isLinux,
-    // Linux artifacts are architecture-specific. Tests can override this to exercise both
-    // manifest keys on any host; production resolves it from the running Dart ABI.
-    String? linuxArchitecture,
+    // Defaults to the running CPU (`arm64`/`x64`): which Linux artifact to fetch, and whether the
+    // Apple Silicon macOS build is on offer. Tests override it to exercise every key from any host.
+    String? architecture,
   }) : _dio =
            dio ??
            Dio(
@@ -167,14 +177,17 @@ class DesktopUpdater {
        _metadataUrlForInstance = metadataUrl ?? _metadataUrl,
        _releaseMode = releaseMode ?? kReleaseMode,
        _isLinux = isLinux ?? Platform.isLinux,
-       _linuxArchitecture =
-           linuxArchitecture ??
-           ((isLinux ?? Platform.isLinux)
-               ? _currentLinuxArchitecture()
-               : 'x64');
+       _architecture = architecture ?? _currentArchitecture();
 
-  String get _otaKey =>
-      _isLinux ? 'desktop-linux-$_linuxArchitecture' : _otaKeyMacOS;
+  /// The manifest entries this build may install, most preferred first — [_newestEntry] takes the
+  /// newest of them, an earlier key winning a tie.
+  List<String> get _otaKeys {
+    if (_isLinux) return ['desktop-linux-$_architecture'];
+    // An Intel Mac reads only the Skia build: the arm64 one renders on Impeller, which is exactly
+    // what it must not get, however new.
+    if (_architecture != 'arm64') return const [_otaKeyMacOS];
+    return const [_otaKeyMacOSArm64, _otaKeyMacOS];
+  }
 
   /// Fetches the manifest and returns the newer entry, or null if this app is already current (or
   /// the manifest/network is unavailable — treated the same as "nothing to do", never surfaced as an
@@ -190,24 +203,45 @@ class DesktopUpdater {
       final response = await _dio.get<Map<String, dynamic>>(
         _metadataUrlForInstance,
       );
-      final entry = response.data?[_otaKey];
-      if (entry is! Map) return null;
-      final version = entry['version'];
-      final url = entry['url'];
-      final sha256 = entry['sha256'];
-      final size = entry['size'];
-      if (version is! String ||
-          url is! String ||
-          sha256 is! String ||
-          size is! int) {
-        return null;
-      }
-      if (!semverGt(version, running)) return null;
-      return UpdateInfo(version: version, url: url, sha256: sha256, size: size);
+      final newest = _newestEntry(response.data);
+      if (newest == null || !semverGt(newest.version, running)) return null;
+      return newest;
     } catch (error) {
       debugPrint('DesktopUpdater.checkOnce: $error');
       return null;
     }
+  }
+
+  /// The newest of this host's [_otaKeys] entries, an earlier key winning a tie — so on Apple Silicon
+  /// a release that published both macOS builds installs the Impeller one, while a release that only
+  /// moved `desktop-macos` still reaches it instead of hiding behind an older arm64 entry.
+  UpdateInfo? _newestEntry(Map<String, dynamic>? manifest) {
+    UpdateInfo? newest;
+    for (final key in _otaKeys) {
+      final entry = _parseEntry(manifest?[key]);
+      if (entry == null) continue;
+      if (newest == null || semverGt(entry.version, newest.version)) {
+        newest = entry;
+      }
+    }
+    return newest;
+  }
+
+  /// One manifest entry, or null when it is missing or malformed — "nothing to install from this
+  /// key", never an error.
+  static UpdateInfo? _parseEntry(Object? entry) {
+    if (entry is! Map) return null;
+    final version = entry['version'];
+    final url = entry['url'];
+    final sha256 = entry['sha256'];
+    final size = entry['size'];
+    if (version is! String ||
+        url is! String ||
+        sha256 is! String ||
+        size is! int) {
+      return null;
+    }
+    return UpdateInfo(version: version, url: url, sha256: sha256, size: size);
   }
 
   /// Checks once immediately, then every [interval] — calls [onUpdateAvailable] each time a newer
@@ -268,7 +302,7 @@ class DesktopUpdater {
 
       if (_isLinux) {
         final appImagePath =
-            '${stagingDir.path}/Harness-linux-$_linuxArchitecture.AppImage';
+            '${stagingDir.path}/Harness-linux-$_architecture.AppImage';
         await File(appImagePath).writeAsBytes(bytes, flush: true);
         await Process.run('/bin/chmod', ['+x', appImagePath]);
         return StagedUpdate(
