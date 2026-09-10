@@ -10,6 +10,7 @@ import '../state/terminal_pane.dart';
 import '../terminal/terminal_font_store.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
+import 'engine_identity.dart';
 import 'harness_join_guide_screen.dart';
 import 'new_agent_dialog.dart';
 import 'terminal_panel.dart';
@@ -484,10 +485,21 @@ class _PaneCell extends StatelessWidget {
           // edge, now that no shared line does. It only CHANGES COLOUR on
           // focus, so nothing resizes as focus moves.
           border: Border.all(
-            // The accent ring is only meaningful with company: a ring around
-            // the only tile would be decoration, since there is nowhere else
-            // focus could be.
-            color: !_single && focused ? AppColors.accent : AppColors.border,
+            // FOCUS IS THE ENGINE'S OWN COLOUR, not the app's blue.
+            //
+            // One colour per pane, and only its EXTENT changes: the engine's
+            // line runs along the top edge normally and around all four when
+            // the pane is focused. The blue ring said the same thing in a
+            // second colour — and, worse, the old treatment blanked the band
+            // underneath it, so the focused pane was the one pane on the grid
+            // that no longer told you which engine it was running. It went
+            // quiet exactly when you looked at it.
+            //
+            // Only meaningful with company: a ring around the only tile would
+            // be decoration, since there is nowhere else focus could be.
+            color: !_single && focused
+                ? engineBand(_engineOf(notifier, pane))
+                : AppColors.border,
             width: 1,
           ),
         ),
@@ -519,36 +531,83 @@ class _PaneCell extends StatelessWidget {
           // TerminalPanel opens with a ColoredBox across its whole box, and
           // that is what was reaching the corners.
           borderRadius: BorderRadius.circular(_paneRadius - 1),
-          child: RepaintBoundary(
-            child: _SwapZone(
-              notifier: notifier,
-              paneId: pane.id,
-              child: _DropZone(
-                notifier: notifier,
-                paneId: pane.id,
-                dragging: dragging,
-                child: ValueListenableBuilder<PaneDragRef?>(
-                  valueListenable: paneDragging,
-                  // The tile being carried fades where it sits, so the grid shows
-                  // where it came FROM while the ghost shows where it is going.
-                  builder: (context, inFlight, child) => Opacity(
-                    opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
-                    child: child,
-                  ),
-                  child: _PaneContent(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // The engine's colour, across the top of its own pane.
+              //
+              // Inside the clip so it follows the rounded corners, and ABOVE the header rather than
+              // behind it, so it reads as a band on the card and not a tint on the title row. Two
+              // pixels: findable across a grid at a glance, silent up close.
+              //
+              // This is the one thing on a pane that says WHAT IS RUNNING before you read a word of
+              // it, which is the whole job — with four terminals open, the names are the slow way to
+              // tell Claude from Codex and the colour is the fast one.
+              SizedBox(
+                height: _engineBandHeight,
+                // Always the engine's colour, focused or not. The band no longer has to get out of
+                // the ring's way, because the ring is now the same colour it is.
+                child: ColoredBox(color: engineBand(_engineOf(notifier, pane))),
+              ),
+              Expanded(
+                child: RepaintBoundary(
+                  child: _SwapZone(
                     notifier: notifier,
-                    pane: pane,
-                    single: _single,
+                    paneId: pane.id,
+                    child: _DropZone(
+                      notifier: notifier,
+                      paneId: pane.id,
+                      dragging: dragging,
+                      child: ValueListenableBuilder<PaneDragRef?>(
+                        valueListenable: paneDragging,
+                        // The tile being carried fades where it sits, so the grid shows
+                        // where it came FROM while the ghost shows where it is going.
+                        builder: (context, inFlight, child) => Opacity(
+                          opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                          child: child,
+                        ),
+                        child: _PaneContent(
+                          notifier: notifier,
+                          pane: pane,
+                          single: _single,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),
     );
   }
 }
+
+/// Which engine a pane is running, or null while that is still resolving.
+///
+/// Read here as well as inside [_PaneContent] because the band belongs to the CARD, not to whatever
+/// the card is currently able to show: a pane still attaching, or one whose machine has not answered
+/// yet, is already known to be a Codex pane and should already wear Codex's colour.
+String? _engineOf(AppNotifier notifier, TerminalPane pane) {
+  final agentId = pane.agentId;
+  if (agentId == null) return null;
+  final machine = notifier.stateOf(pane.machineId);
+  if (machine == null) return null;
+  for (final agent in machine.agents) {
+    if (agent.id == agentId) return agent.engine;
+  }
+  return null;
+}
+
+/// How thick the engine band is.
+///
+/// One pixel, halved from two, and the halving is what lets the same line go around the focused pane
+/// without shouting: at two it was a bar, and four bars around one card would have been a frame. At one
+/// it matches the rim it continues into, so the focused pane reads as the SAME line simply running
+/// further — which is the whole idea. It survives as a line rather than a seam because it is coloured
+/// and everything beside it is not.
+const double _engineBandHeight = 1;
 
 class _PaneContent extends StatelessWidget {
   const _PaneContent({
