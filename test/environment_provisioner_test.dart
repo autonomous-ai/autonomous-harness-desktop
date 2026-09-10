@@ -122,8 +122,25 @@ void main() {
     expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
     // tmux cannot exist here, so it is reported and stepped over rather than blocking the boot.
     expect(readiness.steps[EnvironmentStep.tmux], EnvironmentStepStatus.unavailable);
-    // Nothing POSIX was ever shelled out to.
-    expect(commands.any((c) => c.contains('/bin/')), isFalse);
+    // Nothing POSIX was ever shelled out to: no shell, no package manager, no
+    // installer script.
+    //
+    // ⚠️ This used to read `c.contains('/bin/')`, and that passed on CI while
+    // failing on any machine that actually has a CLI at `~/.local/bin/harness`
+    // — the path `HarnessCliRunner` legitimately resolves on every platform,
+    // and one the fake `run` above never executes anyway. The assertion is
+    // about what the provisioner CHOSE to run, not about where the binary it
+    // found happens to live; a test that reads the developer's home directory
+    // is a test that only fails for whoever installed the CLI.
+    expect(commands.any((c) => c.startsWith('/bin/')), isFalse);
+    expect(
+      commands.any((c) => c.contains('/bin/sh') || c.contains('/bin/bash')),
+      isFalse,
+    );
+    expect(
+      commands.any((c) => c.contains('brew') || c.contains('apt-get')),
+      isFalse,
+    );
     expect(commands.any((c) => c.contains('install.sh')), isFalse);
   });
 

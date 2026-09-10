@@ -368,7 +368,17 @@ void main() {
     final controller = await _pump(tester);
     // Wider than `_pump`'s default: free space is what a stretching child
     // misuses, and the real window has far more of it than 1000px.
+    //
+    // ⚠️ `devicePixelRatio` and `reset` are BOTH load-bearing, and this test
+    // shipped without either. The test view defaults to a ratio of 3, so a
+    // physical 1900 is 633 LOGICAL pixels — narrower than the 800 it started
+    // from, which is the opposite of what the line above says it is doing, and
+    // the rail overflowed by 102px. Without the reset the next test inherited
+    // that window and overflowed too, which is how one missing line failed two
+    // tests in a file that gets both right everywhere else.
     tester.view.physicalSize = const Size(1900, 460);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpAndSettle();
 
     final memory = tester.getRect(find.text('1 / 1.7 TB'));

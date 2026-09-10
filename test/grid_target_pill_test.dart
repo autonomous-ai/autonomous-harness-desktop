@@ -68,14 +68,18 @@ void main() {
     });
 
     // "Every provider is off" and "this account is on no providers" are
-    // different facts, and one of them is a statement about the account that
-    // would be untrue.
-    test('every provider off says so, apart from having none at all', () {
+    // different facts about different things, and only the second one has
+    // anywhere to send the reader.
+    test('every provider off leaves only the subscription row', () {
+      // ⚠️ Says nothing on purpose, and the note it used to print is the
+      // reason: "Every provider is off — turn one on in Settings" read as an
+      // error for a setup that works, and as an order for a state the person
+      // had just chosen. The ticked row above already names what runs.
       final allOff = gridTargetMenuOptions(_ready(), isEnabled: (_) => false);
-      expect(allOff.length, 2);
-      expect(allOff.last.label, contains('Every provider is off'));
-      expect(allOff.last.enabled, isFalse);
+      expect(allOff.map((o) => o.label), [kNoGridTargetLabel]);
 
+      // An account that owns no providers HAS somewhere to be pointed, so it
+      // keeps its line.
       final none = gridTargetMenuOptions(
         GridNetworksReady(
           GridMe(
@@ -84,7 +88,8 @@ void main() {
           ),
         ),
       );
-      expect(none.last.label, 'This account is on no providers');
+      expect(none.last.label, 'This account is on no providers yet');
+      expect(none.last.enabled, isFalse);
     });
 
     test('every grid on the account is a pick', () {
@@ -109,7 +114,7 @@ void main() {
             GridNetworksReady(
               GridMe.fromJson(const {'user': {}, 'networks': []}),
             ),
-            'This account is on no providers',
+            'This account is on no providers yet',
           ),
         ]) {
           final rest = gridTargetMenuOptions(state).skip(1).toList();
