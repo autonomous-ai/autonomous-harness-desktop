@@ -9,7 +9,7 @@ class ConfigStore {
   static const _environmentKey = 'app_autonomous_environment';
   static const _skippedDesktopUpdateVersionKey =
       'skipped_desktop_update_version';
-  static const _environmentConfirmedKey = 'environment_confirmed_ready';
+  static const _environmentSetupVersionKey = 'environment_setup_version';
   static const String defaultBaseUrl = 'https://harness-api.autonomous.ai';
 
   ConfigStore({LocalKeyValueStore? storage})
@@ -22,26 +22,30 @@ class ConfigStore {
   String? _cachedBaseUrl;
   String? _cachedEnvironment;
   String? _cachedSkippedDesktopUpdateVersion;
-  bool _cachedEnvironmentConfirmed = false;
+  int? _cachedEnvironmentSetupVersion;
 
   String? get skippedDesktopUpdateVersion => _cachedSkippedDesktopUpdateVersion;
-  // Once environment provisioning (CLI, tmux, Grid) has succeeded on this machine, none of those
-  // three uninstall themselves, so there is nothing to gain from re-probing them — and flashing
-  // EnvironmentSetupScreen — on every single launch.
-  bool get environmentConfirmed => _cachedEnvironmentConfirmed;
+  // The setup version this machine last passed provisioning at (see `kEnvironmentSetupVersion`).
+  // CLI, tmux and Grid never uninstall themselves, so as long as this is still current there is
+  // nothing to gain from re-probing them — and flashing EnvironmentSetupScreen — on every launch.
+  int? get environmentSetupVersion => _cachedEnvironmentSetupVersion;
 
   Future<AppConfig> load() async {
     // Keep the tiny startup path sequential and predictable.
     final baseUrl = await _storage.read(_baseUrlKey);
     final environment = await _storage.read(_environmentKey);
     final skippedUpdate = await _storage.read(_skippedDesktopUpdateVersionKey);
-    final environmentConfirmed = await _storage.read(_environmentConfirmedKey);
+    final environmentSetupVersion = await _storage.read(
+      _environmentSetupVersionKey,
+    );
     _cachedBaseUrl = baseUrl ?? defaultBaseUrl;
     _cachedEnvironment = environment == 'stag' ? 'stag' : 'prod';
     _cachedSkippedDesktopUpdateVersion = skippedUpdate?.trim().isEmpty ?? true
         ? null
         : skippedUpdate!.trim();
-    _cachedEnvironmentConfirmed = environmentConfirmed == 'true';
+    _cachedEnvironmentSetupVersion = environmentSetupVersion == null
+        ? null
+        : int.tryParse(environmentSetupVersion);
     return config;
   }
 
@@ -69,21 +73,21 @@ class ConfigStore {
     }
   }
 
-  Future<void> saveEnvironmentConfirmed() async {
-    _cachedEnvironmentConfirmed = true;
-    await _storage.write(_environmentConfirmedKey, 'true');
+  Future<void> saveEnvironmentSetupVersion(int version) async {
+    _cachedEnvironmentSetupVersion = version;
+    await _storage.write(_environmentSetupVersionKey, version.toString());
   }
 
   Future<void> reset() async {
     _cachedBaseUrl = null;
     _cachedEnvironment = null;
     _cachedSkippedDesktopUpdateVersion = null;
-    _cachedEnvironmentConfirmed = false;
+    _cachedEnvironmentSetupVersion = null;
     await Future.wait([
       _storage.delete(_baseUrlKey),
       _storage.delete(_environmentKey),
       _storage.delete(_skippedDesktopUpdateVersionKey),
-      _storage.delete(_environmentConfirmedKey),
+      _storage.delete(_environmentSetupVersionKey),
     ]);
   }
 }

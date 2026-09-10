@@ -3,6 +3,12 @@ import 'dart:io';
 
 import '../core/harness_cli_runner.dart';
 
+/// Bumped by hand whenever environment provisioning (Harness CLI, tmux, Grid CLI installs/repairs)
+/// needs to run again for every machine on the next release, independent of the app's own version,
+/// which changes on every build. A machine whose persisted `ConfigStore.environmentSetupVersion` is
+/// still below this forces a fresh `_prepareEnvironment()` pass even if it was confirmed ready before.
+const int kEnvironmentSetupVersion = 2;
+
 enum EnvironmentStep {
   harness,
   tmux,

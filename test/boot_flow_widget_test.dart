@@ -180,7 +180,8 @@ void main() {
     'a machine confirmed once skips environment setup on the next launch',
     () async {
       final storage = _FakeKeyValueStore()
-        ..values['environment_confirmed_ready'] = 'true';
+        ..values['environment_setup_version'] =
+            kEnvironmentSetupVersion.toString();
       final provisioner = _ReadyEnvironmentProvisioner();
       final app = AppNotifier(
         config: AppConfig.dev,
@@ -200,6 +201,31 @@ void main() {
   );
 
   test(
+    'a machine on an older environment-setup version reruns provisioning and then persists the current version',
+    () async {
+      final storage = _FakeKeyValueStore()
+        ..values['environment_setup_version'] =
+            (kEnvironmentSetupVersion - 1).toString();
+      final provisioner = _ReadyEnvironmentProvisioner();
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+
+      expect(provisioner.called, isTrue);
+      expect(
+        storage.values['environment_setup_version'],
+        kEnvironmentSetupVersion.toString(),
+      );
+    },
+  );
+
+  test(
     'environment setup, once it succeeds, is remembered for next time',
     () async {
       final storage = _FakeKeyValueStore();
@@ -215,7 +241,10 @@ void main() {
       await app.bootstrap();
 
       expect(provisioner.called, isTrue);
-      expect(storage.values['environment_confirmed_ready'], 'true');
+      expect(
+        storage.values['environment_setup_version'],
+        kEnvironmentSetupVersion.toString(),
+      );
     },
   );
 
@@ -259,7 +288,10 @@ void main() {
       expect(provisioner.resumeFromCalls.last, same(stuck));
       expect(app.environmentReadiness.isReady, isTrue);
       expect(app.status, AppStatus.unauthenticated);
-      expect(storage.values['environment_confirmed_ready'], 'true');
+      expect(
+        storage.values['environment_setup_version'],
+        kEnvironmentSetupVersion.toString(),
+      );
       expect(app.environmentRecheckPending, isFalse);
       app.dispose();
     },
@@ -293,7 +325,7 @@ void main() {
 
       expect(app.status, AppStatus.preparingEnvironment);
       expect(app.environmentReadiness.isReady, isFalse);
-      expect(storage.values['environment_confirmed_ready'], isNull);
+      expect(storage.values['environment_setup_version'], isNull);
       // Rescheduled rather than given up on.
       expect(app.environmentRecheckPending, isTrue);
       app.dispose();

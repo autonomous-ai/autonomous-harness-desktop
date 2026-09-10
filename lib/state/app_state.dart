@@ -236,9 +236,9 @@ class AppNotifier extends ChangeNotifier {
   Timer? _updateCheckTimer;
   String? _skippedDesktopUpdateVersion;
   // Set from the store on every `bootstrap()` (see `_prepareEnvironment`), never mutated except
-  // there or on the first successful environment check — a machine that has passed once skips
-  // re-probing CLI/tmux/Grid presence on every later launch.
-  bool _environmentConfirmed = false;
+  // there or on the first successful environment check — a machine already on the current
+  // `kEnvironmentSetupVersion` skips re-probing CLI/tmux/Grid presence on every later launch.
+  int? _environmentSetupVersion;
   UpdateInfo? availableUpdate;
   bool isCheckingForUpdate = false;
   bool isInstallingUpdate = false;
@@ -732,7 +732,7 @@ class AppNotifier extends ChangeNotifier {
         _autonomousEnv = 'prod';
         api = ApiClient(config: config, session: session);
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
-        _environmentConfirmed = _store.environmentConfirmed;
+        _environmentSetupVersion = _store.environmentSetupVersion;
       }
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
@@ -774,7 +774,8 @@ class AppNotifier extends ChangeNotifier {
   /// first-run phase instead.
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
-    if (_environmentConfirmed) {
+    if (_environmentSetupVersion != null &&
+        _environmentSetupVersion! >= kEnvironmentSetupVersion) {
       // CLI, tmux and Grid were all found ready on this machine before, and none of the three
       // uninstall themselves — skip the three subprocess probes (and the screen they'd otherwise
       // flash onto) on every later launch rather than re-verifying something already proven.
@@ -799,8 +800,8 @@ class AppNotifier extends ChangeNotifier {
         return false;
       }
       _cancelEnvironmentRecheckTimer();
-      _environmentConfirmed = true;
-      unawaited(_store?.saveEnvironmentConfirmed());
+      _environmentSetupVersion = kEnvironmentSetupVersion;
+      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -867,8 +868,8 @@ class AppNotifier extends ChangeNotifier {
         _scheduleEnvironmentRecheck();
         return;
       }
-      _environmentConfirmed = true;
-      unawaited(_store?.saveEnvironmentConfirmed());
+      _environmentSetupVersion = kEnvironmentSetupVersion;
+      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint(
