@@ -134,6 +134,43 @@ void main() {
     expect(reading.tightest?.label, 'Weekly');
   });
 
+  test('the rail prints the weekly window, not the tightest one', () {
+    // Two different questions. `tightest` is the limit that will stop the work
+    // first; the rail wants the one worth a GLANCE, and the five-hour window
+    // refills all day — it is back to nothing by the time anybody reads it.
+    const reading = ProviderUsage(
+      provider: UsageProvider.claude,
+      status: UsageStatus.ok,
+      windows: [
+        UsageWindow(label: 'Session', usedPercent: 88),
+        UsageWindow(label: kWeeklyWindowLabel, usedPercent: 42),
+      ],
+    );
+    expect(reading.tightest?.label, 'Session');
+    expect(reading.railWindow?.label, kWeeklyWindowLabel);
+  });
+
+  test('a provider with no weekly window still prints one figure', () {
+    // One figure is the rule, and a blank strip would be a worse answer than
+    // the wrong window.
+    const reading = ProviderUsage(
+      provider: UsageProvider.codex,
+      status: UsageStatus.ok,
+      windows: [
+        UsageWindow(label: '5h', usedPercent: 30),
+        UsageWindow(label: '30d', usedPercent: 61),
+      ],
+    );
+    expect(reading.railWindow?.label, '30d');
+    expect(
+      const ProviderUsage(
+        provider: UsageProvider.codex,
+        status: UsageStatus.ok,
+      ).railWindow,
+      isNull,
+    );
+  });
+
   group('Claude source', () {
     test('maps the three windows the CLI itself shows', () async {
       final source = ClaudeUsageSource(
