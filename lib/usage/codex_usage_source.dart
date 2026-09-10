@@ -108,6 +108,6 @@ class CodexUsageSource implements UsageSource {
     if (hours < 1) return '${value ~/ 60}m';
     if (hours < 24) return '${hours}h';
     final days = hours ~/ 24;
-    return days == 7 ? 'Weekly' : '${days}d';
+    return days == 7 ? kWeeklyWindowLabel : '${days}d';
   }
 }

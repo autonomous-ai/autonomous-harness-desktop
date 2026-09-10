@@ -75,7 +75,7 @@ class ClaudeUsageSource implements UsageSource {
   ProviderUsage _mapWindows(Map<Object?, Object?> data) {
     final windows = <UsageWindow>[
       ?_window('Session', data['five_hour']),
-      ?_window('Weekly', data['seven_day']),
+      ?_window(kWeeklyWindowLabel, data['seven_day']),
       ?_window(
         'Fable',
         data['fable_weekly'] ?? data['fable_seven_day'] ?? data['seven_day_fable'],

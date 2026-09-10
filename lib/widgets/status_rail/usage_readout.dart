@@ -48,7 +48,7 @@ class UsageReadout<T> extends StatelessWidget {
     // they stay through every refresh.
     if (loading) {
       return const Align(
-        alignment: Alignment.centerLeft,
+        alignment: Alignment.centerRight,
         child: _UsageSkeleton(),
       );
     }
@@ -60,8 +60,12 @@ class UsageReadout<T> extends StatelessWidget {
         if (reading.hasFigures) reading,
     ];
     if (shown.isEmpty) return const SizedBox.shrink();
+    // Right, against the version mark at the far end. These figures are the
+    // one thing on this strip that is nobody's *setting* — the pill at the
+    // other end is what you press, and furniture you only read belongs at the
+    // edge you are not reaching for.
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -71,7 +75,7 @@ class UsageReadout<T> extends StatelessWidget {
               anchor: anchorFor(reading.provider),
               semantics:
                   '${reading.provider.label} usage, '
-                  '${reading.tightest?.usedPercent.round() ?? 0} percent used',
+                  '${reading.railWindow?.usedPercent.round() ?? 0} percent used',
               onEnter: onEnter,
               onExit: onExit,
               child: _ProviderFigures(reading: reading),
@@ -94,41 +98,41 @@ class _ProviderFigures extends StatelessWidget {
       color: grid.AppPalette.textSecondary,
       fontSize: 11.5,
     );
+    // ⚠️ ONE window, not every window this account reports — see
+    // [ProviderUsage.railWindow]. Claude answers with three and Codex with one,
+    // so printing them all made one account three figures wide and the other
+    // one: two readouts that read as different KINDS of thing rather than the
+    // same thing about two accounts.
+    final window = reading.railWindow;
+    if (window == null) return const SizedBox.shrink();
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         EngineMark(engine: reading.provider.engineId, size: 12),
         const SizedBox(width: 5),
-        for (final (index, window) in reading.windows.indexed) ...[
-          if (index > 0)
-            Text(
-              ' · ',
-              style: style.copyWith(color: grid.AppPalette.textFaint),
-            ),
-          Text(
-            '${window.usedPercent.round()}% used',
-            // Amber past 80, red past 90. The figure is exact either way, so
-            // the colour is not carrying the number — it is carrying the
-            // moment the number starts to matter, which is the whole reason
-            // somebody would look down here unprompted. `19% used` and
-            // `92% used` used to print identically.
-            style: style.copyWith(
-              fontWeight: grid.AppFont.medium,
-              color: usagePressureInk(
-                window.pressure,
-                grid.AppPalette.textSecondary,
-              ),
+        Text(
+          '${window.usedPercent.round()}% used',
+          // Amber past 80, red past 90. The figure is exact either way, so the
+          // colour is not carrying the number — it is carrying the moment the
+          // number starts to matter, which is the whole reason somebody would
+          // look down here unprompted. `19% used` and `92% used` used to print
+          // identically.
+          style: style.copyWith(
+            fontWeight: grid.AppFont.medium,
+            color: usagePressureInk(
+              window.pressure,
+              grid.AppPalette.textSecondary,
             ),
           ),
-          const SizedBox(width: 4),
-          // The countdown when there is one, and the window's own name when
-          // there is not — so every figure on the strip is followed by
-          // something that says which limit it belongs to.
-          Text(
-            window.resetsInLabel() ?? window.label,
-            style: style.copyWith(color: grid.AppPalette.textFaint),
-          ),
-        ],
+        ),
+        const SizedBox(width: 4),
+        // The countdown when there is one, and the window's own name when there
+        // is not — so the figure is always followed by something that says
+        // which limit it belongs to.
+        Text(
+          window.resetsInLabel() ?? window.label,
+          style: style.copyWith(color: grid.AppPalette.textFaint),
+        ),
       ],
     );
   }
@@ -146,8 +150,11 @@ class _UsageSkeleton extends StatelessWidget {
       vertical: 4,
     ),
     child: SkeletonText(
+      // Measured against what lands here — one figure per account, an engine
+      // mark and a countdown each. A placeholder wider than its answer is the
+      // jump a skeleton exists to prevent, in the other direction.
       style: TextStyle(fontSize: 11.5, fontWeight: grid.AppFont.medium),
-      width: 132,
+      width: 84,
     ),
   );
 }

@@ -421,7 +421,19 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   chosen the strip reads the grid; with none — or in a build where `kGridSurfaceEnabled` is off — it
   reads what the Claude and Codex accounts on this machine have spent. The two never share the strip,
   which is why they share one hover/pin surface (`rail_figure.dart`, extracted from the grid rail
-  rather than copied) and one `_PanelKind`. It replaced the words "No grid chosen", a sentence that
+  rather than copied) and one `_PanelKind`. **The strip prints ONE figure per account — the WEEKLY
+  window** (`ProviderUsage.railWindow`, deliberately not `tightest`): Claude answers with three
+  windows and Codex with one, so printing them all made one account three figures wide and the
+  other one — two readouts that read as different KINDS of thing rather than the same thing about
+  two accounts. Weekly rather than the tightest, because the rail wants the figure worth a GLANCE
+  and the five-hour window refills all day: it is back to nothing by the time anybody reads it.
+  `tightest` stays for the question it actually answers, which limit stops the work first. A
+  provider reporting no weekly window falls back to it — one figure is the rule, and a blank strip
+  is a worse answer than the wrong window. `kWeeklyWindowLabel` is written down once because the
+  rail MATCHES on it and the two sources spell it separately; the panel behind the figure still
+  shows every window. The block sits at the RIGHT of the strip, against the version mark: the pill
+  at the other end is what you press, and furniture you only read belongs at the edge you are not
+  reaching for. It replaced the words "No grid chosen", a sentence that
   tells someone what they already know and hands a riddle to anyone whose build has no picker.
   **This is the SECOND exception to "the app talks only to the local CLI"**, after Grid, and it is a
   narrower one: nothing here is dialled on the app's own behalf. `UsageCredentials` reads the tokens

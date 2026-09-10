@@ -247,6 +247,33 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('each account prints ONE figure — its weekly window', (
+    tester,
+  ) async {
+    // Claude answers with three windows and Codex with one, so printing them
+    // all made one account three figures wide and the other one: two readouts
+    // that read as different KINDS of thing rather than the same thing about
+    // two accounts. The panel behind the figure still carries every window.
+    final usage = await _usageWith([
+      const ProviderUsage(
+        provider: UsageProvider.claude,
+        status: UsageStatus.ok,
+        windows: [
+          UsageWindow(label: 'Session', usedPercent: 12),
+          UsageWindow(label: 'Weekly', usedPercent: 42),
+          UsageWindow(label: 'Fable', usedPercent: 7),
+        ],
+      ),
+    ]);
+    addTearDown(usage.dispose);
+    final controller = await _pump(tester, usage: usage, withGrid: false);
+
+    expect(find.text('42% used'), findsOneWidget);
+    expect(find.text('12% used'), findsNothing);
+    expect(find.text('7% used'), findsNothing);
+    controller.dispose();
+  });
+
   testWidgets('a nearly-spent window colours its own figure', (tester) async {
     // The whole point of looking down here unprompted. `19% used` and
     // `92% used` used to print in exactly the same ink, which made the strip
@@ -255,12 +282,12 @@ void main() {
       const ProviderUsage(
         provider: UsageProvider.claude,
         status: UsageStatus.ok,
-        // Two, not three: at this window width a third figure overflows the
-        // rail, and this test is about ink rather than layout.
-        windows: [
-          UsageWindow(label: 'Session', usedPercent: 12),
-          UsageWindow(label: 'Fable', usedPercent: 92),
-        ],
+        windows: [UsageWindow(label: 'Weekly', usedPercent: 92)],
+      ),
+      const ProviderUsage(
+        provider: UsageProvider.codex,
+        status: UsageStatus.ok,
+        windows: [UsageWindow(label: 'Weekly', usedPercent: 12)],
       ),
     ]);
     addTearDown(usage.dispose);
