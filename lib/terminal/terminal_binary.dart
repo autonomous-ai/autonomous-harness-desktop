@@ -13,14 +13,14 @@ const terminalLocalPasteMaxPayloadBytes = 6 * 1024 * 1024;
 // reasonable screenshot rather than a large source-code paste. Mirrors
 // TERMINAL_LOCAL_IMAGE_PASTE_MAX_PAYLOAD_BYTES in the harness CLI's terminalBinary.ts — keep the
 // two in step.
-const terminalLocalImagePasteMaxPayloadBytes = 4 * 1024 * 1024;
+const terminalLocalImagePasteMaxPayloadBytes = 8 * 1024 * 1024;
 // A dropped (non-image) file, delivered whole so its path can be pasted on the far side — see
 // TerminalSession.pasteFile. Ordinary files run larger than a screenshot, hence its own, more
 // generous ceiling; this is a modest atomic-frame limit, not a general file-transfer feature — a
 // bigger file is rejected client-side rather than chunked. Mirrors
 // TERMINAL_LOCAL_PASTE_FILE_MAX_PAYLOAD_BYTES in the harness CLI's terminalBinary.ts — keep the
 // two in step.
-const terminalLocalPasteFileMaxPayloadBytes = 10 * 1024 * 1024;
+const terminalLocalPasteFileMaxPayloadBytes = 20 * 1024 * 1024;
 
 enum TerminalBinaryKind {
   input(1),
