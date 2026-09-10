@@ -394,31 +394,32 @@ void main() {
     await app.assignAgentToPane(null, 'm1', 'a');
     expect(
       app.panes.single.composerVisible,
-      isTrue,
-      reason: 'a tile nobody has had an opinion about shows the box',
+      isFalse,
+      reason: 'a tile nobody has had an opinion about hides the box',
     );
 
     app.toggleComposer(app.panes.single.id);
-    expect(app.panes.single.composerVisible, isFalse);
+    expect(app.panes.single.composerVisible, isTrue);
     await Future<void>.delayed(Duration.zero);
 
     final restored = await PaneLayoutStore(storage: storage).load();
-    expect(restored.single.composerVisible, isFalse);
+    expect(restored.single.composerVisible, isTrue);
     app.dispose();
   });
 
   test(
-    'a layout written before the composer existed opens with it showing',
+    'a layout written before the composer existed opens with it hidden',
     () async {
-      // Absent must read as "never chose", not as "chose off" — otherwise shipping this feature
-      // would silently hide the box for everyone who already has a saved grid.
+      // Absent must read as "never chose", matching this feature's off-by-default, not as
+      // "chose it on" — otherwise shipping this feature would silently show the box for
+      // everyone who already has a saved grid.
       final storage = _MemoryStore()
         ..values['terminal_pane_layout'] = jsonEncode([
           {'machineId': 'm1', 'agentId': 'a'},
         ]);
 
       final restored = await PaneLayoutStore(storage: storage).load();
-      expect(restored.single.composerVisible, isTrue);
+      expect(restored.single.composerVisible, isFalse);
     },
   );
 

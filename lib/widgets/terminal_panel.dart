@@ -65,7 +65,7 @@ class TerminalPanel extends StatefulWidget {
     required this.notifier,
     required this.session,
     required this.focused,
-    this.composerVisible = true,
+    this.composerVisible = false,
     this.readOnly = false,
     this.onToggleComposer,
     this.onClose,

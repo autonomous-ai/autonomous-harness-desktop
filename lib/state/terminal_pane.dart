@@ -67,9 +67,9 @@ class TerminalPane {
   /// Whether this tile shows the composer textbox under its terminal.
   ///
   /// Only ever consulted for a remote machine — that is the one where typing straight into the
-  /// pane pays a network round trip per keystroke. On by default, and remembered, so the choice
+  /// pane pays a network round trip per keystroke. Off by default, and remembered, so the choice
   /// survives a restart the way the rest of the layout does.
-  bool composerVisible = true;
+  bool composerVisible = false;
 }
 
 /// A tile as it survives a restart: intent only, never the session.
@@ -77,7 +77,7 @@ class PaneLayoutEntry {
   const PaneLayoutEntry({
     required this.machineId,
     required this.agentId,
-    this.composerVisible = true,
+    this.composerVisible = false,
     this.pinnedSlot,
   });
 
@@ -104,10 +104,10 @@ class PaneLayoutEntry {
     return PaneLayoutEntry(
       machineId: machineId,
       agentId: agentId,
-      // Absent means a layout written before the composer existed. Those default to ON, matching a
-      // tile the user has never had an opinion about — never to OFF, which would read as a setting
+      // Absent means a layout written before the composer existed. Those default to OFF, matching a
+      // tile the user has never had an opinion about — never to ON, which would read as a setting
       // they chose.
-      composerVisible: composer is bool ? composer : true,
+      composerVisible: composer is bool ? composer : false,
       // A negative or absurd slot is read as "not pinned" rather than clamped:
       // a pin is a place someone chose, and inventing a different one for them
       // is worse than forgetting it.
