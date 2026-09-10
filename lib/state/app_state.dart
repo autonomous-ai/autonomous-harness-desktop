@@ -381,7 +381,6 @@ class AppNotifier extends ChangeNotifier {
 
   String get autonomousEnv => _autonomousEnv;
   bool get hasAvailableUpdate => availableUpdate != null;
-  bool get hasForcedUpdate => availableUpdate?.forced ?? false;
 
   static const offlineRetryInterval = Duration(seconds: 5);
   static const agentSyncInterval = Duration(seconds: 60);
@@ -1107,7 +1106,7 @@ class AppNotifier extends ChangeNotifier {
 
   void _handleBackgroundUpdate(UpdateInfo info) {
     if (_disposed) return;
-    if (!info.forced && _skippedDesktopUpdateVersion == info.version) return;
+    if (_skippedDesktopUpdateVersion == info.version) return;
     if (availableUpdate?.version == info.version) return;
     availableUpdate = info;
     updateError = null;
@@ -1148,7 +1147,7 @@ class AppNotifier extends ChangeNotifier {
 
   Future<void> skipAvailableUpdate() async {
     final info = availableUpdate;
-    if (info == null || info.forced) return;
+    if (info == null) return;
     _skippedDesktopUpdateVersion = info.version;
     await _store?.saveSkippedDesktopUpdateVersion(info.version);
     availableUpdate = null;

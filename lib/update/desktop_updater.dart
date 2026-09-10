@@ -40,16 +40,11 @@ class UpdateInfo {
   final String sha256;
   final int size;
 
-  /// True when this version differs from the running one in the major or minor component — see
-  /// [isForcedUpdate]. A forced update must be installed; the UI offers no way to skip or dismiss it.
-  final bool forced;
-
   const UpdateInfo({
     required this.version,
     required this.url,
     required this.sha256,
     required this.size,
-    this.forced = false,
   });
 }
 
@@ -81,21 +76,6 @@ bool semverGt(String a, String b) {
     if (x[i] != y[i]) return x[i] > y[i];
   }
   return false;
-}
-
-/// A patch-only bump (Z in X.Y.Z) stays optional up to this many versions behind — past it, a
-/// user who keeps skipping patch releases is forced to catch up too. `make upload-desktop`'s
-/// default patch auto-bump increments Z by exactly 1 per release, so this is a release count.
-const _forcedPatchDrift = 5;
-
-/// True when [newer] differs from [current] in the major or minor component (must update), or is
-/// on the same major.minor but more than [_forcedPatchDrift] patch releases behind (must catch up).
-bool isForcedUpdate(String newer, String current) {
-  final x = _parseSemverCore(newer);
-  final y = _parseSemverCore(current);
-  if (x == null || y == null) return false;
-  if (x[0] != y[0] || x[1] != y[1]) return true;
-  return x[2] - y[2] > _forcedPatchDrift;
 }
 
 List<int>? _parseSemverCore(String version) {
@@ -223,13 +203,7 @@ class DesktopUpdater {
         return null;
       }
       if (!semverGt(version, running)) return null;
-      return UpdateInfo(
-        version: version,
-        url: url,
-        sha256: sha256,
-        size: size,
-        forced: isForcedUpdate(version, running),
-      );
+      return UpdateInfo(version: version, url: url, sha256: sha256, size: size);
     } catch (error) {
       debugPrint('DesktopUpdater.checkOnce: $error');
       return null;

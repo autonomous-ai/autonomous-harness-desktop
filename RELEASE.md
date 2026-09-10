@@ -7,8 +7,7 @@ them to that bucket, and cuts the GitHub Release. **The tag IS the version — C
 ```bash
 make release                       # bump the patch, tag, push — CI does the rest
 make release ARGS="--dry-run"      # print the version it would cut and the notes, do nothing
-make release ARGS="--minor"        # bump the MINOR version — running apps treat this as a mandatory
-                                   # update and block until they install it
+make release ARGS="--minor"        # bump the MINOR version, per the usual semver convention
 make release ARGS="1.3.0"          # release an explicit version
 make release ARGS="--notes-file notes.md"   # hand-written release notes
 ```
@@ -61,7 +60,7 @@ them with the version taken from the tag, and they are also reachable directly w
 
 ```bash
 make upload-desktop                     # auto-bump (1.2.3 -> 1.2.4; 1.2.99 -> 1.3.1)
-make upload-desktop ARGS="--force"      # bump the MINOR version — a mandatory update
+make upload-desktop ARGS="--force"      # bump the MINOR version, per the usual semver convention
 make upload-desktop ARGS="1.3.0"        # explicit version
 make upload-desktop ARGS="--no-bump"    # rebuild and re-upload the current version
 make upload-desktop-linux ARCH=arm64    # the same, per Linux architecture

@@ -170,51 +170,6 @@ void main() {
     expect(await explicitlyOff.checkOnce(currentVersion: '1.0.0'), isNull);
   });
 
-  test('checkOnce marks a major/minor bump forced, and a same-major.minor patch bump forced past the drift limit', () async {
-    final url = await serveMetadataAndZip(manifestVersion: newVersion); // 9.9.9
-    final updater = DesktopUpdater(
-      dio: Dio(),
-      isLinux: false,
-      metadataUrl: url,
-      releaseMode: true,
-    );
-
-    final minorBump = await updater.checkOnce(currentVersion: '9.8.9');
-    expect(minorBump, isNotNull);
-    expect(minorBump!.forced, isTrue);
-
-    final majorBump = await updater.checkOnce(currentVersion: '8.9.9');
-    expect(majorBump, isNotNull);
-    expect(majorBump!.forced, isTrue);
-
-    final withinDrift = await updater.checkOnce(currentVersion: '9.9.5');
-    expect(withinDrift, isNotNull);
-    expect(withinDrift!.forced, isFalse);
-
-    final beyondDrift = await updater.checkOnce(currentVersion: '9.9.3');
-    expect(beyondDrift, isNotNull);
-    expect(beyondDrift!.forced, isTrue);
-  });
-
-  test('isForcedUpdate is true for a major/minor difference', () {
-    expect(isForcedUpdate('2.0.0', '1.9.9'), isTrue);
-    expect(isForcedUpdate('1.3.0', '1.2.9'), isTrue);
-    expect(isForcedUpdate('1.2.4', '1.2.3'), isFalse);
-    expect(isForcedUpdate('1.2.3', '1.2.3'), isFalse);
-    expect(isForcedUpdate('not-a-version', '1.0.0'), isFalse);
-  });
-
-  test('isForcedUpdate is also true for a same-major.minor patch drift beyond 5, false at or under it', () {
-    expect(isForcedUpdate('1.2.2', '1.2.2'), isFalse); // no drift
-    expect(
-      isForcedUpdate('1.2.7', '1.2.2'),
-      isFalse,
-    ); // drift 5, at the limit — still optional
-    expect(isForcedUpdate('1.2.8', '1.2.2'), isTrue); // drift 6 — forced
-    // A major/minor difference already forces it regardless of how small the patch drift is.
-    expect(isForcedUpdate('1.3.0', '1.2.99'), isTrue);
-  });
-
   test('checkOnce returns null when the running version is already current or newer', () async {
     final url = await serveMetadataAndZip(manifestVersion: '1.0.0');
     final updater = DesktopUpdater(

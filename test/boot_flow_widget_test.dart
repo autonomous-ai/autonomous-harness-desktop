@@ -560,66 +560,6 @@ void main() {
     app.dispose();
   });
 
-  testWidgets(
-    'a forced (major/minor) update blocks the whole app, even over the login screen',
-    (tester) async {
-      final app = makeNotifier(AppStatus.unauthenticated);
-      app.availableUpdate = const UpdateInfo(
-        version: '2.0.0',
-        url: 'https://example.test/Harness-macos.zip',
-        sha256:
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        size: 1,
-        forced: true,
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [appStateProvider.overrideWithValue(app)],
-          child: const DesktopApp(),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Harness 2.0.0 is required'), findsOneWidget);
-      expect(
-        find.byKey(const Key('forced-update-install-button')),
-        findsOneWidget,
-      );
-      // No login screen underneath, and none of the optional-update escape hatches.
-      expect(find.text('Sign in'), findsNothing);
-      expect(find.byKey(const Key('skip-update-button')), findsNothing);
-      expect(find.byKey(const Key('install-update-button')), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'the manual update-check dialog never opens for a forced update — the blocking screen already covers it',
-    (tester) async {
-      final app = makeNotifier(AppStatus.authenticated);
-      await tester.pumpWidget(const MaterialApp(home: Placeholder()));
-
-      final dialog = showUpdateCheckDialog(
-        tester.element(find.byType(Placeholder)),
-        app,
-        const ManualUpdateCheck(
-          update: UpdateInfo(
-            version: '2.0.0',
-            url: 'https://example.test/Harness-macos.zip',
-            sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            size: 1,
-            forced: true,
-          ),
-        ),
-      );
-      await tester.pump();
-      await dialog;
-
-      expect(find.byType(Dialog), findsNothing);
-      app.dispose();
-    },
-  );
-
   testWidgets('offline selected agent shows the Harness join guide', (
     tester,
   ) async {

@@ -6,9 +6,8 @@
 # Usage:
 #   bash scripts/release-desktop.sh                    # bump the patch and release
 #   bash scripts/release-desktop.sh --dry-run          # print everything, tag nothing, push nothing
-#   bash scripts/release-desktop.sh --minor            # bump the MINOR version — every running app
-#                                                      # treats this as a MANDATORY update and blocks
-#                                                      # until it installs (see desktop_updater.dart)
+#   bash scripts/release-desktop.sh --minor            # bump the MINOR version, per the usual semver
+#                                                      # convention
 #   bash scripts/release-desktop.sh 1.1.0              # release an explicit version
 #   bash scripts/release-desktop.sh --notes-file f.md  # hand-written release notes instead of the
 #                                                      # generated commit list
@@ -229,7 +228,7 @@ if version_gt "$GCS_VER" "$TAG_VER"; then
 fi
 echo "  releasing          $VER   (tag $TAG on ${HEAD_SHA:0:12})"
 if [ "$DO_MINOR" -eq 1 ] || [ "${VER%%.*}" != "${CUR%%.*}" ] || [ "$(echo "$VER" | cut -d. -f2)" != "$(echo "$CUR" | cut -d. -f2)" ]; then
-  echo "  MANDATORY UPDATE   a major/minor change blocks every running app until it installs this."
+  echo "  NOTE               this is a major/minor version bump."
 fi
 echo ""
 echo "  release notes:"

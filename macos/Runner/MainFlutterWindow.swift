@@ -296,6 +296,12 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "readImagePng":
         result(MainFlutterWindow.readClipboardImagePng())
+      case "writeImagePng":
+        guard let bytes = (call.arguments as? FlutterStandardTypedData)?.data else {
+          result(FlutterError(code: "INVALID_ARGUMENT", message: "expected PNG bytes", details: nil))
+          return
+        }
+        result(MainFlutterWindow.writeClipboardImagePng(bytes))
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -320,5 +326,16 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
     return FlutterStandardTypedData(bytes: pngData)
+  }
+
+  /// Writes PNG bytes onto the general pasteboard, replacing whatever was there — the LOCAL half
+  /// of native image drag-drop (`_dropImage` in pane_grid.dart): when the pane's machine is this
+  /// same computer, the app puts the dropped image on ITS OWN clipboard directly instead of
+  /// sending it over the terminal wire, then forwards a Ctrl+V so the engine reads it exactly as
+  /// it already does for an ordinary local clipboard paste.
+  private static func writeClipboardImagePng(_ data: Data) -> Bool {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    return pasteboard.setData(data, forType: .png)
   }
 }

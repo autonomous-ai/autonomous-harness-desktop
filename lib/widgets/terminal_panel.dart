@@ -422,11 +422,13 @@ class _TerminalPanelState extends State<TerminalPanel>
   /// platform-channel read for an actual image (macOS/Linux only; see its doc).
   ///
   /// The engines running in these panes read the system clipboard THEMSELVES —
-  /// Claude Code attaches an image on Ctrl+V — so a native image paste sends the
-  /// bytes to the daemon, which writes THIS remote machine's OS clipboard and
-  /// replays Ctrl+V, and a bare Ctrl+V (no capability, or no image bytes at all)
-  /// is handed down exactly as it always was, on the same bet: that whatever
-  /// clipboard the remote engine reads from already has what the user copied.
+  /// Claude Code attaches an image on Ctrl+V — so on a LOCAL pane that is already
+  /// true with zero help from us: a bare Ctrl+V is all that ever ran here, before
+  /// native image paste existed, and it still works because the engine and this
+  /// app share the exact same OS clipboard. The wire-based `pasteImage` (chunked
+  /// upload, daemon writes the far side's OS clipboard, daemon replays Ctrl+V) is
+  /// reserved for a genuinely REMOTE pane, whose engine reads a DIFFERENT
+  /// clipboard than this one — see `MachineState.isLocalMachine`.
   Future<void> _paste() async {
     if (widget.readOnly || !widget.session.acceptsInput) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
@@ -443,7 +445,9 @@ class _TerminalPanelState extends State<TerminalPanel>
       return;
     }
     final machine = widget.notifier.stateOf(widget.session.machineId);
-    if (machine != null && machine.terminalImagePasteAvailable) {
+    if (machine != null &&
+        !machine.isLocalMachine &&
+        machine.terminalImagePasteAvailable) {
       final imageBytes = await NativeClipboard.readImagePng();
       if (imageBytes != null &&
           imageBytes.isNotEmpty &&

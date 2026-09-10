@@ -2,12 +2,16 @@ import 'dart:typed_data';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
+import 'package:xterm/xterm.dart';
 
 import 'window_chrome.dart';
 
 import '../clipboard/image_bytes.dart';
+import '../clipboard/native_clipboard.dart';
 import '../shared/theme/app_theme.dart' as grid;
-import '../shortcuts/app_shortcuts.dart';
+// `hide TerminalKey`: this file's own shortcut-label class, unused here, collides with xterm's
+// `TerminalKey` (needed for the local image-drop Ctrl+V nudge — see `_dropImage`).
+import '../shortcuts/app_shortcuts.dart' hide TerminalKey;
 import '../state/app_state.dart';
 import '../state/pane_preset.dart';
 import '../state/terminal_pane.dart';
@@ -927,8 +931,11 @@ class _FileDropZoneState extends State<_FileDropZone> {
     MachineState? machine,
     TerminalSession session,
   ) async {
-    if (machine == null || !machine.terminalImagePasteAvailable) {
-      _toast('This machine cannot receive a native image paste yet');
+    // Not "cannot receive a native image paste" — that's a real capability gap, this is just a
+    // race between the drop landing and machine state loading. Conflating the two would send the
+    // user to fix a machine that is perfectly fine.
+    if (machine == null) {
+      _toast('Machine info not ready yet — try again in a moment');
       return;
     }
     Uint8List raw;
@@ -941,6 +948,25 @@ class _FileDropZoneState extends State<_FileDropZone> {
     final png = await ensurePngBytes(raw);
     if (png == null) {
       _toast('${item.name} is not a readable image');
+      return;
+    }
+
+    // Local pane: the app itself IS the target OS, so it writes ITS OWN clipboard directly
+    // instead of sending the bytes over the wire, then nudges the engine exactly like an
+    // ordinary local clipboard paste already does (see terminal_panel.dart's `_paste()`) — never
+    // the chunked-upload path, which is for a genuinely remote machine's DIFFERENT clipboard.
+    if (machine.isLocalMachine) {
+      final wrote = await NativeClipboard.writeImagePng(png);
+      if (!wrote) {
+        _toast('Could not set the clipboard on this machine');
+        return;
+      }
+      session.terminal.keyInput(TerminalKey.keyV, ctrl: true);
+      return;
+    }
+
+    if (!machine.terminalImagePasteAvailable) {
+      _toast('This machine cannot receive a native image paste yet');
       return;
     }
     if (png.length > terminalLocalImagePasteMaxPayloadBytes) {
@@ -957,8 +983,15 @@ class _FileDropZoneState extends State<_FileDropZone> {
     MachineState? machine,
     TerminalSession session,
   ) async {
+    // Same reasoning as _dropImage: null here is a transient race, not "this machine can't do
+    // this" — say so distinctly rather than falling through to the remote/upload branch below,
+    // which would silently take the wire for what might actually be a local pane.
+    if (machine == null) {
+      _toast('Machine info not ready yet — try again in a moment');
+      return;
+    }
     // Local pane: the file already has a valid path on this same machine — nothing to transfer.
-    if (machine != null && machine.isLocalMachine) {
+    if (machine.isLocalMachine) {
       await session.pasteText(item.path);
       return;
     }
@@ -967,7 +1000,7 @@ class _FileDropZoneState extends State<_FileDropZone> {
       _toast("Folders can't be sent to a remote machine yet");
       return;
     }
-    if (machine == null || !machine.terminalPasteFileAvailable) {
+    if (!machine.terminalPasteFileAvailable) {
       _toast('This machine cannot receive a dropped file yet');
       return;
     }

@@ -106,8 +106,7 @@ real tty.
 
 `lib/main.dart`: `CrashLog.install()` → `loadPersistedSettings()` (theme mode + terminal font, awaited
 before the first frame to avoid flicker) → `RootShell`, which switches on `AppStatus`
-(`bootstrapping → preparingEnvironment → unauthenticated → authenticated`); a forced update
-(`hasForcedUpdate`, major/minor bump) overrides every other screen.
+(`bootstrapping → preparingEnvironment → unauthenticated → authenticated`).
 
 `lib/state/app_state.dart` (`AppNotifier`, a `ChangeNotifier` exposed through the single Riverpod
 `appStateProvider`) is the whole app model: machines, agents, connections, panes, updater, login.
@@ -772,7 +771,7 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - `lib/flash/` flashes the ESP32-S3 dial through the CLI runner; `SerialPortLease` pauses daemon
   supervision while the port is held so `harness start` cannot steal it mid-write.
 - `lib/update/desktop_updater.dart` self-updates from the GCS manifest (sha256-verified, strictly
-  newer only, major/minor = forced). `_otaKey` must match `OTA_KEY` in `scripts/upload-desktop.sh`.
+  newer only). `_otaKey` must match `OTA_KEY` in `scripts/upload-desktop.sh`.
 
 ## Testing conventions
 

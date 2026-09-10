@@ -113,8 +113,8 @@ class WindowDragStrip extends StatelessWidget {
   }
 }
 
-/// A screen that takes the whole window — sign-in, first-run setup, a forced
-/// update — with a drag strip laid over its top edge.
+/// A screen that takes the whole window — sign-in, first-run setup — with a
+/// drag strip laid over its top edge.
 ///
 /// Overlaid rather than stacked above, so the screen's own centring does not
 /// shift by half a strip; these screens centre a card and draw nothing at the

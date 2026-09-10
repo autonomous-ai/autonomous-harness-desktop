@@ -5,11 +5,9 @@
 #
 # Usage:
 #   bash scripts/upload-desktop.sh              # auto-bump (1.2.3 -> 1.2.4; 1.2.99 -> 1.3.1)
-#   bash scripts/upload-desktop.sh --force       # bump the MINOR version (1.2.3 -> 1.3.1) — running
-#                                                 # apps treat this as a mandatory update and block
-#                                                 # until they install it (see desktop_updater.dart)
-#   bash scripts/upload-desktop.sh 1.3.0         # release an explicit version (a major bump, e.g.
-#                                                 # 2.0.0, is also forced — no separate flag for it)
+#   bash scripts/upload-desktop.sh --force       # bump the MINOR version (1.2.3 -> 1.3.1), per the
+#                                                 # usual semver convention
+#   bash scripts/upload-desktop.sh 1.3.0         # release an explicit version
 #   bash scripts/upload-desktop.sh --no-bump     # keep the current published version, build + upload
 #   bash scripts/upload-desktop.sh --no-build    # upload the existing build/ artifact as-is
 #   bash scripts/upload-desktop.sh --no-notarize # skip Apple notarization (Developer ID signed only)
@@ -75,8 +73,7 @@ next_desktop_version() {
 }
 
 # Same "reset to .1, not .0" convention as next_desktop_version()'s patch rollover above — kept
-# consistent so "the next minor" means the same thing everywhere. A minor bump is what running apps
-# treat as a mandatory update (see isForcedUpdate() in lib/update/desktop_updater.dart).
+# consistent so "the next minor" means the same thing everywhere.
 bump_minor_version() {
   local current="$1" major minor
   if [[ ! "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then

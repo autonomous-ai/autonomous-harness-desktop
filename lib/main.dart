@@ -194,56 +194,49 @@ class _RootShellState extends ConsumerState<RootShell> {
       listenable: app,
       builder: (context, _) {
         final Widget screen;
-        // A forced (major/minor) update wins over every other status, including the login screen —
-        // this build can no longer be used at all, so there is nothing underneath worth showing.
-        if (app.hasForcedUpdate) {
-          screen = ForcedUpdateScreen(notifier: app);
-        } else {
-          switch (app.status) {
-            case AppStatus.bootstrapping:
-              // `bootstrapping` covers two unrelated moments: the app starting
-              // cold, and a sign-in the user just began. The second keeps
-              // LoginScreen, which carries the wait as a state of its own
-              // button; swapping the window for a separate screen there was a
-              // hard cut in the middle of a flow, and it is why that button's
-              // spinner was almost never seen.
-              //
-              // ⚠️ Keyed on `signingIn`, NOT on `pendingAuthorizeUrl`. The URL
-              // only exists for the middle stretch of the flow — the CLI has to
-              // start before it can print one, and it is cleared again while
-              // the post-login restore is still running — so keying on it blew
-              // the user's own screen away twice per sign-in: once on the click
-              // and again on success.
-              screen = app.signingIn
-                  ? LoginScreen(notifier: app)
-                  : Scaffold(
-                      body: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const CircularProgressIndicator(),
-                            if (app.bootStatusMessage != null) ...[
-                              const SizedBox(height: 16),
-                              Text(app.bootStatusMessage!),
-                            ],
+        switch (app.status) {
+          case AppStatus.bootstrapping:
+            // `bootstrapping` covers two unrelated moments: the app starting
+            // cold, and a sign-in the user just began. The second keeps
+            // LoginScreen, which carries the wait as a state of its own
+            // button; swapping the window for a separate screen there was a
+            // hard cut in the middle of a flow, and it is why that button's
+            // spinner was almost never seen.
+            //
+            // ⚠️ Keyed on `signingIn`, NOT on `pendingAuthorizeUrl`. The URL
+            // only exists for the middle stretch of the flow — the CLI has to
+            // start before it can print one, and it is cleared again while
+            // the post-login restore is still running — so keying on it blew
+            // the user's own screen away twice per sign-in: once on the click
+            // and again on success.
+            screen = app.signingIn
+                ? LoginScreen(notifier: app)
+                : Scaffold(
+                    body: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(),
+                          if (app.bootStatusMessage != null) ...[
+                            const SizedBox(height: 16),
+                            Text(app.bootStatusMessage!),
                           ],
-                        ),
+                        ],
                       ),
-                    );
-            case AppStatus.preparingEnvironment:
-              screen = EnvironmentSetupScreen(notifier: app);
-            case AppStatus.unauthenticated:
-              screen = LoginScreen(notifier: app);
-            case AppStatus.authenticated:
-              screen = HomeScreen(notifier: app);
-          }
+                    ),
+                  );
+          case AppStatus.preparingEnvironment:
+            screen = EnvironmentSetupScreen(notifier: app);
+          case AppStatus.unauthenticated:
+            screen = LoginScreen(notifier: app);
+          case AppStatus.authenticated:
+            screen = HomeScreen(notifier: app);
         }
         // Only the home shell carries its own drag handle and traffic-light
         // clearance (the rail's head). Every other screen fills the window
         // with a centred card, so the strip goes over it here, once, instead
         // of inside each of them.
-        final framed =
-            app.status == AppStatus.authenticated && !app.hasForcedUpdate
+        final framed = app.status == AppStatus.authenticated
             ? screen
             : FullWindowScreen(child: screen);
         // The band takes a row of its own rather than floating over one. As an
@@ -253,7 +246,6 @@ class _RootShellState extends ConsumerState<RootShell> {
         return Column(
           children: [
             if (app.hasAvailableUpdate &&
-                !app.hasForcedUpdate &&
                 app.status != AppStatus.bootstrapping &&
                 app.status != AppStatus.preparingEnvironment)
               UpdateNotice(notifier: app),

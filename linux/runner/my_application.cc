@@ -20,33 +20,20 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
-// Dart calls into this channel to read a native image off the GTK clipboard. Flutter's own
-// `Clipboard` API only ever sees text/plain — see terminal_panel.dart's `_paste()` — so a real
-// image (a screenshot, "Copy Image" from a browser, ...) needs this native round trip instead.
-// Mirrors macOS's `harness/clipboard_image` channel (MainFlutterWindow.swift).
-static void clipboard_image_method_call_cb(FlMethodChannel* channel,
-                                            FlMethodCall* method_call,
-                                            gpointer user_data) {
-  g_autoptr(FlMethodResponse) response = nullptr;
-  if (g_strcmp0(fl_method_call_get_name(method_call), "readImagePng") != 0) {
-    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-    fl_method_call_respond(method_call, response, nullptr);
-    return;
-  }
-
+// Reads a native image off the GTK clipboard, as PNG bytes.
+static FlMethodResponse* read_clipboard_image_png() {
   GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
   GdkPixbuf* pixbuf = gtk_clipboard_wait_for_image(clipboard);
   if (pixbuf == nullptr) {
     // No image on the clipboard (the normal case for a plain-text paste) — the Dart side falls
     // back to today's text-paste behaviour.
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_null()));
-    fl_method_call_respond(method_call, response, nullptr);
-    return;
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_null()));
   }
 
   gchar* buffer = nullptr;
   gsize buffer_size = 0;
   g_autoptr(GError) error = nullptr;
+  FlMethodResponse* response;
   if (gdk_pixbuf_save_to_buffer(pixbuf, &buffer, &buffer_size, "png", &error, nullptr)) {
     g_autoptr(FlValue) bytes = fl_value_new_uint8_list(
         reinterpret_cast<const uint8_t*>(buffer), buffer_size);
@@ -59,6 +46,53 @@ static void clipboard_image_method_call_cb(FlMethodChannel* channel,
         nullptr));
   }
   g_object_unref(pixbuf);
+  return response;
+}
+
+// Writes PNG bytes onto the GTK clipboard, replacing whatever was there — the LOCAL half of
+// native image drag-drop (`_dropImage` in pane_grid.dart): when the pane's machine is this same
+// computer, the app puts the dropped image on ITS OWN clipboard directly instead of sending it
+// over the terminal wire, then forwards a Ctrl+V so the engine reads it exactly as it already
+// does for an ordinary local clipboard paste. GTK's clipboard API works in terms of a decoded
+// GdkPixbuf, not raw encoded bytes, unlike the read side above (which can hand back raw PNG bytes
+// directly) — hence decoding through a loader here.
+static FlMethodResponse* write_clipboard_image_png(FlValue* args) {
+  if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_UINT8_LIST) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "INVALID_ARGUMENT", "expected PNG bytes", nullptr));
+  }
+  const uint8_t* bytes = fl_value_get_uint8_list(args);
+  size_t length = fl_value_get_length(args);
+
+  g_autoptr(GdkPixbufLoader) loader = gdk_pixbuf_loader_new();
+  gdk_pixbuf_loader_write(loader, bytes, length, nullptr);
+  gdk_pixbuf_loader_close(loader, nullptr);
+  GdkPixbuf* pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+  if (pixbuf == nullptr) {
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(FALSE)));
+  }
+
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  gtk_clipboard_set_image(clipboard, pixbuf);
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
+}
+
+// Dart calls into this channel to read/write a native image on the GTK clipboard. Flutter's own
+// `Clipboard` API only ever sees text/plain — see terminal_panel.dart's `_paste()` — so a real
+// image (a screenshot, "Copy Image" from a browser, ...) needs this native round trip instead.
+// Mirrors macOS's `harness/clipboard_image` channel (MainFlutterWindow.swift).
+static void clipboard_image_method_call_cb(FlMethodChannel* channel,
+                                            FlMethodCall* method_call,
+                                            gpointer user_data) {
+  g_autoptr(FlMethodResponse) response = nullptr;
+  const gchar* method = fl_method_call_get_name(method_call);
+  if (g_strcmp0(method, "readImagePng") == 0) {
+    response = read_clipboard_image_png();
+  } else if (g_strcmp0(method, "writeImagePng") == 0) {
+    response = write_clipboard_image_png(fl_method_call_get_args(method_call));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
   fl_method_call_respond(method_call, response, nullptr);
 }
 

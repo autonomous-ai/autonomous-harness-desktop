@@ -9,6 +9,4 @@ class ManualUpdateCheck {
   const ManualUpdateCheck({this.update, this.isSkipped = false});
 
   bool get isUpToDate => update == null;
-
-  bool get isForced => update?.forced ?? false;
 }

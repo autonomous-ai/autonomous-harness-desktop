@@ -30,4 +30,25 @@ class NativeClipboard {
       return null;
     }
   }
+
+  /// Writes `pngBytes` onto the system clipboard, replacing whatever was there — the LOCAL half
+  /// of native image drag-drop (see `_dropImage` in `widgets/pane_grid.dart`): when the pane's
+  /// machine is this same computer, the app puts the bytes on ITS OWN clipboard directly instead
+  /// of sending them over the terminal wire, then forwards a Ctrl+V so the engine reads them
+  /// exactly as it already does for an ordinary local clipboard paste.
+  ///
+  /// Returns `false` on any platform without a native handler for this channel, or when the
+  /// native side could not decode/write the bytes — callers should treat that as "could not do
+  /// the local shortcut" rather than surfacing a crash.
+  static Future<bool> writeImagePng(Uint8List pngBytes) async {
+    if (!Platform.isMacOS && !Platform.isLinux) return false;
+    try {
+      final wrote = await _channel.invokeMethod<bool>('writeImagePng', pngBytes);
+      return wrote ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
