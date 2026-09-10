@@ -118,10 +118,3 @@ class PaneLayoutEntry {
     );
   }
 }
-
-/// Which end of the desk an agent the dial turned to sits past.
-///
-/// The daemon decides this — it holds the flat list of every agent on every machine, and the window only
-/// knows its own tiles. Sent up with the dial's focus so a tile is replaced at the end the thumb walked
-/// off, rather than the window guessing a direction it cannot see.
-enum DeskEdge { head, tail }
