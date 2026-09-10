@@ -54,7 +54,10 @@ enum TerminalBinaryKind {
   }
 }
 
-int _maxLocalPayloadBytesFor(TerminalBinaryKind kind) {
+/// The ceiling on one frame of [kind]: the loopback payload here, and equally the relay's HTRM
+/// ciphertext — the CLI's `TERMINAL_BINARY_*_MAX_CIPHERTEXT_BYTES` are the same numbers, which is
+/// why `e2ee/terminal_cipher.dart` reads them from here rather than restating them.
+int maxTerminalPayloadBytesFor(TerminalBinaryKind kind) {
   switch (kind) {
     case TerminalBinaryKind.paste:
       return terminalLocalPasteMaxPayloadBytes;
@@ -182,7 +185,7 @@ TerminalBinaryFrame? decodeTerminalPlain(
 /// wire format the app ever needs; there is no separate encrypted variant anymore.
 Uint8List? encodeTerminalLocal(TerminalBinaryFrame frame) {
   final payload = encodeTerminalPlain(frame);
-  if (payload == null || payload.length > _maxLocalPayloadBytesFor(frame.kind)) {
+  if (payload == null || payload.length > maxTerminalPayloadBytesFor(frame.kind)) {
     return null;
   }
   final header = Uint8List(terminalLocalHeaderBytes)
@@ -205,7 +208,7 @@ TerminalBinaryFrame? decodeTerminalLocal(List<int> raw) {
     return null;
   }
   final length = ByteData.sublistView(bytes).getUint32(8, Endian.big);
-  if (length > _maxLocalPayloadBytesFor(kind) ||
+  if (length > maxTerminalPayloadBytesFor(kind) ||
       bytes.length != terminalLocalHeaderBytes + length) {
     return null;
   }

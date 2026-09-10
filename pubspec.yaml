@@ -61,6 +61,12 @@ dependencies:
   # read".
   sqlite3: ^2.4.0
   desktop_drop: ^0.8.4
+  # NFKC for the remote password, which the harness CLI folds with
+  # `normalize('NFKC')` before scrypt. Dart ships no normalizer, and a password
+  # holding a compatibility character (a fullwidth digit, a ligature) would
+  # otherwise stretch to a different key and read as WRONG_PASSWORD. Pure Dart,
+  # so no native plugin. See `e2ee/password_pake.dart`.
+  unorm_dart: ^0.3.2
 
 dev_dependencies:
   flutter_test:
