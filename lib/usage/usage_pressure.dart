@@ -26,6 +26,14 @@ const double kUsageWarnPercent = 80;
 /// Where the app is willing to say something the reader did not ask for.
 const double kUsageCriticalPercent = 90;
 
+/// How long the notice stays quiet after any dismissal, whatever it was about.
+///
+/// Long enough that a second account over the threshold cannot appear under the
+/// pointer that just closed the first, short enough that it is not a second
+/// dismissal in disguise — the poll behind this runs every sixty seconds, so
+/// the next alert lands on the following cycle either way.
+const Duration kUsageNudgeCoolOff = Duration(seconds: 30);
+
 /// How long a dismissal lasts when the vendor never said when the window
 /// resets.
 ///

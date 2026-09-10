@@ -40,15 +40,15 @@ UsageAgentTally usageTallyFor(AppNotifier notifier, UsageProvider provider) =>
 /// The offer for [alert], or null when there is nothing worth pressing.
 ///
 /// [gridSurface] and [selection] are injection points, defaulted to what the
-/// app actually reads. They are NOT `@visibleForTesting`: the strip forwards
+/// app actually reads. They are NOT `@visibleForTesting`: the notice forwards
 /// its own injected stores through here, and a production caller passing a
 /// store it was handed is the ordinary case rather than the exception.
-UsageOffer? usageOfferOf(
+({UsageOffer? offer, UsageOfferBlocked? blocked}) usageOfferOf(
   AppNotifier notifier,
   UsageAlert alert, {
   bool gridSurface = kGridSurfaceEnabled,
   GridSelectionStore? selection,
-}) => usageOfferFor(
+}) => resolveUsageOffer(
   alert: alert,
   providerName: (selection ?? gridSelectionStore).value.networkName,
   tally: usageTallyFor(notifier, alert.provider),

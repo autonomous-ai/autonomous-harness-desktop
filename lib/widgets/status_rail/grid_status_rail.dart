@@ -856,7 +856,7 @@ class _ReadoutState extends State<_Readout> {
             widget.notifier,
             alerts.first,
             selection: widget.selection,
-          );
+          ).offer;
     return _stat(
       kind,
       _usageAnchors[provider]!,

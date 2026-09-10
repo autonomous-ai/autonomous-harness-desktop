@@ -425,16 +425,33 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   a row in the shell's `Column` would SIGWINCH every pty on screen to deliver a message, so it
   floats at bottom-left, over the figure it is about, taking no layout.
   **It never draws without something to press.** `usageOfferFor` answers null in four cases —
-  a build with no providers (`kGridSurfaceEnabled`), no agent here spending that subscription
-  (so whatever burned it is out of reach), a provider chosen with every candidate mid-turn (the
-  CLI would answer `AGENT_BUSY`), and below the threshold. A warning the reader can only agree
-  with is what the amber figure already says for free. With a default provider the button MOVES
+  a build with no providers (`kGridSurfaceEnabled`), an engine this computer does not run at all,
+  a provider chosen with every candidate mid-turn (the CLI would answer `AGENT_BUSY`), and below
+  the threshold. ⚠️ **The two offers ask DIFFERENT questions of `UsageAgentTally`**, and reading
+  both off `candidates` was a real hole: a computer whose only Codex agent had been moved onto a
+  provider by hand watched that account hit 97% and was offered nothing, while `New agent` would
+  have launched the next one straight back onto the spent subscription because no DEFAULT was
+  picked. Moving asks `candidates` ("what is on that subscription now"); choosing a default asks
+  `present` ("does this computer run that engine at all"), and an agent parked on a provider
+  answers yes. In every one of those cases the amber figure has already said the only thing left
+  to say, and a warning the reader can only agree with is not worth interrupting for.
+  ⚠️ **The silence names itself**: `resolveUsageOffer` returns a `UsageOfferBlocked` beside the
+  offer and the notice logs it (`app` category, so Settings ▸ Debug shows it live). Four unrelated
+  facts about a machine produce the identical blank and each is fixed somewhere else entirely, so
+  a red figure with nothing beside it reads as a broken feature — this is what tells whoever is
+  looking which of the four it is. It is also what caught the `candidates`/`present` hole above.
+  With a default provider the button MOVES
   the idle agents (`applyAgentModel` per agent, Auto model, sequential — a retarget respawns the
   pane in place with `--resume`, so this is not destructive); with none it opens Settings ▸
   Providers. ⚠️ **Only the MOVE closes the card.** Choosing a provider does not answer the
   question, it changes which offer applies — the card should come back reading `Move 3 agents to
   Water Grid`, which is the step that gets the work going again; silencing it there would strand
-  somebody one click short. **Once per rate-limit window**: `UsageNudgeStore` keys a dismissal by
+  somebody one click short. ⚠️ **Any dismissal buys `kUsageNudgeCoolOff` of quiet from the notice as a whole**, not just
+  from the window it closed: two accounts can be over the threshold at once, and closing the first
+  used to put the second on screen in the same place under the pointer that had just clicked — so
+  the second click landed on a card nobody had read. No timer behind it; the poll rebuilds this
+  once a minute anyway.
+  **Once per rate-limit window**: `UsageNudgeStore` keys a dismissal by
   `provider|label` — deliberately WITHOUT the reset time, which both vendors recompute on every
   answer, so a key carrying it would change under a once-a-minute poll — and expires it at the
   window's own reset, or `kUsageDismissGrace` when the vendor sent none. **Every entry expires**,

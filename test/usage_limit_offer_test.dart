@@ -110,43 +110,126 @@ void main() {
         (engine: 'claude', onProvider: false, busy: false),
         (engine: 'claude', onProvider: false, busy: true),
         // Already on a provider: not spending this subscription, so moving it
-        // would change nothing about the figure.
+        // would change nothing about the figure — but it still counts as
+        // [present], because it is proof this computer runs the engine.
         (engine: 'claude', onProvider: true, busy: false),
         (engine: 'codex', onProvider: false, busy: false),
         (engine: null, onProvider: false, busy: false),
       ]);
+      expect(tally.present, 3);
       expect(tally.candidates, 2);
       expect(tally.movable, 1);
     });
   });
 
   group('offer', () {
-    const busyOnly = UsageAgentTally(candidates: 2, movable: 0);
-    const idle = UsageAgentTally(candidates: 3, movable: 3);
+    const busyOnly = UsageAgentTally(present: 2, candidates: 2, movable: 0);
+    const idle = UsageAgentTally(present: 3, candidates: 3, movable: 3);
 
-    test('a build with no providers is offered nothing', () {
+    /// Every agent of this engine already moved onto a provider by hand.
+    const parked = UsageAgentTally(present: 2, candidates: 0, movable: 0);
+
+    test('the silence says which of the three it is', () {
+      // Four unrelated facts about a machine produce the identical blank, and
+      // they are fixed in completely different places — so the notice can log
+      // which one it was rather than leaving somebody to guess at a feature
+      // that looks broken.
       expect(
-        usageOfferFor(
+        resolveUsageOffer(
           alert: _alert(95),
           providerName: 'Water Grid',
           tally: idle,
           gridSurface: false,
-        ),
-        isNull,
+        ).blocked,
+        UsageOfferBlocked.noProviders,
       );
-    });
-
-    test('nothing here spending that subscription is offered nothing', () {
-      // The limit is real, but whatever burned it is on a machine this app
-      // cannot reach — so there is nothing to move and nothing to say.
       expect(
-        usageOfferFor(
+        resolveUsageOffer(
           alert: _alert(95),
           providerName: 'Water Grid',
           tally: UsageAgentTally.none,
           gridSurface: true,
-        ),
+        ).blocked,
+        UsageOfferBlocked.noAgents,
+      );
+      expect(
+        resolveUsageOffer(
+          alert: _alert(95),
+          providerName: 'Water Grid',
+          tally: busyOnly,
+          gridSurface: true,
+        ).blocked,
+        UsageOfferBlocked.allBusy,
+      );
+      expect(
+        resolveUsageOffer(
+          alert: _alert(95),
+          providerName: 'Water Grid',
+          tally: idle,
+          gridSurface: true,
+        ).blocked,
         isNull,
+      );
+    });
+
+    test('a build with no providers is offered nothing', () {
+      expect(
+        resolveUsageOffer(
+          alert: _alert(95),
+          providerName: 'Water Grid',
+          tally: idle,
+          gridSurface: false,
+        ).offer,
+        isNull,
+      );
+    });
+
+    test('an engine this computer does not run is offered nothing', () {
+      // The limit is real, but whatever burned it is on a machine this app
+      // cannot reach — so there is nothing to move and nothing to say.
+      expect(
+        resolveUsageOffer(
+          alert: _alert(95),
+          providerName: 'Water Grid',
+          tally: UsageAgentTally.none,
+          gridSurface: true,
+        ).offer,
+        isNull,
+      );
+      expect(
+        resolveUsageOffer(
+          alert: _alert(95),
+          providerName: null,
+          tally: UsageAgentTally.none,
+          gridSurface: true,
+        ).offer,
+        isNull,
+      );
+    });
+
+    test('agents parked on a provider still earn the DEFAULT offer', () {
+      // The hole this closes: with no default picked, `New agent` launches the
+      // next one onto the very subscription that is running out — so the fact
+      // that today's agents were moved by hand is not a reason to say nothing.
+      expect(
+        resolveUsageOffer(
+          alert: _alert(97),
+          providerName: null,
+          tally: parked,
+          gridSurface: true,
+        ).offer!.action,
+        UsageOfferAction.chooseProvider,
+      );
+      // With a default already picked there IS nothing to do: new agents
+      // launch on it, and nothing here is on the subscription to move.
+      expect(
+        resolveUsageOffer(
+          alert: _alert(97),
+          providerName: 'Water Grid',
+          tally: parked,
+          gridSurface: true,
+        ).blocked,
+        UsageOfferBlocked.noAgents,
       );
     });
 
@@ -154,12 +237,12 @@ void main() {
       // The CLI refuses a busy agent with AGENT_BUSY, so the only button worth
       // drawing would be refused the moment it was pressed.
       expect(
-        usageOfferFor(
+        resolveUsageOffer(
           alert: _alert(95),
           providerName: 'Water Grid',
           tally: busyOnly,
           gridSurface: true,
-        ),
+        ).offer,
         isNull,
       );
     });
@@ -167,12 +250,12 @@ void main() {
     test('no provider chosen offers the picker, busy agents or not', () {
       // Choosing one is worth doing whether or not anything can move right
       // now — it is what every agent started after this will launch on.
-      final offer = usageOfferFor(
+      final offer = resolveUsageOffer(
         alert: _alert(95),
         providerName: null,
         tally: busyOnly,
         gridSurface: true,
-      )!;
+      ).offer!;
       expect(offer.action, UsageOfferAction.chooseProvider);
       expect(offer.actionLabel, 'Choose a provider');
       expect(offer.providerName, isNull);
@@ -180,23 +263,23 @@ void main() {
 
     test('an empty provider name is no provider', () {
       expect(
-        usageOfferFor(
+        resolveUsageOffer(
           alert: _alert(95),
           providerName: '',
           tally: idle,
           gridSurface: true,
-        )!.action,
+        ).offer!.action,
         UsageOfferAction.chooseProvider,
       );
     });
 
     test('the button names the count and the destination', () {
-      final offer = usageOfferFor(
+      final offer = resolveUsageOffer(
         alert: _alert(92),
         providerName: 'Water Grid',
         tally: idle,
         gridSurface: true,
-      )!;
+      ).offer!;
       expect(offer.action, UsageOfferAction.moveAgents);
       expect(offer.headline, 'Claude is 92% through its Session limit');
       expect(offer.actionLabel, 'Move 3 agents');
@@ -205,18 +288,18 @@ void main() {
 
     test('one agent is not "1 agents"', () {
       expect(
-        usageOfferFor(
+        resolveUsageOffer(
           alert: _alert(92),
           providerName: 'Water Grid',
-          tally: const UsageAgentTally(candidates: 1, movable: 1),
+          tally: const UsageAgentTally(present: 1, candidates: 1, movable: 1),
           gridSurface: true,
-        )!.actionLabel,
+        ).offer!.actionLabel,
         'Move 1 agent',
       );
     });
 
     test('the countdown leads when the vendor sent one', () {
-      final offer = usageOfferFor(
+      final offer = resolveUsageOffer(
         alert: UsageAlert(
           provider: UsageProvider.codex,
           window: _window(
@@ -228,19 +311,19 @@ void main() {
         providerName: 'Water Grid',
         tally: idle,
         gridSurface: true,
-      )!;
+      ).offer!;
       expect(offer.detail, startsWith('It resets in 2h 3m.'));
     });
 
     test('and is simply absent when it did not', () {
       // Never "resets in 0m", which would read as a measurement rather than as
       // the silence it is.
-      final offer = usageOfferFor(
+      final offer = resolveUsageOffer(
         alert: _alert(96),
         providerName: 'Water Grid',
         tally: idle,
         gridSurface: true,
-      )!;
+      ).offer!;
       expect(offer.detail, isNot(contains('resets')));
       expect(offer.detail, startsWith('Keep working'));
     });

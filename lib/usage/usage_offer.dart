@@ -24,12 +24,24 @@ typedef UsageAgentRow = ({String? engine, bool onProvider, bool busy});
 
 /// How many agents on one engine this offer could actually move.
 class UsageAgentTally {
-  const UsageAgentTally({required this.candidates, required this.movable});
+  const UsageAgentTally({
+    required this.present,
+    required this.candidates,
+    required this.movable,
+  });
 
-  static const none = UsageAgentTally(candidates: 0, movable: 0);
+  static const none = UsageAgentTally(present: 0, candidates: 0, movable: 0);
 
-  /// Agents on this engine running on its own subscription — the ones actually
-  /// spending the window that is about to run out.
+  /// Agents on this engine at all, whatever they are pointed at.
+  ///
+  /// Evidence that this computer *uses* the engine, which is a different fact
+  /// from whether it is spending the subscription right now — and it is the one
+  /// that matters when no provider has been chosen, because the next agent
+  /// started here launches on that subscription.
+  final int present;
+
+  /// Of those, the ones running on the engine's own subscription — the agents
+  /// actually spending the window that is about to run out.
   final int candidates;
 
   /// Of those, the ones not in the middle of a turn.
@@ -44,14 +56,21 @@ UsageAgentTally tallyUsageAgents(
   String engineId,
   Iterable<UsageAgentRow> rows,
 ) {
+  var present = 0;
   var candidates = 0;
   var movable = 0;
   for (final row in rows) {
-    if (row.engine != engineId || row.onProvider) continue;
+    if (row.engine != engineId) continue;
+    present++;
+    if (row.onProvider) continue;
     candidates++;
     if (!row.busy) movable++;
   }
-  return UsageAgentTally(candidates: candidates, movable: movable);
+  return UsageAgentTally(
+    present: present,
+    candidates: candidates,
+    movable: movable,
+  );
 }
 
 /// A nearly-spent window, and the one thing worth pressing about it.
@@ -105,36 +124,63 @@ class UsageOffer {
   static String _agents(int count) => '$count agent${count == 1 ? '' : 's'}';
 }
 
-/// The offer for [alert], or null when there is nothing worth saying.
+/// Why there is no offer, when there is none.
 ///
-/// Four ways to answer null, and each is a case where a strip would be pure
-/// noise:
+/// An enum rather than a bare null because "the card is not showing" is
+/// otherwise unanswerable from outside: three unrelated facts about the machine
+/// produce the identical silence, and they are fixed in three completely
+/// different places. A red figure on the rail with nothing beside it reads as a
+/// broken feature unless the app can say which of the three it is.
+enum UsageOfferBlocked {
+  /// This build has no providers at all ([kGridSurfaceEnabled] off), so every
+  /// offer would point at a door that is not there.
+  noProviders,
+
+  /// No agent here runs on that subscription — whatever is spending it is
+  /// somewhere this app cannot reach, and moving nothing would not help.
+  noAgents,
+
+  /// A provider is chosen and every candidate is mid-turn, so the one button
+  /// worth drawing would be refused by the CLI the moment it was pressed.
+  allBusy,
+}
+
+/// The offer for [alert], or the reason there is none.
 ///
-///  * this build has no providers at all, so every offer points at a door that
-///    is not there;
-///  * no agent here runs on that subscription, so whatever is spending it is
-///    somewhere this app cannot reach and moving nothing would not help;
-///  * a provider is chosen and every candidate is mid-turn, so the one button
-///    worth drawing would be refused by the CLI the moment it was pressed.
-///
-/// The rail's amber figure covers all three: the reader is told, and is not
-/// interrupted to be told something they cannot act on.
-UsageOffer? usageOfferFor({
+/// The rail's amber figure covers every silence here: the reader is told, and
+/// is not interrupted to be told something they cannot act on.
+({UsageOffer? offer, UsageOfferBlocked? blocked}) resolveUsageOffer({
   required UsageAlert alert,
   required String? providerName,
   required UsageAgentTally tally,
   required bool gridSurface,
 }) {
-  if (!gridSurface) return null;
-  if (tally.candidates == 0) return null;
+  if (!gridSurface) {
+    return (offer: null, blocked: UsageOfferBlocked.noProviders);
+  }
   final hasProvider = (providerName ?? '').isNotEmpty;
-  if (hasProvider && tally.movable == 0) return null;
-  return UsageOffer(
-    alert: alert,
-    action: hasProvider
-        ? UsageOfferAction.moveAgents
-        : UsageOfferAction.chooseProvider,
-    providerName: hasProvider ? providerName : null,
-    tally: tally,
+  // ⚠️ The two offers ask DIFFERENT questions of the tally, and reading both
+  // off `candidates` was a real hole: a computer whose only Codex agent had
+  // been moved onto a provider by hand watched that account climb to 97% and
+  // was offered nothing — while `New agent` would have launched the next one
+  // straight onto the spent subscription, because no DEFAULT had been picked.
+  // Moving asks "what is on that subscription now"; choosing a default asks
+  // "does this computer use that engine at all", and an agent parked on a
+  // provider answers yes.
+  final enough = hasProvider ? tally.candidates : tally.present;
+  if (enough == 0) return (offer: null, blocked: UsageOfferBlocked.noAgents);
+  if (hasProvider && tally.movable == 0) {
+    return (offer: null, blocked: UsageOfferBlocked.allBusy);
+  }
+  return (
+    offer: UsageOffer(
+      alert: alert,
+      action: hasProvider
+          ? UsageOfferAction.moveAgents
+          : UsageOfferAction.chooseProvider,
+      providerName: hasProvider ? providerName : null,
+      tally: tally,
+    ),
+    blocked: null,
   );
 }

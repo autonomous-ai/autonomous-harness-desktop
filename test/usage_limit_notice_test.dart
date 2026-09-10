@@ -38,22 +38,25 @@ class _StubUsageSource implements UsageSource {
   Future<ProviderUsage> read() async => reading;
 }
 
+ProviderUsage _reading(UsageProvider provider, double percent) => ProviderUsage(
+  provider: provider,
+  status: UsageStatus.ok,
+  windows: [
+    UsageWindow(
+      label: provider == UsageProvider.claude ? 'Session' : '5h',
+      usedPercent: percent,
+    ),
+  ],
+  fetchedAt: DateTime.now(),
+);
+
 /// A controller holding one Claude reading, already settled.
 ///
 /// `autoStart: false` and one explicit refresh, for the reason the rail's own
 /// tests give: a periodic timer is a `pumpAndSettle` that never settles.
 Future<UsageController> _usageAt(double percent) async {
   final controller = UsageController(
-    sources: [
-      _StubUsageSource(
-        ProviderUsage(
-          provider: UsageProvider.claude,
-          status: UsageStatus.ok,
-          windows: [UsageWindow(label: 'Session', usedPercent: percent)],
-          fetchedAt: DateTime.now(),
-        ),
-      ),
-    ],
+    sources: [_StubUsageSource(_reading(UsageProvider.claude, percent))],
     autoStart: false,
   );
   await controller.refresh();
@@ -89,6 +92,9 @@ void main() {
     terminalAvailable: true,
     grid: grid,
   );
+
+  Agent codexAgent({String id = 'a2'}) =>
+      Agent(id: id, name: id, engine: 'codex', status: 'active');
 
   Future<UsageNudgeStore> pumpNotice(
     WidgetTester tester, {
@@ -163,9 +169,11 @@ void main() {
     expect(find.text('Choose a provider'), findsOneWidget);
   });
 
-  testWidgets('an agent already on a provider is not a reason', (tester) async {
-    // It is not spending the subscription that is running out, so moving it
-    // would change nothing about the figure.
+  testWidgets('with a default set, an agent already on it is not a reason', (
+    tester,
+  ) async {
+    // It is not spending the subscription that is running out, and new agents
+    // already launch on the provider — so there is nothing left to offer.
     final usage = await _usageAt(92);
     addTearDown(usage.dispose);
     await pumpNotice(
@@ -177,6 +185,25 @@ void main() {
       providerName: 'Water Grid',
     );
     expect(find.textContaining('through its'), findsNothing);
+  });
+
+  testWidgets('agents parked on a provider still earn the picker', (
+    tester,
+  ) async {
+    // The case that caught this: every agent of the engine had been moved onto
+    // a provider by hand, so nothing was on the subscription — but no DEFAULT
+    // was picked either, which means the next `New agent` lands right back on
+    // the account that is running out.
+    final usage = await _usageAt(97);
+    addTearDown(usage.dispose);
+    await pumpNotice(
+      tester,
+      notifier: notifierWith([
+        claudeAgent(grid: const AgentGrid(baseUrl: 'https://relay/x')),
+      ]),
+      usage: usage,
+    );
+    expect(find.text('Choose a provider'), findsOneWidget);
   });
 
   testWidgets('a build with no providers draws nothing at all', (tester) async {
@@ -210,6 +237,34 @@ void main() {
     // but the card's own contract does not depend on that: it asked, it was
     // answered, and it does not ask again this cycle.
     expect(store.isDismissed('claude|Session'), isTrue);
+    expect(find.textContaining('through its'), findsNothing);
+  });
+
+  testWidgets('closing one does not hand the next a click you did not make', (
+    tester,
+  ) async {
+    // Both accounts are over the threshold. Closing the first used to put the
+    // second on screen in the same place, under the pointer that had just
+    // clicked — so the second click landed on a card nobody had read.
+    final usage = UsageController(
+      sources: [
+        _StubUsageSource(_reading(UsageProvider.claude, 92)),
+        _StubUsageSource(_reading(UsageProvider.codex, 97)),
+      ],
+      autoStart: false,
+    );
+    addTearDown(usage.dispose);
+    await usage.refresh();
+    await pumpNotice(
+      tester,
+      notifier: notifierWith([claudeAgent(), codexAgent()]),
+      usage: usage,
+    );
+    // Codex is the tighter window, so it is the one on screen.
+    expect(find.textContaining('Codex is 97%'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Not now — until this limit resets'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('through its'), findsNothing);
   });
 

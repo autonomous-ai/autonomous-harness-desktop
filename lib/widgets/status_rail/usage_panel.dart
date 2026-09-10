@@ -28,7 +28,7 @@ class UsagePanelContent extends StatelessWidget {
   final ProviderUsage reading;
 
   /// What this account's nearly-spent window is worth doing about, or null when
-  /// there is nothing worth pressing — see `usageOfferFor`.
+  /// there is nothing worth pressing — see `resolveUsageOffer`.
   final UsageOffer? offer;
 
   /// Runs [offer]. Null drops the footer entirely rather than drawing a button
