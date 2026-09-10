@@ -424,24 +424,40 @@ class _HomeScreenState extends State<HomeScreen> {
                     // the Expanded above so it is full-bleed under the machine
                     // rail as well as the panes — a strip that started after the
                     // rail would put a step in the window's bottom edge.
-                    GridStatusRail(
-                      // Two things need it, for one reason: the rail holds no
-                      // `AppNotifier` and both of these open Settings.
-                      notifier: notifier,
-                      // The shell's, shared with the card above — see [_usage].
-                      usage: _usage,
-                      // The node dashboard's empty state offers to put THIS
-                      // computer on the grid, and the screen that does it is a
-                      // Settings pane — which needs the notifier the shell holds
-                      // and the rail does not.
-                      onShareIntelligence: () => unawaited(
-                        showSettingsScreen(
-                          context,
-                          notifier,
-                          initialSection: SettingsSection.shareIntelligence,
-                          source: 'node_dashboard',
-                        ),
-                      ),
+                    // FOLDS WITH THE RAIL. Collapsing is a request for the whole window, and a strip
+                    // of chrome left running along the bottom answers half of it — the terminals get
+                    // the width and keep paying forty pixels of height for figures nobody folded the
+                    // rail to read.
+                    //
+                    // AnimatedSize rather than a plain `if`: the rail takes AppMotion.fold to get out
+                    // of the way, and a bar that vanished on the first frame of that would read as
+                    // two separate things happening, not one window opening up.
+                    AnimatedSize(
+                      duration: grid.AppMotion.fold,
+                      curve: grid.AppMotion.curve,
+                      alignment: Alignment.topCenter,
+                      child: _collapsed
+                          ? const SizedBox(width: double.infinity, height: 0)
+                          : GridStatusRail(
+                              // Two things need it, for one reason: the rail holds no
+                              // `AppNotifier` and both of these open Settings.
+                              notifier: notifier,
+                              // The shell's, shared with the card above — see [_usage].
+                              usage: _usage,
+                              // The node dashboard's empty state offers to put THIS
+                              // computer on the grid, and the screen that does it is a
+                              // Settings pane — which needs the notifier the shell holds
+                              // and the rail does not.
+                              onShareIntelligence: () => unawaited(
+                                showSettingsScreen(
+                                  context,
+                                  notifier,
+                                  initialSection:
+                                      SettingsSection.shareIntelligence,
+                                  source: 'node_dashboard',
+                                ),
+                              ),
+                            ),
                     ),
                   ],
                 ),
