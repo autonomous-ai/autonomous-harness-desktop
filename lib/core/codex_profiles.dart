@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'codex_profile_discovery.dart';
 import 'harness_file_store.dart';
 import 'local_key_value_store.dart';
 import 'test_run.dart';
@@ -10,44 +11,44 @@ class LocalCodexProfile {
   const LocalCodexProfile(this.path);
 
   final String path;
-  String get label => path.split(Platform.pathSeparator).last;
+  String get label =>
+      path
+          .split(Platform.pathSeparator)
+          .where((p) => p.isNotEmpty)
+          .lastOrNull ??
+      path;
 }
 
 class LocalCodexProfiles {
-  LocalCodexProfiles({this.home, LocalKeyValueStore? storage})
-    : _storage = storage ?? HarnessFileStore.shared;
+  LocalCodexProfiles({
+    this.home,
+    LocalKeyValueStore? storage,
+    Map<String, String>? environment,
+  }) : _storage = storage ?? HarnessFileStore.shared,
+       environment =
+           environment ?? (home == null ? Platform.environment : const {});
 
   static const _key = 'local_codex_profile_paths';
   final Directory? home;
+  final Map<String, String> environment;
   final LocalKeyValueStore _storage;
 
-  /// Discover conventional homes and explicitly linked folders. Stat only:
-  /// auth.json, config.toml and their contents remain owned by Codex.
-  Future<List<LocalCodexProfile>> load() async {
+  /// The caller supplies only Codex homes observed on this computer. Remote
+  /// paths must never be interpreted in this computer's filesystem.
+  Future<List<LocalCodexProfile>> load({
+    Set<String> observedPaths = const {},
+  }) async {
     if (kUnderTest && home == null) return const [];
-    final paths = <String>{};
-    try {
-      final raw = await _storage.read(_key);
-      final saved = raw == null ? null : jsonDecode(raw);
-      if (saved is List) paths.addAll(saved.whereType<String>());
-    } catch (_) {
-      // Discovery still works when the optional saved list is unavailable.
-    }
-    final root = home ?? Directory(Platform.environment['HOME'] ?? '');
-    if (root.path.isNotEmpty) {
-      try {
-        await for (final entry in root.list(followLinks: false)) {
-          final name = entry.uri.pathSegments.where((s) => s.isNotEmpty).last;
-          if (name == '.codex' || name.startsWith('.codex-')) {
-            if (await File('${entry.path}/auth.json').exists() ||
-                await File('${entry.path}/config.toml').exists()) {
-              paths.add(entry.path);
-            }
-          }
-        }
-      } on FileSystemException {
-        // Explicitly linked folders can still be available.
-      }
+    final paths = {...await _linkedPaths(), ...observedPaths};
+    final root =
+        home?.path ?? environment['HOME'] ?? environment['USERPROFILE'];
+    if (root != null && root.isNotEmpty) {
+      paths.addAll(
+        await CodexProfileDiscovery(
+          home: root,
+          environment: environment,
+        ).discover(),
+      );
     }
     final profiles = <String, LocalCodexProfile>{};
     for (final path in paths) {
@@ -60,7 +61,21 @@ class LocalCodexProfiles {
         // Ignore malformed persisted preferences.
       }
     }
-    return profiles.values.toList()..sort((a, b) => a.label.compareTo(b.label));
+    return profiles.values.toList()..sort((a, b) {
+      final byName = a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      return byName == 0 ? a.path.compareTo(b.path) : byName;
+    });
+  }
+
+  Future<Set<String>> _linkedPaths() async {
+    try {
+      final raw = await _storage.read(_key);
+      final saved = raw == null ? null : jsonDecode(raw);
+      if (saved is List) return saved.whereType<String>().take(256).toSet();
+    } catch (_) {
+      // Discovery still works when the optional saved list is unavailable.
+    }
+    return {};
   }
 
   Future<LocalCodexProfile> resolve(String path) async {
@@ -75,18 +90,18 @@ class LocalCodexProfiles {
         'The Codex profile folder is unavailable.',
       );
     }
-    return LocalCodexProfile(await directory.resolveSymbolicLinks());
+    final resolved = await directory.resolveSymbolicLinks();
+    if (resolved.length > 4096 ||
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(resolved)) {
+      throw const FormatException('Choose an absolute Codex profile folder.');
+    }
+    return LocalCodexProfile(resolved);
   }
 
   Future<LocalCodexProfile> link(String path) async {
     final profile = await resolve(path);
-    final profiles = await load();
-    await _storage.write(
-      _key,
-      jsonEncode(
-        {for (final entry in profiles) entry.path, profile.path}.toList(),
-      ),
-    );
+    final linked = await _linkedPaths();
+    await _storage.write(_key, jsonEncode({...linked, profile.path}.toList()));
     return profile;
   }
 }

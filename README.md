@@ -29,11 +29,29 @@ upstream package upgrade without preserving the local rendering and IME fixes.
 
 ## Local Codex profiles
 
-New Agent → Codex offers a profile picker when the local Harness CLI advertises
-`supportsCodexHome`. It discovers existing `~/.codex` and `~/.codex-*` folders;
-use **Link a profile folder…** for another location. Choose the `CODEX_HOME`
-directory used by a shortcut such as `codex1` or `codex2`, rather than the shortcut
-executable or a named Codex configuration preset. Only directory paths are saved.
+New Agent → Codex discovers local profiles when the Harness CLI advertises
+`supportsCodexHome`. The picker appears only when there are at least two distinct
+profile folders; **Default** does not count as another profile. A single profile
+is selected automatically, while no profiles keeps the normal launch. Linking
+and refreshing remain available in both cases.
+
+Discovery combines `CODEX_HOME` from the app environment, homes
+observed on this computer's Codex agents, Codex-named folders in home/XDG config
+with an existing `auth.json` or `config.toml` (including `.codex2` and
+`.codex_work`), and directories explicitly linked before. An empty default
+directory does not create a second profile.
+It also reads literal `CODEX_HOME` declarations in bash/zsh/fish startup files,
+aliases, functions, sourced files, and executable shell wrappers in local bin/PATH
+directories. Shortcut names do not have to contain "codex". `$HOME`, `${HOME}`,
+tilde and simple directory variables are supported; symlinks are deduplicated.
+
+Discovery never executes shell configuration or shortcuts and never reads Codex
+credentials. Shell scanning stops after 3 seconds, 256 small scripts, or four
+levels of script references. Computed paths, unsupported shell syntax and profiles outside
+these sources can be added with **Link a profile folder…**. Choose the actual
+`CODEX_HOME` directory, not the shortcut executable or a named configuration
+preset. Only linked paths are saved. **Refresh profiles** rescans without changing
+the current choice; new local agent homes also update an open picker.
 
 The selected directory supplies that agent’s Codex login, configuration, hooks,
 history and model cache, and stays attached across restarts. The terminal header

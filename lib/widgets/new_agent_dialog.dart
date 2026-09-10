@@ -83,6 +83,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   late String _engine = allEngines.first.id;
   String? _folder;
   LocalCodexProfile? _codexProfile;
+  bool _codexProfilesBusy = true;
   bool _bypassPermission = false;
   bool _submitting = false;
 
@@ -215,6 +216,13 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool get _machineIsThisComputer =>
       widget.notifier.stateOf(widget.machineId)?.isLocalMachine ?? false;
 
+  bool get _waitingForCodexProfile =>
+      _engine == 'codex' &&
+      _machineIsThisComputer &&
+      !gridSelectionStore.value.hasGrid &&
+      _availability('codex')?.supportsCodexHome == true &&
+      _codexProfilesBusy;
+
   /// [Machine.displayName], not `name` — the latter is nullable and a machine
   /// that never got one would title the dialog "New agent on null".
   String get _machineName =>
@@ -265,7 +273,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 
   Future<void> _submit() async {
     final folder = _folder;
-    if (folder == null || _submitting) return;
+    if (folder == null || _submitting || _waitingForCodexProfile) return;
     final engine = _engine;
     final profile = _codexProfile;
     final selection = gridSelectionStore.value;
@@ -369,7 +377,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         // engine — and which the summary's refusal note names.
         final refused =
             chosen.hasGrid && !kGridCapableEngines.contains(_engine);
-        final canCreate = _folder != null && !refused && !_submitting;
+        final canCreate =
+            _folder != null &&
+            !refused &&
+            !_submitting &&
+            !_waitingForCodexProfile;
 
         return AlertDialog(
           title: Text('New agent on $_machineName'),
@@ -509,6 +521,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           onChanged: (value) => setState(() {
             _engine = value;
             _codexProfile = null;
+            _codexProfilesBusy = true;
             if (!kEngineBypassPermissionFlag.containsKey(value)) {
               _bypassPermission = false;
             }
@@ -520,7 +533,18 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             CodexProfileField(
               value: _codexProfile,
               profiles: widget.codexProfiles,
+              observedPaths: {
+                for (final agent
+                    in widget.notifier.stateOf(widget.machineId)!.agents)
+                  if (agent.engine == 'codex' && agent.codexHome != null)
+                    agent.codexHome!,
+              },
               onChanged: (profile) => setState(() => _codexProfile = profile),
+              onBusyChanged: (busy) {
+                if (_codexProfilesBusy != busy) {
+                  setState(() => _codexProfilesBusy = busy);
+                }
+              },
             )
           else
             Text(
