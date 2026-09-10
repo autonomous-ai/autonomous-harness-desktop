@@ -520,9 +520,10 @@ class _ReadoutState extends State<_Readout> {
     // are the same figures either way — a rate limit is the account's, not the
     // grid's — so this is a substitution, not a fallback.
     if (controller == null) {
-      // No provider chosen — so the pill says `Subscription`, and the figures
-      // beside it are exactly what that subscription has spent. In a build with
-      // no provider surface at all there is nothing to pick and no pill.
+      // No provider chosen — so the pill says `This computer`, and the figures
+      // beside it are exactly what the account signed in here has spent. In a
+      // build with no provider surface at all there is nothing to pick and no
+      // pill.
       return Row(
         children: [
           if (kGridSurfaceEnabled) ...[
