@@ -4,7 +4,6 @@ import 'package:file_selector_platform_interface/file_selector_platform_interfac
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
-import 'package:harness/core/codex_profiles.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/core/engine_availability.dart';
 import 'package:harness/core/models.dart';
@@ -12,29 +11,6 @@ import 'package:harness/grid/grid_agent_override.dart';
 import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
-
-class _Profiles extends LocalCodexProfiles {
-  _Profiles([
-    Iterable<String> initialPaths = const [
-      '/accounts/codex1',
-      '/accounts/codex2',
-    ],
-  ]) : paths = {...initialPaths};
-
-  final Set<String> paths;
-  final extraPaths = <String>{};
-  Completer<void>? pending;
-  @override
-  Future<List<LocalCodexProfile>> load({
-    Set<String> observedPaths = const {},
-  }) async {
-    await pending?.future;
-    return [
-      for (final path in {...paths, ...observedPaths, ...extraPaths})
-        LocalCodexProfile(path),
-    ];
-  }
-}
 
 class _Folders extends FileSelectorPlatform {
   @override
@@ -44,14 +20,31 @@ class _Folders extends FileSelectorPlatform {
   }) async => '/work';
 }
 
+String _labelFor(String path) =>
+    path.split('/').where((p) => p.isNotEmpty).last;
+
+/// Stands in for the CLI round trip. `listCodexProfiles`/`linkCodexProfile` are what the harness CLI
+/// on [machineId] would answer with — this fake never touches a filesystem, matching how the real
+/// data now only ever comes from the machine's own CLI.
 class _Notifier extends AppNotifier {
-  _Notifier()
-    : super(
-        config: AppConfig.dev,
-        authSession: AuthSession(),
-        configStore: null,
-      );
+  _Notifier([
+    Iterable<String> initialPaths = const [
+      '/accounts/codex1',
+      '/accounts/codex2',
+    ],
+  ]) : paths = {...initialPaths},
+       super(
+         config: AppConfig.dev,
+         authSession: AuthSession(),
+         configStore: null,
+       );
+
+  final Set<String> paths;
+  final extraPaths = <String>{};
+  final linkedPaths = <String>[];
+  Completer<void>? pending;
   final calls = <Map<String, Object?>>[];
+
   void replaceAgents(String machineId, List<Agent> agents) {
     machineStates[machineId]!.agents = agents;
     notifyListeners();
@@ -59,6 +52,33 @@ class _Notifier extends AppNotifier {
 
   @override
   Future<void> probeEngines(String machineId, {bool force = false}) async {}
+
+  @override
+  Future<Map<String, dynamic>> listCodexProfiles(
+    String machineId, {
+    Set<String> observedPaths = const {},
+  }) async {
+    await pending?.future;
+    return {
+      'profiles': [
+        for (final path in {...paths, ...observedPaths, ...extraPaths})
+          {'path': path, 'label': _labelFor(path)},
+      ],
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> linkCodexProfile(
+    String machineId,
+    String path,
+  ) async {
+    linkedPaths.add(path);
+    paths.add(path);
+    return {
+      'profile': {'path': path, 'label': _labelFor(path)},
+    };
+  }
+
   @override
   Future<String?> createAgent(
     String machineId, {
@@ -68,14 +88,6 @@ class _Notifier extends AppNotifier {
     GridAgentOverride? grid,
     String? codexHome,
   }) async {
-    if (codexHome != null && !stateOf(machineId)!.isLocalMachine) {
-      return super.createAgent(
-        machineId,
-        engine: engine,
-        folder: folder,
-        codexHome: codexHome,
-      );
-    }
     calls.add({'engine': engine, 'codexHome': codexHome, 'folder': folder});
     return null;
   }
@@ -99,11 +111,16 @@ void main() {
     WidgetTester tester, {
     bool local = true,
     bool supported = true,
-    _Profiles? profiles,
+    Iterable<String>? initialPaths,
+    _Notifier? notifier,
   }) async {
-    final notifier = _Notifier();
-    addTearDown(notifier.dispose);
-    notifier.machineStates['machine'] =
+    final n =
+        notifier ??
+        _Notifier(
+          initialPaths ?? const ['/accounts/codex1', '/accounts/codex2'],
+        );
+    addTearDown(n.dispose);
+    n.machineStates['machine'] =
         MachineState(
             const Machine(
               machineId: 'machine',
@@ -126,10 +143,9 @@ void main() {
             body: TextButton(
               onPressed: () => showNewAgentDialog(
                 context,
-                notifier,
+                n,
                 'machine',
                 source: 'machine_row',
-                codexProfiles: profiles ?? _Profiles(),
               ),
               child: const Text('open'),
             ),
@@ -143,7 +159,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Codex').last);
     await tester.pumpAndSettle();
-    return notifier;
+    return n;
   }
 
   Future<void> selectSecond(WidgetTester tester) async {
@@ -156,7 +172,7 @@ void main() {
   testWidgets('no profiles hides the picker and keeps a default launch', (
     tester,
   ) async {
-    final notifier = await open(tester, profiles: _Profiles([]));
+    final notifier = await open(tester, initialPaths: const []);
     expect(
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsNothing,
@@ -175,7 +191,7 @@ void main() {
   ) async {
     final notifier = await open(
       tester,
-      profiles: _Profiles(['/custom/work-login']),
+      initialPaths: const ['/custom/work-login'],
     );
     expect(
       find.byKey(const Key('new-agent-codex-profile-field')),
@@ -192,16 +208,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the picker appears at two profiles and hides again at one', (
+  testWidgets('offers Codex profiles for a remote machine too, not only this computer', (
     tester,
   ) async {
-    final profiles = _Profiles(['/accounts/codex1']);
-    await open(tester, profiles: profiles);
+    await open(
+      tester,
+      local: false,
+      initialPaths: const ['/custom/work-login'],
+    );
     expect(
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsNothing,
     );
-    profiles.paths.add('/accounts/codex2');
+    expect(find.text('/custom/work-login'), findsOneWidget);
+    expect(find.text('Link a profile folder…'), findsOneWidget);
+  });
+
+  testWidgets('the picker appears at two profiles and hides again at one', (
+    tester,
+  ) async {
+    final notifier = await open(
+      tester,
+      initialPaths: const ['/accounts/codex1'],
+    );
+    expect(
+      find.byKey(const Key('new-agent-codex-profile-field')),
+      findsNothing,
+    );
+    notifier.paths.add('/accounts/codex2');
     await tester.tap(find.byTooltip('Refresh profiles'));
     await tester.pumpAndSettle();
     expect(
@@ -210,7 +244,7 @@ void main() {
     );
     expect(find.text('/accounts/codex1'), findsOneWidget);
     await selectSecond(tester);
-    profiles.paths.remove('/accounts/codex1');
+    notifier.paths.remove('/accounts/codex1');
     await tester.tap(find.byTooltip('Refresh profiles'));
     await tester.pumpAndSettle();
     expect(
@@ -223,15 +257,16 @@ void main() {
   testWidgets('creation waits for discovery to select the single account', (
     tester,
   ) async {
-    final profiles = _Profiles(['/custom/work-login'])
-      ..pending = Completer<void>();
-    final notifier = await open(tester, profiles: profiles);
+    final notifier = _Notifier(const [
+      '/custom/work-login',
+    ])..pending = Completer<void>();
+    await open(tester, notifier: notifier);
     await tester.tap(find.text('Browse…'));
     await tester.pumpAndSettle();
     final createButton = find.widgetWithText(FilledButton, 'Create agent');
     expect(tester.widget<FilledButton>(createButton).onPressed, isNull);
     expect(notifier.calls, isEmpty);
-    profiles.pending!.complete();
+    notifier.pending!.complete();
     await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(createButton).onPressed, isNotNull);
     await tester.tap(createButton);
@@ -243,10 +278,9 @@ void main() {
   testWidgets('a missing selection requires an explicit account change', (
     tester,
   ) async {
-    final profiles = _Profiles();
-    final notifier = await open(tester, profiles: profiles);
+    final notifier = await open(tester);
     await selectSecond(tester);
-    profiles.paths.remove('/accounts/codex2');
+    notifier.paths.remove('/accounts/codex2');
     await tester.tap(find.byTooltip('Refresh profiles'));
     await tester.pumpAndSettle();
     expect(
@@ -267,14 +301,13 @@ void main() {
   testWidgets('refresh preserves an explicitly chosen default launch', (
     tester,
   ) async {
-    final profiles = _Profiles();
-    final notifier = await open(tester, profiles: profiles);
+    final notifier = await open(tester);
     await selectSecond(tester);
     await tester.tap(find.byKey(const Key('new-agent-codex-profile-field')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Default').last);
     await tester.pumpAndSettle();
-    profiles.paths.remove('/accounts/codex2');
+    notifier.paths.remove('/accounts/codex2');
     await tester.tap(find.byTooltip('Refresh profiles'));
     await tester.pumpAndSettle();
     expect(
@@ -345,10 +378,9 @@ void main() {
   testWidgets(
     'refresh discovers an added profile and keeps the current selection',
     (tester) async {
-      final profiles = _Profiles();
-      await open(tester, profiles: profiles);
+      final notifier = await open(tester);
       await selectSecond(tester);
-      profiles.extraPaths.add('/elsewhere/new-profile');
+      notifier.extraPaths.add('/elsewhere/new-profile');
       await tester.tap(find.byTooltip('Refresh profiles'));
       await tester.pumpAndSettle();
       expect(find.text('/accounts/codex2'), findsOneWidget);
@@ -380,26 +412,6 @@ void main() {
   });
 
   testWidgets(
-    'a target becoming remote refuses the selected profile without a default launch',
-    (tester) async {
-      final notifier = await open(tester);
-      await selectSecond(tester);
-      await tester.tap(find.text('Browse…'));
-      await tester.pumpAndSettle();
-      notifier.stateOf('machine')!.localOnly = false;
-      await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
-      await tester.pumpAndSettle();
-      expect(notifier.calls, isEmpty);
-      expect(
-        find.text(
-          'Choose a local Codex profile only for Codex on this computer’s own account',
-        ),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
     'an old CLI keeps the normal launch available and explains profile support',
     (tester) async {
       final notifier = await open(tester, supported: false);
@@ -416,18 +428,6 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
       await tester.pumpAndSettle();
       expect(notifier.calls.single['codexHome'], isNull);
-    },
-  );
-
-  testWidgets(
-    'never offers this computer’s account folders for a remote machine',
-    (tester) async {
-      await open(tester, local: false);
-      expect(
-        find.byKey(const Key('new-agent-codex-profile-field')),
-        findsNothing,
-      );
-      expect(find.text('Link a profile folder…'), findsNothing);
     },
   );
 }

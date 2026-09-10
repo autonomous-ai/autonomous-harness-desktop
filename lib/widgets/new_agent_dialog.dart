@@ -45,7 +45,6 @@ Future<void> showNewAgentDialog(
   // GridNetworksController/GridModelsController already expose. Production never passes one, so
   // _submit's resolveGridAgentOverride falls back to its own default (real) client.
   @visibleForTesting GridApiClient? gridApiClient,
-  @visibleForTesting LocalCodexProfiles? codexProfiles,
 }) {
   // Reported here rather than at each call site: the doors are four and
   // growing, and one that forgets to track is a hole in the funnel that only
@@ -57,7 +56,6 @@ Future<void> showNewAgentDialog(
       notifier: notifier,
       machineId: machineId,
       gridApiClient: gridApiClient,
-      codexProfiles: codexProfiles,
     ),
   );
 }
@@ -66,13 +64,11 @@ class _NewAgentDialog extends StatefulWidget {
   final AppNotifier notifier;
   final String machineId;
   final GridApiClient? gridApiClient;
-  final LocalCodexProfiles? codexProfiles;
 
   const _NewAgentDialog({
     required this.notifier,
     required this.machineId,
     this.gridApiClient,
-    this.codexProfiles,
   });
 
   @override
@@ -218,7 +214,6 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 
   bool get _waitingForCodexProfile =>
       _engine == 'codex' &&
-      _machineIsThisComputer &&
       !gridSelectionStore.value.hasGrid &&
       _availability('codex')?.supportsCodexHome == true &&
       _codexProfilesBusy;
@@ -415,10 +410,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                             : null,
                         missingWithoutRecipe: _missingAndUnfixable,
                         checkFailed: _engineCheckFailed,
-                        codexProfile:
-                            _engine == 'codex' &&
-                                !chosen.hasGrid &&
-                                _machineIsThisComputer
+                        codexProfile: _engine == 'codex' && !chosen.hasGrid
                             ? _codexProfile
                             : null,
                       );
@@ -527,12 +519,14 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             }
           }),
         ),
-        if (_engine == 'codex' && _machineIsThisComputer && !gridChosen) ...[
+        if (_engine == 'codex' && !gridChosen) ...[
           const SizedBox(height: _gapField),
           if (_availability('codex')?.supportsCodexHome == true)
             CodexProfileField(
+              notifier: widget.notifier,
+              machineId: widget.machineId,
+              machineIsThisComputer: _machineIsThisComputer,
               value: _codexProfile,
-              profiles: widget.codexProfiles,
               observedPaths: {
                 for (final agent
                     in widget.notifier.stateOf(widget.machineId)!.agents)

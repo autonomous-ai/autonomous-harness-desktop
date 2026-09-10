@@ -2406,6 +2406,44 @@ class AppNotifier extends ChangeNotifier {
     }
   }
 
+  /// Every Codex profile folder the CLI on [machineId] can offer, merged with [observedPaths]
+  /// (Codex homes already known from this same machine's other Codex agents). Runs entirely on that
+  /// machine — this app never touches a filesystem itself, which is what makes it work for a remote
+  /// machine too. Returns `{profiles: [{path, label}]}` or `{error}`.
+  Future<Map<String, dynamic>> listCodexProfiles(
+    String machineId, {
+    Set<String> observedPaths = const {},
+  }) async {
+    final connection = _conn(machineId);
+    try {
+      return await connection.request(
+        'codex_profiles_list',
+        payload: {'observedPaths': observedPaths.toList()},
+        timeout: const Duration(seconds: 10),
+      );
+    } catch (error) {
+      return {'error': 'UNREACHABLE'};
+    }
+  }
+
+  /// Links [path] as a Codex profile on [machineId], persisted there so it survives future
+  /// requests. Returns `{profile: {path, label}}` or `{error}`.
+  Future<Map<String, dynamic>> linkCodexProfile(
+    String machineId,
+    String path,
+  ) async {
+    final connection = _conn(machineId);
+    try {
+      return await connection.request(
+        'codex_profile_link',
+        payload: {'path': path},
+        timeout: const Duration(seconds: 10),
+      );
+    } catch (error) {
+      return {'error': 'UNREACHABLE'};
+    }
+  }
+
   /// Spawns a new engine session on [machineId] via the harness CLI, then jumps into its terminal.
   /// Returns null on success, or an error message to show inline in the New Agent dialog.
   Future<String?> createAgent(
@@ -2419,11 +2457,11 @@ class AppNotifier extends ChangeNotifier {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
     if (codexHome != null) {
-      if (engine != 'codex' || grid != null || !machine.isLocalMachine) {
-        return 'Choose a local Codex profile only for Codex on this computer’s own account';
+      if (engine != 'codex' || grid != null) {
+        return 'Choose a Codex profile only for Codex, without a provider selected';
       }
       if (machine.engines['codex']?.supportsCodexHome != true) {
-        return 'Update the harness CLI on this computer to choose a Codex profile';
+        return 'Update the harness CLI on this machine to choose a Codex profile';
       }
     }
     final connection = _conn(machineId);
