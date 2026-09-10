@@ -1007,4 +1007,50 @@ void main() {
       },
     );
   });
+
+  group('pasteImage', () {
+    /// The `TerminalBinaryKind.imagePaste` frames this session put on the wire.
+    List<TerminalBinaryFrame> imagePastes() => [
+      for (final frame in binarySent)
+        if (frame.kind == TerminalBinaryKind.imagePaste) frame,
+    ];
+
+    Future<void> live() async {
+      await ready();
+      await session.handleBinary(
+        output(0, utf8.encode(r'$ '), keyframe: true, cols: 100, rows: 30),
+      );
+      sent.clear();
+      binarySent.clear();
+    }
+
+    test('sends the whole image as one binary frame, uncompressed', () async {
+      await live();
+      final png = Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff]);
+
+      expect(await session.pasteImage(png), isTrue);
+
+      expect(imagePastes(), hasLength(1));
+      expect(imagePastes().single.bytes, png);
+      expect(imagePastes().single.streamId, streamId);
+      expect(imagePastes().single.compressed, isFalse);
+      // Never through the ordinary keystroke pipeline or the text-paste kind, and never as JSON.
+      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.input), isEmpty);
+      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.paste), isEmpty);
+      expect(sent, isEmpty);
+    });
+
+    test('sends nothing while the stream is not accepting input', () async {
+      expect(session.acceptsInput, isFalse);
+      expect(await session.pasteImage(Uint8List.fromList(const [1, 2, 3])), isFalse);
+      expect(imagePastes(), isEmpty);
+    });
+
+    test('sends nothing for an empty image', () async {
+      await live();
+
+      expect(await session.pasteImage(Uint8List(0)), isFalse);
+      expect(imagePastes(), isEmpty);
+    });
+  });
 }

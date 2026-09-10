@@ -7,8 +7,16 @@ import FlutterMacOS
 /// means. Nothing about updating lives on this side.
 private let kMenuChannel = "harness/app_menu"
 
+/// Channel Dart calls INTO this side over, to read a native image off the general pasteboard.
+/// Flutter's own `Clipboard` API only ever sees `text/plain` — see `terminal_panel.dart`'s
+/// `_paste()` — so a real image (a screenshot, "Copy Image" from a browser, ...) needs this native
+/// round trip instead. The other direction of `harness/clipboard_image` (Dart calling Swift) rather
+/// than `harness/app_menu`'s (Swift calling Dart).
+private let kClipboardImageChannel = "harness/clipboard_image"
+
 class MainFlutterWindow: NSWindow {
   private var menuChannel: FlutterMethodChannel?
+  private var clipboardImageChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -22,6 +30,7 @@ class MainFlutterWindow: NSWindow {
       name: kMenuChannel,
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
+    installClipboardImageChannel(messenger: flutterViewController.engine.binaryMessenger)
 
     // Harness Desktop is dark-only. Flutter's own theme does not reach AppKit —
     // every native surface (the standard About panel, the menu bar, the
@@ -279,5 +288,37 @@ class MainFlutterWindow: NSWindow {
 
   @objc private func resetTerminalFontSize(_ sender: Any?) {
     menuChannel?.invokeMethod("resetTerminalFontSize", arguments: nil)
+  }
+
+  private func installClipboardImageChannel(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: kClipboardImageChannel, binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "readImagePng":
+        result(MainFlutterWindow.readClipboardImagePng())
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    clipboardImageChannel = channel
+  }
+
+  /// Reads the general pasteboard for image data, returned as PNG bytes — or `nil` when the
+  /// clipboard holds no image (the normal case for a plain-text paste, which the caller is
+  /// expected to fall back to). Prefers an existing PNG representation; falls back to TIFF (what
+  /// "Copy Image" from Safari, Preview, and many other apps actually put on the pasteboard),
+  /// re-encoded to PNG since the terminal wire protocol only carries one image format.
+  private static func readClipboardImagePng() -> FlutterStandardTypedData? {
+    let pasteboard = NSPasteboard.general
+    if let pngData = pasteboard.data(forType: .png) {
+      return FlutterStandardTypedData(bytes: pngData)
+    }
+    guard let tiffData = pasteboard.data(forType: .tiff),
+      let bitmap = NSBitmapImageRep(data: tiffData),
+      let pngData = bitmap.representation(using: .png, properties: [:])
+    else {
+      return nil
+    }
+    return FlutterStandardTypedData(bytes: pngData)
   }
 }

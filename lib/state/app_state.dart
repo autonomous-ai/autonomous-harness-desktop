@@ -117,6 +117,10 @@ class MachineState {
   // one atomic tmux paste-buffer, not chunked like ordinary keystrokes — see TerminalSession.pasteText).
   // False for any CLI published before this existed; the panel falls back to the old chunked path.
   bool terminalPasteRawAvailable = false;
+  // Whether this machine's CLI daemon understands TerminalBinaryKind.imagePaste (a native clipboard
+  // IMAGE paste — see TerminalSession.pasteImage). False for any CLI published before this existed;
+  // the panel falls back to forwarding a bare Ctrl+V, today's only option for an image paste.
+  bool terminalImagePasteAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -2129,11 +2133,14 @@ class AppNotifier extends ChangeNotifier {
       final features = result['features'];
       machine.terminalPasteRawAvailable =
           features is Map && features['pasteRaw'] == true;
+      machine.terminalImagePasteAvailable =
+          features is Map && features['imagePaste'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
       machine.terminalCapabilityError = 'Could not negotiate terminal protocol';
       machine.terminalPasteRawAvailable = false;
+      machine.terminalImagePasteAvailable = false;
     }
   }
 

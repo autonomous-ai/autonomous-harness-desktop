@@ -8,12 +8,14 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 
+import '../clipboard/native_clipboard.dart';
 import '../state/app_state.dart';
 
 import 'agent_drag.dart';
 import 'agent_model_menu.dart';
 import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
+import '../terminal/terminal_binary.dart';
 import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_session.dart';
 import '../terminal/terminal_theme.dart';
@@ -411,17 +413,20 @@ class _TerminalPanelState extends State<TerminalPanel>
     await _paste();
   }
 
-  /// Paste — including the kinds of clipboard this app cannot read.
+  /// Paste — including the kinds of clipboard this app cannot fully read.
   ///
-  /// ⚠️ FLUTTER CAN ONLY SEE `text/plain`. A screenshot has no text at all, so
-  /// the old body found `null` and returned, silently: the single most common
-  /// thing anyone pastes into a coding agent did nothing, with no error and
-  /// nothing in a log.
+  /// ⚠️ FLUTTER'S OWN `Clipboard` API ONLY SEES `text/plain`. A screenshot has no
+  /// text at all, so a naive body finds `null` and returns, silently: the single
+  /// most common thing anyone pastes into a coding agent did nothing, with no
+  /// error and nothing in a log. [NativeClipboard] closes that gap with a native
+  /// platform-channel read for an actual image (macOS/Linux only; see its doc).
   ///
   /// The engines running in these panes read the system clipboard THEMSELVES —
-  /// Claude Code attaches an image on Ctrl+V — so when there is no text for us
-  /// to paste, the keystroke is handed DOWN as Ctrl+V rather than dropped. That
-  /// is also exactly what the user had been doing by hand to work around this.
+  /// Claude Code attaches an image on Ctrl+V — so a native image paste sends the
+  /// bytes to the daemon, which writes THIS remote machine's OS clipboard and
+  /// replays Ctrl+V, and a bare Ctrl+V (no capability, or no image bytes at all)
+  /// is handed down exactly as it always was, on the same bet: that whatever
+  /// clipboard the remote engine reads from already has what the user copied.
   Future<void> _paste() async {
     if (widget.readOnly || !widget.session.acceptsInput) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
@@ -436,6 +441,16 @@ class _TerminalPanelState extends State<TerminalPanel>
         widget.session.terminal.paste(text);
       }
       return;
+    }
+    final machine = widget.notifier.stateOf(widget.session.machineId);
+    if (machine != null && machine.terminalImagePasteAvailable) {
+      final imageBytes = await NativeClipboard.readImagePng();
+      if (imageBytes != null &&
+          imageBytes.isNotEmpty &&
+          imageBytes.length <= terminalLocalImagePasteMaxPayloadBytes) {
+        await widget.session.pasteImage(imageBytes);
+        return;
+      }
     }
     widget.session.terminal.keyInput(TerminalKey.keyV, ctrl: true);
   }

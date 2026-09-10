@@ -8,6 +8,12 @@ const terminalLocalMaxPayloadBytes = 512 * 1024;
 // keystroke ceiling (input, ≤8 KiB per frame). Mirrors TERMINAL_LOCAL_PASTE_MAX_PAYLOAD_BYTES in
 // the harness CLI's terminalBinary.ts — keep the two in step.
 const terminalLocalPasteMaxPayloadBytes = 6 * 1024 * 1024;
+// An image paste (a clipboard screenshot, "Copy Image", ...) is delivered whole, same as a text
+// paste — but the bytes are already-compressed PNG data, not text, so the ceiling is sized for a
+// reasonable screenshot rather than a large source-code paste. Mirrors
+// TERMINAL_LOCAL_IMAGE_PASTE_MAX_PAYLOAD_BYTES in the harness CLI's terminalBinary.ts — keep the
+// two in step.
+const terminalLocalImagePasteMaxPayloadBytes = 4 * 1024 * 1024;
 
 enum TerminalBinaryKind {
   input(1),
@@ -17,7 +23,12 @@ enum TerminalBinaryKind {
   /// A clipboard paste made directly into the terminal, delivered as one atomic unit instead of
   /// going through the chunked keystroke pipeline — see [TerminalSession.pasteText]. Upload
   /// (client→CLI) only; nothing ever sends this back down.
-  paste(5);
+  paste(5),
+  /// A clipboard IMAGE paste (raw PNG bytes) — same "atomic, out-of-band" shape as [paste], but
+  /// carrying binary image data instead of UTF-8 text, so it cannot share that kind (the CLI's
+  /// paste handler requires valid UTF-8). See [TerminalSession.pasteImage]. Upload (client→CLI)
+  /// only; nothing ever sends this back down.
+  imagePaste(6);
 
   final int code;
   const TerminalBinaryKind(this.code);
@@ -30,10 +41,16 @@ enum TerminalBinaryKind {
   }
 }
 
-int _maxLocalPayloadBytesFor(TerminalBinaryKind kind) =>
-    kind == TerminalBinaryKind.paste
-        ? terminalLocalPasteMaxPayloadBytes
-        : terminalLocalMaxPayloadBytes;
+int _maxLocalPayloadBytesFor(TerminalBinaryKind kind) {
+  switch (kind) {
+    case TerminalBinaryKind.paste:
+      return terminalLocalPasteMaxPayloadBytes;
+    case TerminalBinaryKind.imagePaste:
+      return terminalLocalImagePasteMaxPayloadBytes;
+    default:
+      return terminalLocalMaxPayloadBytes;
+  }
+}
 
 class TerminalBinaryFrame {
   final TerminalBinaryKind kind;
@@ -79,7 +96,8 @@ Uint8List? encodeTerminalPlain(TerminalBinaryFrame frame) {
   if (id == null || frame.seq < 0) return null;
   if ((frame.kind == TerminalBinaryKind.input ||
           frame.kind == TerminalBinaryKind.sync ||
-          frame.kind == TerminalBinaryKind.paste) &&
+          frame.kind == TerminalBinaryKind.paste ||
+          frame.kind == TerminalBinaryKind.imagePaste) &&
       frame.compressed) {
     return null;
   }
@@ -116,7 +134,8 @@ TerminalBinaryFrame? decodeTerminalPlain(
   if ((flags & ~_flagZlib) != 0 ||
       ((kind == TerminalBinaryKind.input ||
               kind == TerminalBinaryKind.sync ||
-              kind == TerminalBinaryKind.paste) &&
+              kind == TerminalBinaryKind.paste ||
+              kind == TerminalBinaryKind.imagePaste) &&
           flags != 0)) {
     return null;
   }

@@ -635,6 +635,31 @@ class TerminalSession extends ChangeNotifier {
     return sent;
   }
 
+  /// A clipboard IMAGE paste (raw PNG bytes) made directly into this pane — same "atomic,
+  /// out-of-band" shape as [pasteText], but binary rather than UTF-8 text, so it travels as
+  /// [TerminalBinaryKind.imagePaste] instead (the daemon's text-paste handler requires valid
+  /// UTF-8 and would reject PNG bytes outright).
+  ///
+  /// The caller must check [MachineState.terminalImagePasteAvailable] first, same reason
+  /// [pasteText] checks `terminalPasteRawAvailable`: an older CLI does not know this binary kind
+  /// at all, so sending it there would silently go nowhere.
+  Future<bool> pasteImage(Uint8List pngBytes) async {
+    if (!acceptsInput) return false;
+    if (pngBytes.isEmpty) return false;
+    final currentStreamId = streamId;
+    if (currentStreamId == null) return false;
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.imagePaste,
+      streamId: currentStreamId,
+      seq: 0,
+      bytes: pngBytes,
+      compressed: false,
+    );
+    final sent = await sendBinary(frame);
+    if (!sent) transportLost('Terminal image paste was not sent');
+    return sent;
+  }
+
   void _onTerminalOutput(String data) {
     if (!acceptsInput || data.isEmpty) return;
     final bytes = utf8.encode(data);
