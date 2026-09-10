@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../grid/grid_surface.dart';
 import '../logging/debug_surface.dart';
 
 /// Every keyboard shortcut in the app, declared once.
@@ -240,22 +241,6 @@ const List<AppShortcut> kAppShortcuts = [
     group: ShortcutGroup.actions,
   ),
   AppShortcut(
-    action: ShortcutAction.changeModel,
-    // ⇧, because plain ⌘M is Minimize — AppKit owns it in `MainMenu.xib` and
-    // matches it in `performKeyEquivalent:`, which runs BEFORE the keystroke
-    // reaches Flutter at all (the same trap the note at the top of this file
-    // tells about ⌘C/⌘V/⌘A). The M is worth keeping through the shift: it is
-    // the letter of the thing being changed, and every other action here is
-    // named by its own initial.
-    activator: SingleActivator(
-      LogicalKeyboardKey.keyM,
-      meta: true,
-      shift: true,
-    ),
-    label: "Change the focused agent's model",
-    group: ShortcutGroup.actions,
-  ),
-  AppShortcut(
     action: ShortcutAction.routeTask,
     // ⌘B, the owner's pick. ⌘K is the chord this gesture wears in most apps, and it is deliberately
     // NOT taken here — leaving it free keeps it available for the search-shaped thing people reach for
@@ -295,6 +280,28 @@ const List<AppShortcut> kAppShortcuts = [
   ),
 ];
 
+/// Open the model picker for the focused agent.
+///
+/// Kept out of [kAppShortcuts] for the reason [kDebugShortcut] is: a release
+/// build has no providers (see [kGridSurfaceEnabled]), and this key is the ONE
+/// door onto the whole picker that is not a control the build already hides.
+/// Bound there, ⇧⌘M opened a panel listing every provider on the account — and
+/// fetched them from the control plane to do it — in a build whose own answer
+/// is that Grid is not finished. A key that opens a feature the build does not
+/// have is worse than a key that was never taken.
+const AppShortcut kChangeModelShortcut = AppShortcut(
+  action: ShortcutAction.changeModel,
+  // ⇧, because plain ⌘M is Minimize — AppKit owns it in `MainMenu.xib` and
+  // matches it in `performKeyEquivalent:`, which runs BEFORE the keystroke
+  // reaches Flutter at all (the same trap the note at the top of this file
+  // tells about ⌘C/⌘V/⌘A). The M is worth keeping through the shift: it is
+  // the letter of the thing being changed, and every other action here is
+  // named by its own initial.
+  activator: SingleActivator(LogicalKeyboardKey.keyM, meta: true, shift: true),
+  label: "Change the focused agent's model",
+  group: ShortcutGroup.actions,
+);
+
 /// Open Settings ▸ Debug — the app's own log, as this session still holds it.
 ///
 /// Kept out of [kAppShortcuts] because it is not always there: a release build
@@ -317,6 +324,7 @@ const AppShortcut kDebugShortcut = AppShortcut(
 /// bind.
 List<AppShortcut> appShortcuts() => [
   ...kAppShortcuts,
+  if (kGridSurfaceEnabled) kChangeModelShortcut,
   if (kDebugSurfaceEnabled) kDebugShortcut,
 ];
 

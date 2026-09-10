@@ -234,9 +234,18 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   carry a row that is not one. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
   `grid/grid_surface.dart` — `kDebugMode` or `--dart-define=HARNESS_GRID_SURFACE=true`): it is a
   feature still being built, so its own flag rather than `kDebugSurfaceEnabled`, which is developer
-  furniture and must be switchable apart from it. Four places read it — the two Settings rows
+  furniture and must be switchable apart from it. The places that read it are the two Settings rows
   (`_kGridSections`), the rail's pill, the status rail's readout (the strip stays, for the version
-  mark), and **`GridSelectionStore.load`, which is the one that matters**: `state.json` is shared
+  mark), `UsageLimitNotice`, **`⇧⌘M`** (`kChangeModelShortcut` lives in `appShortcuts()` beside
+  `kDebugShortcut`, not in `kAppShortcuts` — bound unconditionally it was the one door onto the
+  whole model picker that was NOT a control the build already hides, and it fetched every provider
+  on the account from the control plane to draw it; `pickAgentModel` carries the same guard, since
+  it is the one function both doors run), **`GridSessionStore.signIn`** (⚠️ called unprompted on
+  every bootstrap by `AppNotifier._ensureGridSession`, and every call mints a fresh 365-day session
+  and revokes nothing — in a build with no Settings ▸ Grid that is a credential its owner can
+  neither see, explain, nor undo from inside the app; `load` is deliberately NOT gated, because a
+  session written by `grid login` in a terminal directs nothing on its own), and
+  **`GridSelectionStore.load`, which is the one that matters**: `state.json` is shared
   with the debug build where a grid IS picked, so without it a release build would inherit that
   choice off disk and launch agents on a grid it shows no picker, no pane and no way out of. The
   stored key is left alone, not cleared — it is the other build's setting. `settingsGroupsFor` takes

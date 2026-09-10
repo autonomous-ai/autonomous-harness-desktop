@@ -2,11 +2,15 @@
 // Intelligence, no picker in the machine rail. The flag behind that is a compile-time const and a
 // test run has it ON — which is the whole difficulty, since the shape worth guarding is the one no
 // test build has. `settingsGroupsFor` takes both gates as arguments for exactly this.
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:harness/grid/grid_session.dart';
 import 'package:harness/grid/grid_surface.dart';
 import 'package:harness/logging/debug_surface.dart';
 import 'package:harness/settings/settings_section.dart';
+import 'package:harness/shortcuts/app_shortcuts.dart';
 
 void main() {
   List<SettingsSection> sectionsOf(List<SettingsGroup> groups) => [
@@ -75,5 +79,70 @@ void main() {
       SettingsSection.shortcuts,
       SettingsSection.about,
     ]);
+  });
+
+  group('a shipped build has no door onto Grid', () {
+    // Settings is the door everybody thinks of, and the tests above cover it.
+    // These are the three that were open behind it.
+
+    test('⇧⌘M is not bound where there is no picker to open', () {
+      // The one door onto the model picker that is not a control the build
+      // already hides. Bound unconditionally, it opened a panel listing every
+      // provider on the account — and fetched them from the control plane to
+      // do it — in a build whose own answer is that Grid is not finished.
+      expect(
+        kAppShortcuts.map((s) => s.action),
+        isNot(contains(ShortcutAction.changeModel)),
+        reason: 'it belongs to appShortcuts(), behind the gate',
+      );
+      expect(kChangeModelShortcut.action, ShortcutAction.changeModel);
+      // A test build has Grid on, so the live list DOES carry it — which is
+      // what the ⌘/ sheet and the bindings both read.
+      expect(
+        appShortcuts().map((s) => s.action),
+        contains(ShortcutAction.changeModel),
+      );
+    });
+
+    test('the ⌘/ sheet is drawn from the same gated list', () {
+      // `shortcutRows()` derives from `appShortcuts()`, so moving the key
+      // behind the gate takes its line out of the sheet with it — a build
+      // cannot bind a key it does not document, or document one it cannot use.
+      expect(
+        shortcutRows().map((row) => row.label),
+        contains(kChangeModelShortcut.label),
+      );
+    });
+
+    test('a shipped build never mints a Grid session', () async {
+      // ⚠️ `signIn` is called unprompted on every bootstrap, and each call that
+      // gets through puts a fresh 365-day session on the person's Grid account
+      // and revokes nothing. In a build with no Settings ▸ Grid that is a
+      // credential its owner can neither see, explain, nor undo from inside
+      // the app.
+      final dir = await Directory.systemTemp.createTemp('grid-gate-');
+      addTearDown(() => dir.delete(recursive: true));
+      final store = GridSessionStore(
+        file: File('${dir.path}/credentials.toml'),
+        gridSurface: false,
+      );
+
+      // Refuses without reaching for the CLI at all — the runner here is the
+      // real one, so anything else would shell out.
+      expect(await store.signIn(), isNotNull);
+      expect(store.signedIn, isFalse);
+    });
+
+    test('but reading one already on disk is left alone', () {
+      // A session written by `grid login` in a terminal directs nothing on its
+      // own, and nothing in a shipped build draws or spends it. Gating the read
+      // as well would only make `grid logout` behave differently here.
+      final store = GridSessionStore(
+        file: File('/does/not/exist/credentials.toml'),
+        gridSurface: false,
+      );
+      expect(store.loaded, isFalse);
+      expect(() => store.load(), returnsNormally);
+    });
   });
 }

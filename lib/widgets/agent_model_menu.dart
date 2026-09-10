@@ -122,7 +122,13 @@ Future<void> pickAgentModel(
   required String machineId,
   required String agentId,
   required String engine,
+  bool gridSurface = kGridSurfaceEnabled,
 }) async {
+  // ⚠️ The guard lives HERE, in the one function both doors run, and not only
+  // on the pill that draws itself away. A build with no providers has no picker
+  // to open, and this is what makes that true for any caller — the shortcut,
+  // the pill, and whatever door is added next.
+  if (!gridSurface) return;
   final key = _retargetKey(machineId, agentId);
   if (retargetingAgents.value.contains(key)) return;
   // The pill is already disabled for both of these, so they only ever fire from
