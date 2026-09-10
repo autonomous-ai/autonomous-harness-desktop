@@ -27,6 +27,43 @@ flutter build linux --release   # must run on an Ubuntu host — no cross-compil
 The terminal core is vendored at `third_party/xterm`. Do not replace it with an
 upstream package upgrade without preserving the local rendering and IME fixes.
 
+## Local Codex profiles
+
+New Agent → Codex discovers local profiles when the Harness CLI advertises
+`supportsCodexHome`. The picker appears only when there are at least two distinct
+profile folders; **Default** does not count as another profile. A single profile
+is selected automatically, while no profiles keeps the normal launch. Linking
+and refreshing remain available in both cases.
+
+Discovery combines `CODEX_HOME` from the app environment, homes
+observed on this computer's Codex agents, Codex-named folders in home/XDG config
+with an existing `auth.json` or `config.toml` (including `.codex2` and
+`.codex_work`), and directories explicitly linked before. An empty default
+directory does not create a second profile.
+It also reads literal `CODEX_HOME` declarations in bash/zsh/fish startup files,
+aliases, functions, sourced files, and executable shell wrappers in local bin/PATH
+directories. Shortcut names do not have to contain "codex". `$HOME`, `${HOME}`,
+tilde and simple directory variables are supported; symlinks are deduplicated.
+
+Discovery never executes shell configuration or shortcuts and never reads Codex
+credentials. Shell scanning stops after 3 seconds, 256 small scripts, or four
+levels of script references. Computed paths, unsupported shell syntax and profiles outside
+these sources can be added with **Link a profile folder…**. Choose the actual
+`CODEX_HOME` directory, not the shortcut executable or a named configuration
+preset. Only linked paths are saved. **Refresh profiles** rescans without changing
+the current choice; new local agent homes also update an open picker.
+
+The selected directory supplies that agent’s Codex login, configuration, hooks,
+history and model cache, and stays attached across restarts. The terminal header
+shows its folder name and exposes the full path in a tooltip. **Default** keeps
+the machine’s normal launch behavior. This picker applies to local agents using
+Codex’s own account; remote machines and Grid launches use their existing flows.
+The rail’s Codex usage panel still reports the default `~/.codex` profile.
+
+This requires the companion CLI support for `agent_create.codexHome`. Older CLIs
+show update guidance and keep default launches available; Desktop refuses an
+explicit profile when support is missing rather than silently using another login.
+
 ## Local and production terminal E2E
 
 The terminal E2E scripts exercise this desktop client together with source

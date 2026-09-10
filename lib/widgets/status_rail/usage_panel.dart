@@ -43,6 +43,13 @@ class UsagePanelContent extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _Header(reading: reading),
+        if (reading.provider == UsageProvider.codex) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Default profile · ~/.codex',
+            style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
+          ),
+        ],
         if (reading.hasFigures)
           for (final window in reading.windows) ...[
             const SizedBox(height: 12),

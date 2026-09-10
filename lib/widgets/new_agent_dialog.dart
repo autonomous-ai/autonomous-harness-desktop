@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../analytics/analytics.dart';
 import '../core/engine_availability.dart';
+import '../core/codex_profiles.dart';
 import '../grid/grid_agent_override.dart';
 import '../grid/grid_api_client.dart';
 import '../grid/grid_selection_store.dart';
@@ -15,6 +16,7 @@ import '../shared/widgets/app_select_field.dart';
 import '../shared/widgets/labeled_field.dart';
 import '../state/app_state.dart';
 import 'engine_identity.dart';
+import 'codex_profile_field.dart';
 import 'remote_folder_picker.dart';
 
 /// Mirrors the harness CLI's `BYPASS_PERMISSION_FLAGS`
@@ -43,6 +45,7 @@ Future<void> showNewAgentDialog(
   // GridNetworksController/GridModelsController already expose. Production never passes one, so
   // _submit's resolveGridAgentOverride falls back to its own default (real) client.
   @visibleForTesting GridApiClient? gridApiClient,
+  @visibleForTesting LocalCodexProfiles? codexProfiles,
 }) {
   // Reported here rather than at each call site: the doors are four and
   // growing, and one that forgets to track is a hole in the funnel that only
@@ -54,6 +57,7 @@ Future<void> showNewAgentDialog(
       notifier: notifier,
       machineId: machineId,
       gridApiClient: gridApiClient,
+      codexProfiles: codexProfiles,
     ),
   );
 }
@@ -62,11 +66,13 @@ class _NewAgentDialog extends StatefulWidget {
   final AppNotifier notifier;
   final String machineId;
   final GridApiClient? gridApiClient;
+  final LocalCodexProfiles? codexProfiles;
 
   const _NewAgentDialog({
     required this.notifier,
     required this.machineId,
     this.gridApiClient,
+    this.codexProfiles,
   });
 
   @override
@@ -76,6 +82,8 @@ class _NewAgentDialog extends StatefulWidget {
 class _NewAgentDialogState extends State<_NewAgentDialog> {
   late String _engine = allEngines.first.id;
   String? _folder;
+  LocalCodexProfile? _codexProfile;
+  bool _codexProfilesBusy = true;
   bool _bypassPermission = false;
   bool _submitting = false;
 
@@ -208,6 +216,13 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool get _machineIsThisComputer =>
       widget.notifier.stateOf(widget.machineId)?.isLocalMachine ?? false;
 
+  bool get _waitingForCodexProfile =>
+      _engine == 'codex' &&
+      _machineIsThisComputer &&
+      !gridSelectionStore.value.hasGrid &&
+      _availability('codex')?.supportsCodexHome == true &&
+      _codexProfilesBusy;
+
   /// [Machine.displayName], not `name` — the latter is nullable and a machine
   /// that never got one would title the dialog "New agent on null".
   String get _machineName =>
@@ -258,7 +273,12 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 
   Future<void> _submit() async {
     final folder = _folder;
-    if (folder == null || _submitting) return;
+    if (folder == null || _submitting || _waitingForCodexProfile) return;
+    final engine = _engine;
+    final profile = _codexProfile;
+    final selection = gridSelectionStore.value;
+    final bypassPermission =
+        _bypassPermission && kEngineBypassPermissionFlag.containsKey(engine);
     setState(() {
       _submitting = true;
       _error = null;
@@ -288,13 +308,25 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       });
       return;
     }
+    if (!mounted) return;
+    if (gridSelectionStore.value != selection) {
+      setState(() {
+        _submitting = false;
+        _error = 'The provider changed. Review the account and try again.';
+      });
+      return;
+    }
     final error = await widget.notifier.createAgent(
       widget.machineId,
-      engine: _engine,
+      engine: engine,
       folder: folder,
-      bypassPermission:
-          _bypassPermission && kEngineBypassPermissionFlag.containsKey(_engine),
+      bypassPermission: bypassPermission,
       grid: gridOverride,
+      // Keep the explicit choice even if machine discovery changes mid-submit.
+      // The notifier must reject a now-remote target, never use its default login.
+      codexHome: engine == 'codex' && gridOverride == null
+          ? profile?.path
+          : null,
     );
     if (!mounted) return;
     if (error != null) {
@@ -308,10 +340,9 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     // Auto from the engine's own login. Both reach the notifier as a null
     // override, and `onGrid` is what separates them downstream.
     analytics.agentCreated(
-      engine: _engine,
+      engine: engine,
       onGrid: gridOverride != null,
-      bypassPermission:
-          _bypassPermission && kEngineBypassPermissionFlag.containsKey(_engine),
+      bypassPermission: bypassPermission,
       model: gridOverride?.model,
       networkId: gridOverride?.networkId,
     );
@@ -324,6 +355,13 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     // reaches it, so it has to watch for itself or it strands on the palette it
     // opened with.
     grid.AppTheme.watch(context);
+    return ListenableBuilder(
+      listenable: widget.notifier,
+      builder: (context, _) => _buildDialog(context),
+    );
+  }
+
+  Widget _buildDialog(BuildContext context) {
     final bypassFlag = kEngineBypassPermissionFlag[_engine];
 
     return ValueListenableBuilder<GridSelection>(
@@ -339,7 +377,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         // engine — and which the summary's refusal note names.
         final refused =
             chosen.hasGrid && !kGridCapableEngines.contains(_engine);
-        final canCreate = _folder != null && !refused && !_submitting;
+        final canCreate =
+            _folder != null &&
+            !refused &&
+            !_submitting &&
+            !_waitingForCodexProfile;
 
         return AlertDialog(
           title: Text('New agent on $_machineName'),
@@ -356,7 +398,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                 children: [
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final choices = _choices(bypassFlag, chosen.hasGrid);
+                      final choices = AbsorbPointer(
+                        absorbing: _submitting,
+                        child: _choices(bypassFlag, chosen.hasGrid),
+                      );
                       final summary = _NewAgentSummary(
                         engine: _engine,
                         folder: _folder,
@@ -370,6 +415,12 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
                             : null,
                         missingWithoutRecipe: _missingAndUnfixable,
                         checkFailed: _engineCheckFailed,
+                        codexProfile:
+                            _engine == 'codex' &&
+                                !chosen.hasGrid &&
+                                _machineIsThisComputer
+                            ? _codexProfile
+                            : null,
                       );
                       // Below this the two columns would each be too narrow to
                       // hold a path, so the summary goes back on top of the
@@ -469,11 +520,42 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           ],
           onChanged: (value) => setState(() {
             _engine = value;
+            _codexProfile = null;
+            _codexProfilesBusy = true;
             if (!kEngineBypassPermissionFlag.containsKey(value)) {
               _bypassPermission = false;
             }
           }),
         ),
+        if (_engine == 'codex' && _machineIsThisComputer && !gridChosen) ...[
+          const SizedBox(height: _gapField),
+          if (_availability('codex')?.supportsCodexHome == true)
+            CodexProfileField(
+              value: _codexProfile,
+              profiles: widget.codexProfiles,
+              observedPaths: {
+                for (final agent
+                    in widget.notifier.stateOf(widget.machineId)!.agents)
+                  if (agent.engine == 'codex' && agent.codexHome != null)
+                    agent.codexHome!,
+              },
+              onChanged: (profile) => setState(() => _codexProfile = profile),
+              onBusyChanged: (busy) {
+                if (_codexProfilesBusy != busy) {
+                  setState(() => _codexProfilesBusy = busy);
+                }
+              },
+            )
+          else
+            Text(
+              _availability('codex') == null
+                  ? _engineCheckFailed
+                        ? 'Could not check Codex profiles. Reopen this dialog to retry.'
+                        : 'Checking whether this computer supports Codex profiles…'
+                  : 'Update Harness CLI to choose a local Codex profile.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
         const SizedBox(height: _gapField),
         const FieldLabel('Working folder'),
         _FolderControl(
@@ -863,9 +945,11 @@ class _NewAgentSummary extends StatelessWidget {
     this.installCommand,
     this.missingWithoutRecipe = false,
     this.checkFailed = false,
+    this.codexProfile,
   });
 
   final String engine;
+  final LocalCodexProfile? codexProfile;
   final String? folder;
   final String machineName;
   final bool machineIsThisComputer;
@@ -1036,8 +1120,10 @@ class _NewAgentSummary extends StatelessWidget {
             'Inference',
             // Always Auto: a new agent pins no model, so the grid picks one.
             refused || !selection.hasGrid
-                ? "${engineIdentity(engine).label}'s own account"
+                ? codexProfile?.label ??
+                      "${engineIdentity(engine).label}'s own account"
                 : '${selection.label} · Auto',
+            note: codexProfile?.path,
           ),
           if (refused) ...[
             const SizedBox(height: _gapBlock),

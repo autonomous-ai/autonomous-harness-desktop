@@ -18,6 +18,7 @@ class EngineAvailability {
     required this.engine,
     required this.installed,
     this.command,
+    this.supportsCodexHome = false,
     this.installable = false,
     this.installCommand,
   });
@@ -38,6 +39,9 @@ class EngineAvailability {
   /// ambiguous rather than absent (the `agent` alias Cursor and Grok share).
   final String? command;
 
+  /// Explicit capability: older CLIs otherwise ignore a requested profile.
+  final bool supportsCodexHome;
+
   /// Whether this machine can be offered an install for it. False when the
   /// engine is already there, and false when Harness has no line to cite.
   final bool installable;
@@ -57,6 +61,7 @@ class EngineAvailability {
       engine: engine,
       installed: raw['installed'] == true,
       command: command is String && command.isNotEmpty ? command : null,
+      supportsCodexHome: engine == 'codex' && raw['supportsCodexHome'] == true,
       installable: raw['installable'] == true,
       installCommand: installCommand is String && installCommand.isNotEmpty
           ? installCommand

@@ -65,6 +65,7 @@ class FakeCreateAgentNotifier extends AppNotifier {
     required String folder,
     bool bypassPermission = false,
     GridAgentOverride? grid,
+    String? codexHome,
   }) async => null;
 }
 
