@@ -297,6 +297,47 @@ gh workflow run release.yml -f version=1.3.0 -f metadata_path=harness/desktop/me
 flutter run -d macos --dart-define=DESKTOP_UPDATE_METADATA_URL=https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/metadata-test.json
 ```
 
+## Internal builds — an unlisted link, not a release
+
+`.github/workflows/internal-build.yml` builds any branch the way a release would — both macOS
+builds, Developer ID signed, notarized, stapled and checked by Gatekeeper — and uploads them where
+no running app and no public page will ever look:
+
+```bash
+git push origin HEAD:internal/<name>     # builds that commit: Grid on, Debug off
+gh workflow run internal-build.yml --ref <branch> -f grid_surface=true -f debug_surface=false
+bash scripts/internal-build-link.sh <commit>    # the two .dmg links, once it has finished
+```
+
+(`workflow_dispatch` only exists once the file is on `main`; the `internal/**` push works from any
+branch that carries it.) Each build is a `Harness-<commit>-macos[-arm64].dmg`.
+
+- **The links are never printed by CI — this repository is public**, and so is every log and run
+  summary it produces. Each build's path is `harness/desktop-internal/<token>/`, where the token is
+  `HMAC-SHA256(INTERNAL_BUILD_KEY, "<commit>/<variant>")`. `scripts/internal-build-link.sh` works it
+  out — the workflow calls that same script and masks the result — so whoever holds the key has the
+  link for any commit, and nobody else can find one: the bucket refuses anonymous listing.
+- **One-time setup:** a repository secret `INTERNAL_BUILD_KEY` (any long random string —
+  `openssl rand -base64 32`), and the same value on the machine that runs the script, as an
+  environment variable or once in the keychain:
+  `security add-generic-password -U -s harness-internal-build-key -a "$USER" -w`. Without the
+  secret the workflow stops in its first seconds rather than notarizing a build nobody can be sent.
+- **Unlisted, not private.** Anyone a link is forwarded to can download that build. The script also
+  prints how to take one back (`gsutil -m rm -r gs://…/harness/desktop-internal/<token>`); the
+  workflow strips the release's year-long cache headers from these files so a deletion sticks.
+- **It never updates itself.** `DESKTOP_UPDATE_METADATA_URL` points at a manifest nothing writes,
+  so a tester stays on the build they were asked to test rather than being moved onto the next
+  public release. The next internal build is installed by its own link.
+- **Same code path as a release, flags aside.** `publish-macos-variant.sh --build-only` builds and
+  pins the renderer (its `--dart-define=` arguments go to `flutter build` and nowhere else), then
+  `upload-desktop.sh --no-build` packages, notarizes and uploads, moved onto the internal prefix by
+  its existing env overrides (`GCS_PATH`, `DMG_GCS_PATH`, `METADATA_PATH`). Its signing steps are the
+  release's own `.github/actions/macos-signing`, so an internal build also proves those before a
+  release depends on them.
+- **Why not by hand.** An Info.plist edited and re-signed on a laptop reached a tester as "The
+  application "Harness" can't be opened", and a laptop without the notarytool profile cannot
+  notarize at all — which is what makes a copy downloaded fresh on another Mac open cleanly.
+
 ## Rollback
 
 The relaunch-health check (step 6 above) only guards against a build that fails to start. To roll back

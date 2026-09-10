@@ -9,6 +9,8 @@
 #   bash scripts/publish-macos-variant.sh apple-silicon 1.2.4        # desktop-macos-arm64 — Impeller
 #   bash scripts/publish-macos-variant.sh intel 1.2.4 --build-only   # build + pin, publish nothing
 #   bash scripts/publish-macos-variant.sh intel 1.2.4 --no-notarize  # forwarded to upload-desktop.sh
+#   bash scripts/publish-macos-variant.sh intel 1.2.4 --build-only --dart-define=HARNESS_GRID_SURFACE=true
+#                                                                    # forwarded to flutter build only
 #   (x64 / x86_64 are accepted for intel, arm64 / aarch64 for apple-silicon.)
 #
 # ONE universal app, two bundles. Flutter renders macOS with Impeller by default, and Intel users
@@ -43,7 +45,7 @@ SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"   # same default as u
 die() { echo "error: $*" >&2; exit 1; }
 
 usage() {
-  echo "usage: bash scripts/publish-macos-variant.sh <intel|apple-silicon> <X.Y.Z> [--build-only] [--no-notarize]" >&2
+  echo "usage: bash scripts/publish-macos-variant.sh <intel|apple-silicon> <X.Y.Z> [--build-only] [--no-notarize] [--dart-define=KEY=VALUE ...]" >&2
   exit 1
 }
 
@@ -54,11 +56,15 @@ VER="$2"
 shift 2
 BUILD_ONLY=0
 DO_NOTARIZE=1
+# Handed to `flutter build` and nowhere else — upload-desktop.sh --no-build never builds. A release
+# passes none; .github/workflows/internal-build.yml passes the flags a tester's build carries.
+DART_DEFINES=()
 for arg in "$@"; do
   case "$arg" in
-    --build-only)  BUILD_ONLY=1 ;;
-    --no-notarize) DO_NOTARIZE=0 ;;
-    *) die "unknown argument '$arg' — only --build-only and --no-notarize; the version is explicit, so there is nothing to bump" ;;
+    --build-only)    BUILD_ONLY=1 ;;
+    --no-notarize)   DO_NOTARIZE=0 ;;
+    --dart-define=*) DART_DEFINES+=("$arg") ;;
+    *) die "unknown argument '$arg' — only --build-only, --no-notarize and --dart-define=KEY=VALUE; the version is explicit, so there is nothing to bump" ;;
   esac
 done
 
@@ -81,10 +87,17 @@ command -v flutter >/dev/null 2>&1 || die "flutter not found"
 
 # --- build ---
 echo ">> building the $VARIANT build $VER (build $BUILD_NUM), rendering on $RENDERER"
+# Names only: a define's value can be a credential (GRID_API_TOKEN is one).
+for define in ${DART_DEFINES[@]+"${DART_DEFINES[@]}"}; do
+  define="${define#--dart-define=}"
+  echo "   dart-define ${define%%=*}"
+done
 # Removed first for the reason upload-desktop.sh removes it: an incremental Xcode build can skip
 # re-stamping Info.plist and leave a previous version inside.
 rm -rf "$APP_BUNDLE"
-( cd "$APP_DIR" && flutter build macos --release --build-name="$VER" --build-number="$BUILD_NUM" )
+# `${a[@]+"${a[@]}"}`: an empty array under `set -u` is an error on the bash 3.2 macOS ships.
+( cd "$APP_DIR" && flutter build macos --release --build-name="$VER" --build-number="$BUILD_NUM" \
+    ${DART_DEFINES[@]+"${DART_DEFINES[@]}"} )
 [ -d "$APP_BUNDLE" ] || die "app bundle missing after the build: $APP_BUNDLE"
 
 # --- pin the renderer ---
