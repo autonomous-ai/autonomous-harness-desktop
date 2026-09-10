@@ -146,7 +146,16 @@ class _UsageLine extends StatelessWidget {
     // figure is exact either way, so the colour is not carrying the number: it
     // carries the moment the number starts to matter, which is the only reason
     // anyone looks at this unprompted.
-    final ink = usagePressureInk(window.pressure, grid.AppPalette.textSecondary);
+    // The FILL wears the provider's own colour while everything is calm, so the
+    // bar and the mark beside it are visibly the same account. Pressure takes it
+    // over past 80: at that point the bar has stopped being an identity and
+    // started being a warning, and the warning outranks the identity.
+    final identity = engineIdentity(reading.provider.engineId).color;
+    final ink = usagePressureInk(
+      window.pressure,
+      grid.AppPalette.textSecondary,
+    );
+    final fill = usagePressureInk(window.pressure, identity);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: Row(
@@ -171,13 +180,24 @@ class _UsageLine extends StatelessWidget {
                     Positioned.fill(
                       child: ColoredBox(color: grid.AppGlass.hair),
                     ),
-                    FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      // Clamped, and not only for tidiness: a provider that
-                      // reports over 100 would otherwise paint past its own
-                      // track and the bar would stop meaning anything.
-                      widthFactor: (window.usedPercent / 100).clamp(0.0, 1.0),
-                      child: ColoredBox(color: ink),
+                    // Positioned.fill around the fraction, not just inside it.
+                    //
+                    // A Stack gives its unpositioned children LOOSE constraints,
+                    // and a ColoredBox with no child takes constraints.smallest
+                    // under those — which is zero high. The track was visible
+                    // and the fill was not, at every percentage, because it was
+                    // being painted four pixels wide and none tall. Positioned
+                    // .fill hands down a tight box, so the fraction has a height
+                    // to take a share of.
+                    Positioned.fill(
+                      child: FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        // Clamped, and not only for tidiness: a provider that
+                        // reports over 100 would otherwise paint past its own
+                        // track and the bar would stop meaning anything.
+                        widthFactor: (window.usedPercent / 100).clamp(0.0, 1.0),
+                        child: ColoredBox(color: fill),
+                      ),
                     ),
                   ],
                 ),
