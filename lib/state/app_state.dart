@@ -121,6 +121,10 @@ class MachineState {
   // IMAGE paste — see TerminalSession.pasteImage). False for any CLI published before this existed;
   // the panel falls back to forwarding a bare Ctrl+V, today's only option for an image paste.
   bool terminalImagePasteAvailable = false;
+  // Whether this machine's CLI daemon understands TerminalBinaryKind.pasteFile (a dropped non-image
+  // file, written to disk on that machine and pasted as a path — see TerminalSession.pasteFile).
+  // Only consulted for a REMOTE pane; a local one pastes its own path directly and never needs this.
+  bool terminalPasteFileAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -2136,12 +2140,15 @@ class AppNotifier extends ChangeNotifier {
           features is Map && features['pasteRaw'] == true;
       machine.terminalImagePasteAvailable =
           features is Map && features['imagePaste'] == true;
+      machine.terminalPasteFileAvailable =
+          features is Map && features['pasteFile'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
       machine.terminalCapabilityError = 'Could not negotiate terminal protocol';
       machine.terminalPasteRawAvailable = false;
       machine.terminalImagePasteAvailable = false;
+      machine.terminalPasteFileAvailable = false;
     }
   }
 

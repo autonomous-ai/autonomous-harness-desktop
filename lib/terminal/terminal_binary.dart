@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 const terminalLocalVersion = 1;
@@ -14,6 +15,13 @@ const terminalLocalPasteMaxPayloadBytes = 6 * 1024 * 1024;
 // TERMINAL_LOCAL_IMAGE_PASTE_MAX_PAYLOAD_BYTES in the harness CLI's terminalBinary.ts — keep the
 // two in step.
 const terminalLocalImagePasteMaxPayloadBytes = 4 * 1024 * 1024;
+// A dropped (non-image) file, delivered whole so its path can be pasted on the far side — see
+// TerminalSession.pasteFile. Ordinary files run larger than a screenshot, hence its own, more
+// generous ceiling; this is a modest atomic-frame limit, not a general file-transfer feature — a
+// bigger file is rejected client-side rather than chunked. Mirrors
+// TERMINAL_LOCAL_PASTE_FILE_MAX_PAYLOAD_BYTES in the harness CLI's terminalBinary.ts — keep the
+// two in step.
+const terminalLocalPasteFileMaxPayloadBytes = 10 * 1024 * 1024;
 
 enum TerminalBinaryKind {
   input(1),
@@ -28,7 +36,13 @@ enum TerminalBinaryKind {
   /// carrying binary image data instead of UTF-8 text, so it cannot share that kind (the CLI's
   /// paste handler requires valid UTF-8). See [TerminalSession.pasteImage]. Upload (client→CLI)
   /// only; nothing ever sends this back down.
-  imagePaste(6);
+  imagePaste(6),
+  /// A dropped (non-image) FILE — carries the original filename plus its bytes, so the daemon can
+  /// write it to disk on its own machine and paste that path as text (never the OS clipboard, and
+  /// never a Ctrl+V replay — unlike [imagePaste], the goal here is only "the pane gets a valid
+  /// path"). See [TerminalSession.pasteFile]. Upload (client→CLI) only; nothing ever sends this
+  /// back down.
+  pasteFile(7);
 
   final int code;
   const TerminalBinaryKind(this.code);
@@ -47,6 +61,8 @@ int _maxLocalPayloadBytesFor(TerminalBinaryKind kind) {
       return terminalLocalPasteMaxPayloadBytes;
     case TerminalBinaryKind.imagePaste:
       return terminalLocalImagePasteMaxPayloadBytes;
+    case TerminalBinaryKind.pasteFile:
+      return terminalLocalPasteFileMaxPayloadBytes;
     default:
       return terminalLocalMaxPayloadBytes;
   }
@@ -97,7 +113,8 @@ Uint8List? encodeTerminalPlain(TerminalBinaryFrame frame) {
   if ((frame.kind == TerminalBinaryKind.input ||
           frame.kind == TerminalBinaryKind.sync ||
           frame.kind == TerminalBinaryKind.paste ||
-          frame.kind == TerminalBinaryKind.imagePaste) &&
+          frame.kind == TerminalBinaryKind.imagePaste ||
+          frame.kind == TerminalBinaryKind.pasteFile) &&
       frame.compressed) {
     return null;
   }
@@ -135,7 +152,8 @@ TerminalBinaryFrame? decodeTerminalPlain(
       ((kind == TerminalBinaryKind.input ||
               kind == TerminalBinaryKind.sync ||
               kind == TerminalBinaryKind.paste ||
-              kind == TerminalBinaryKind.imagePaste) &&
+              kind == TerminalBinaryKind.imagePaste ||
+              kind == TerminalBinaryKind.pasteFile) &&
           flags != 0)) {
     return null;
   }
@@ -197,4 +215,32 @@ TerminalBinaryFrame? decodeTerminalLocal(List<int> raw) {
     bytes[6],
     Uint8List.fromList(bytes.sublist(terminalLocalHeaderBytes)),
   );
+}
+
+/// [TerminalBinaryKind.pasteFile]'s payload (the frame's opaque `bytes`) is itself a tiny
+/// sub-format: a 2-byte big-endian filename length, the UTF-8 filename, then the file's own
+/// content — one small header inside the existing opaque `bytes` field, so the outer frame format
+/// needs no changes for this. Mirrors the harness CLI's `encodePasteFilePayload` in
+/// terminalBinary.ts — keep the two in step.
+Uint8List? encodePasteFilePayload(String filename, Uint8List content) {
+  final nameBytes = utf8.encode(filename);
+  if (nameBytes.isEmpty || nameBytes.length > 0xffff) return null;
+  final out = Uint8List(2 + nameBytes.length + content.length);
+  ByteData.sublistView(out).setUint16(0, nameBytes.length, Endian.big);
+  out.setRange(2, 2 + nameBytes.length, nameBytes);
+  out.setRange(2 + nameBytes.length, out.length, content);
+  return out;
+}
+
+({String filename, Uint8List content})? decodePasteFilePayload(Uint8List payload) {
+  if (payload.length < 2) return null;
+  final nameLength = ByteData.sublistView(payload).getUint16(0, Endian.big);
+  if (nameLength == 0 || payload.length < 2 + nameLength) return null;
+  final String filename;
+  try {
+    filename = utf8.decode(payload.sublist(2, 2 + nameLength), allowMalformed: false);
+  } on FormatException {
+    return null;
+  }
+  return (filename: filename, content: Uint8List.sublistView(payload, 2 + nameLength));
 }

@@ -1,13 +1,19 @@
+import 'dart:typed_data';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import 'window_chrome.dart';
 
+import '../clipboard/image_bytes.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shortcuts/app_shortcuts.dart';
 import '../state/app_state.dart';
 import '../state/pane_preset.dart';
 import '../state/terminal_pane.dart';
+import '../terminal/terminal_binary.dart';
 import '../terminal/terminal_font_store.dart';
+import '../terminal/terminal_session.dart';
 import '../theme/app_theme.dart';
 import 'agent_drag.dart';
 import 'engine_identity.dart';
@@ -558,25 +564,29 @@ class _PaneCell extends StatelessWidget {
               ),
               Expanded(
                 child: RepaintBoundary(
-                  child: _SwapZone(
+                  child: _FileDropZone(
                     notifier: notifier,
-                    paneId: pane.id,
-                    child: _DropZone(
+                    pane: pane,
+                    child: _SwapZone(
                       notifier: notifier,
                       paneId: pane.id,
-                      dragging: dragging,
-                      child: ValueListenableBuilder<PaneDragRef?>(
-                        valueListenable: paneDragging,
-                        // The tile being carried fades where it sits, so the grid shows
-                        // where it came FROM while the ghost shows where it is going.
-                        builder: (context, inFlight, child) => Opacity(
-                          opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
-                          child: child,
-                        ),
-                        child: _PaneContent(
-                          notifier: notifier,
-                          pane: pane,
-                          single: _single,
+                      child: _DropZone(
+                        notifier: notifier,
+                        paneId: pane.id,
+                        dragging: dragging,
+                        child: ValueListenableBuilder<PaneDragRef?>(
+                          valueListenable: paneDragging,
+                          // The tile being carried fades where it sits, so the grid shows
+                          // where it came FROM while the ghost shows where it is going.
+                          builder: (context, inFlight, child) => Opacity(
+                            opacity: inFlight?.paneId == pane.id ? 0.35 : 1,
+                            child: child,
+                          ),
+                          child: _PaneContent(
+                            notifier: notifier,
+                            pane: pane,
+                            single: _single,
+                          ),
                         ),
                       ),
                     ),
@@ -791,6 +801,210 @@ class _LaunchFailureBanner extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Where an OS file (from Finder/Nautilus, not an in-app drag) may be dropped onto this pane.
+///
+/// Outermost of the three drop layers on a tile ([_SwapZone]/[_DropZone] handle in-app Flutter
+/// drags; this one is a native OS drag session, a different event channel entirely — `desktop_drop`
+/// does not consume ordinary pointer/click/scroll events, so nesting order among the three doesn't
+/// matter functionally). Unlike the other two, there is no app-wide "what's being dragged" notifier
+/// to key hover state off — `desktop_drop` only tells THIS widget about drags over it — so this one
+/// is a StatefulWidget with its own local hover flag instead of a shared `ValueListenableBuilder`.
+///
+/// An image is sent through the exact same pipeline as a clipboard image paste
+/// ([TerminalSession.pasteImage]); a non-image file's path is pasted as text — directly, with no
+/// network round-trip, when this pane's machine is local, or via [TerminalSession.pasteFile] (which
+/// writes it to disk on that machine first) when the pane's machine is remote. See the plan this
+/// shipped from for why that asymmetry is intentional.
+class _FileDropZone extends StatefulWidget {
+  const _FileDropZone({
+    required this.notifier,
+    required this.pane,
+    required this.child,
+  });
+
+  final AppNotifier notifier;
+  final TerminalPane pane;
+  final Widget child;
+
+  @override
+  State<_FileDropZone> createState() => _FileDropZoneState();
+}
+
+class _FileDropZoneState extends State<_FileDropZone> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _hovering = true),
+      onDragExited: (_) => setState(() => _hovering = false),
+      onDragDone: (details) async {
+        setState(() => _hovering = false);
+        await _handleDrop(details.files);
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          widget.child,
+          if (_hovering)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: AppColors.accent.withValues(alpha: 0.16),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: grid.AppPalette.panelBg,
+                        border: Border.all(color: AppColors.accent),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Drop to attach',
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontFamily: AppFonts.sans,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  static String _mb(int bytes) => '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
+
+  /// Reads just enough of the file to sniff its format (see [looksLikeImage]) without loading a
+  /// large drop fully into memory before deciding which ceiling even applies to it.
+  Future<Uint8List> _peekHead(DropItem item, int maxBytes) async {
+    final chunks = <int>[];
+    await for (final chunk in item.openRead(0, maxBytes)) {
+      chunks.addAll(chunk);
+      if (chunks.length >= maxBytes) break;
+    }
+    return Uint8List.fromList(chunks);
+  }
+
+  Future<void> _handleDrop(List<DropItem> files) async {
+    if (files.isEmpty) return;
+    widget.notifier.focusPane(widget.pane.id);
+    final session = widget.pane.session;
+    if (session == null) return; // pane not attached to a live session yet
+    final machine = widget.notifier.stateOf(widget.pane.machineId);
+
+    final images = <DropItem>[];
+    final others = <DropItem>[];
+    for (final item in files) {
+      if (item is DropItemDirectory) {
+        others.add(item);
+        continue;
+      }
+      Uint8List head;
+      try {
+        head = await _peekHead(item, 16);
+      } catch (_) {
+        continue;
+      }
+      if (looksLikeImage(head)) {
+        images.add(item);
+      } else {
+        others.add(item);
+      }
+    }
+
+    // Only the first image: several back-to-back would race the same OS clipboard + single Ctrl+V
+    // nudge on the daemon side — see pasteImage's own doc.
+    if (images.isNotEmpty) {
+      await _dropImage(images.first, machine, session);
+      if (images.length > 1) {
+        final ignored = images.length - 1;
+        _toast('$ignored more image${ignored > 1 ? 's' : ''} ignored — drop one image at a time');
+      }
+    }
+
+    // Every non-image file, independently — no shared resource to race over.
+    for (final item in others) {
+      await _dropFile(item, machine, session);
+    }
+  }
+
+  Future<void> _dropImage(
+    DropItem item,
+    MachineState? machine,
+    TerminalSession session,
+  ) async {
+    if (machine == null || !machine.terminalImagePasteAvailable) {
+      _toast('This machine cannot receive a native image paste yet');
+      return;
+    }
+    Uint8List raw;
+    try {
+      raw = await item.readAsBytes();
+    } catch (_) {
+      _toast('Could not read ${item.name}');
+      return;
+    }
+    final png = await ensurePngBytes(raw);
+    if (png == null) {
+      _toast('${item.name} is not a readable image');
+      return;
+    }
+    if (png.length > terminalLocalImagePasteMaxPayloadBytes) {
+      _toast('${item.name} is larger than ${_mb(terminalLocalImagePasteMaxPayloadBytes)}');
+      return;
+    }
+    await session.pasteImage(png);
+  }
+
+  Future<void> _dropFile(
+    DropItem item,
+    MachineState? machine,
+    TerminalSession session,
+  ) async {
+    // Local pane: the file already has a valid path on this same machine — nothing to transfer.
+    if (machine != null && machine.isLocalMachine) {
+      await session.pasteText(item.path);
+      return;
+    }
+    // A folder has no single-file byte content to transfer to a remote machine — out of scope.
+    if (item is DropItemDirectory) {
+      _toast("Folders can't be sent to a remote machine yet");
+      return;
+    }
+    if (machine == null || !machine.terminalPasteFileAvailable) {
+      _toast('This machine cannot receive a dropped file yet');
+      return;
+    }
+    Uint8List bytes;
+    try {
+      bytes = await item.readAsBytes();
+    } catch (_) {
+      _toast('Could not read ${item.name}');
+      return;
+    }
+    if (bytes.length > terminalLocalPasteFileMaxPayloadBytes) {
+      _toast('${item.name} is larger than ${_mb(terminalLocalPasteFileMaxPayloadBytes)}');
+      return;
+    }
+    await session.pasteFile(item.name, bytes);
+  }
 }
 
 /// Where a dragged pane may be dropped to trade places with this one.
