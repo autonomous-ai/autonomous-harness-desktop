@@ -25,6 +25,40 @@ enum TerminalSessionStatus {
   error,
 }
 
+/// Transient progress for an in-flight [TerminalSession.pasteImage]/[TerminalSession.pasteFile]
+/// chunked upload — mirrors `lib/share/model_pull.dart`'s `PullProgress`, the closest existing
+/// analog in this app for "a known-size transfer with a percentage". `bytesWritten` reflects the
+/// daemon's own per-chunk ACKs, not bytes merely handed to the local socket.
+class UploadProgress {
+  const UploadProgress({
+    required this.label,
+    required this.bytesWritten,
+    required this.totalBytes,
+  });
+
+  /// The image/file name shown in the overlay — a filename for a file upload, a generic word for
+  /// an image (which carries no name of its own).
+  final String label;
+  final int bytesWritten;
+  final int totalBytes;
+
+  double get percent => totalBytes <= 0 ? 0 : (bytesWritten / totalBytes).clamp(0, 1);
+
+  UploadProgress copyWith({int? bytesWritten, int? totalBytes}) => UploadProgress(
+    label: label,
+    bytesWritten: bytesWritten ?? this.bytesWritten,
+    totalBytes: totalBytes ?? this.totalBytes,
+  );
+}
+
+/// Internal bookkeeping for one in-flight upload — see [TerminalSession._uploadBytes]. Two
+/// Completers rather than one, since "the daemon accepted the announcement" and "the transfer is
+/// over (however it ended)" are resolved at different points and by different frames.
+class _ActiveUpload {
+  final Completer<bool> beginAccepted = Completer<bool>();
+  final Completer<bool> finished = Completer<bool>();
+}
+
 /// One controller stream for one remote Harness agent.
 ///
 /// Sequence corruption is recovered with bounded resync retries and one clean
@@ -82,6 +116,11 @@ class TerminalSession extends ChangeNotifier {
   String? errorMessage;
   int cols = 80;
   int rows = 24;
+
+  /// Set while an image/file upload is in flight ([pasteImage]/[pasteFile]); `null` otherwise. The
+  /// terminal panel's overlay shows a progress pill exactly when this is non-null.
+  UploadProgress? uploadProgress;
+  _ActiveUpload? _activeUpload;
 
   String? _openRequestId;
   int? _expectedSeq;
@@ -298,6 +337,32 @@ class TerminalSession extends ChangeNotifier {
           'Harness sent terminal bulk data as JSON',
         );
         return true;
+      case 'terminal_chunked_upload_begin_result':
+        if (!_matchesStream(payload)) return true;
+        final accepted = payload['accepted'] == true;
+        if (_activeUpload?.beginAccepted.isCompleted == false) {
+          _activeUpload!.beginAccepted.complete(accepted);
+        }
+        return true;
+      case 'terminal_chunked_upload_progress':
+        if (!_matchesStream(payload)) return true;
+        final bytesWritten = (payload['bytesWritten'] as num?)?.toInt();
+        final totalBytes = (payload['totalBytes'] as num?)?.toInt();
+        if (bytesWritten != null && totalBytes != null && uploadProgress != null) {
+          uploadProgress = uploadProgress!.copyWith(
+            bytesWritten: bytesWritten,
+            totalBytes: totalBytes,
+          );
+          notifyListeners();
+        }
+        return true;
+      case 'terminal_paste_image_result':
+      case 'terminal_paste_file_result':
+        if (!_matchesStream(payload)) return true;
+        if (_activeUpload?.finished.isCompleted == false) {
+          _activeUpload!.finished.complete(true);
+        }
+        return true;
       case 'terminal_link_mode':
         if (!_matchesStream(payload)) return true;
         final mode = payload['mode']?.toString();
@@ -335,12 +400,22 @@ class TerminalSession extends ChangeNotifier {
         // stream itself is completely fine, so this must not freeze it the way a real transport/
         // protocol failure does. `debugPrint` only: there is no dedicated per-action failure surface
         // to show the user something better than silence, and silence beats losing the terminal.
-        if (errorCode == 'TERMINAL_PASTE_INVALID') {
+        // A malformed upload chunk (bad seq/size) is the same shape of non-event for the same
+        // reason — nothing it describes ever reached tmux either.
+        if (errorCode == 'TERMINAL_PASTE_INVALID' ||
+            errorCode == 'TERMINAL_CHUNKED_UPLOAD_INVALID') {
+          _abortActiveUpload();
+          notifyListeners();
           debugPrint(
             'TerminalSession: paste rejected: ${payload['message'] ?? errorCode}',
           );
           return true;
         }
+        // A genuine mid-transfer failure (the daemon couldn't write the clipboard/disk, or the
+        // pty write itself failed) IS treated like a real transport/protocol failure — same as
+        // TERMINAL_PASTE_FAILED already is, since it may mean the pty is in an unknown state.
+        // `_fail` itself resolves any in-flight upload (see `_abortActiveUpload`), so there is
+        // nothing extra to do here for TERMINAL_PASTE_IMAGE_FAILED/TERMINAL_PASTE_FILE_FAILED.
         _fail(errorCode, payload['message']?.toString());
         return true;
       case 'terminal_transport_error':
@@ -635,56 +710,144 @@ class TerminalSession extends ChangeNotifier {
     return sent;
   }
 
-  /// A clipboard IMAGE paste (raw PNG bytes) made directly into this pane — same "atomic,
-  /// out-of-band" shape as [pasteText], but binary rather than UTF-8 text, so it travels as
-  /// [TerminalBinaryKind.imagePaste] instead (the daemon's text-paste handler requires valid
-  /// UTF-8 and would reject PNG bytes outright).
+  /// A clipboard IMAGE paste (raw PNG bytes) made directly into this pane, sent as a chunked
+  /// upload (see [_uploadBytes]) over [TerminalBinaryKind.imagePaste] frames — the daemon's
+  /// text-paste handler requires valid UTF-8 and would reject PNG bytes outright, hence its own
+  /// kind, same reason [pasteText] doesn't carry it.
   ///
   /// The caller must check [MachineState.terminalImagePasteAvailable] first, same reason
   /// [pasteText] checks `terminalPasteRawAvailable`: an older CLI does not know this binary kind
   /// at all, so sending it there would silently go nowhere.
   Future<bool> pasteImage(Uint8List pngBytes) async {
-    if (!acceptsInput) return false;
     if (pngBytes.isEmpty) return false;
-    final currentStreamId = streamId;
-    if (currentStreamId == null) return false;
-    final frame = TerminalBinaryFrame(
-      kind: TerminalBinaryKind.imagePaste,
-      streamId: currentStreamId,
-      seq: 0,
+    return _uploadBytes(
+      uploadKind: 'image',
+      filename: null,
       bytes: pngBytes,
-      compressed: false,
+      binaryKind: TerminalBinaryKind.imagePaste,
     );
-    final sent = await sendBinary(frame);
-    if (!sent) transportLost('Terminal image paste was not sent');
-    return sent;
   }
 
-  /// A dropped (non-image) FILE — sends its bytes so the daemon can write it to disk on its own
-  /// (REMOTE) machine and paste that path as text; nothing round-trips back through this method.
-  /// Only meaningful for a genuinely remote pane: a LOCAL file already has a valid path on this
-  /// same machine, so callers should paste that path directly via [pasteText] instead and never
-  /// reach this method at all — see [MachineState.isLocalMachine].
+  /// A dropped (non-image) FILE — sent as a chunked upload (see [_uploadBytes]) so the daemon can
+  /// write it to disk on its own (REMOTE) machine and paste that path as text. Only meaningful for
+  /// a genuinely remote pane: a LOCAL file already has a valid path on this same machine, so
+  /// callers should paste that path directly via [pasteText] instead and never reach this method
+  /// at all — see [MachineState.isLocalMachine].
   ///
   /// The caller must check [MachineState.terminalPasteFileAvailable] first, same reason
   /// [pasteImage] checks `terminalImagePasteAvailable`: an older CLI does not know this binary kind
   /// at all, so sending it there would silently go nowhere.
   Future<bool> pasteFile(String filename, Uint8List content) async {
+    if (filename.isEmpty || content.isEmpty) return false;
+    return _uploadBytes(
+      uploadKind: 'file',
+      filename: filename,
+      bytes: content,
+      binaryKind: TerminalBinaryKind.pasteFile,
+    );
+  }
+
+  /// Cancels whatever image/file upload is currently in flight on this pane, if any — the user's
+  /// own Cancel affordance on the upload-progress overlay. A no-op if nothing is uploading.
+  Future<void> cancelUpload() async {
+    final upload = _activeUpload;
+    final currentStreamId = streamId;
+    if (upload == null) return;
+    if (!upload.finished.isCompleted) upload.finished.complete(false);
+    _clearUpload();
+    if (currentStreamId != null) {
+      await send('terminal_chunked_upload_cancel', {'streamId': currentStreamId});
+    }
+  }
+
+  /// Shared orchestration for [pasteImage]/[pasteFile]: announce the upload
+  /// (`terminal_chunked_upload_begin`), wait to be accepted, send the bytes as a series of
+  /// `binaryKind` frames — [TerminalBinaryFrame.seq] is the chunk index — each at most
+  /// [terminalUploadChunkBytes], then wait for the daemon's completion/error frame. Chunked rather
+  /// than sent whole because a single frame over 512 KiB never reaches a relayed or P2P-connected
+  /// remote machine at all (both cap a binary message there); see the plan this shipped from.
+  ///
+  /// [uploadProgress] reflects the daemon's own per-chunk ACKs
+  /// (`terminal_chunked_upload_progress`), not "chunks handed to the local socket" — that is what
+  /// keeps the percentage honest on a slow link, mirroring the firmware pusher's `fw.progress`
+  /// philosophy (`autonomous-harness/cli/src/cable/fwPush.ts`). Only one upload runs at a time per
+  /// pane — a second call while one is active is refused immediately, matching the daemon's own
+  /// "an upload is already in progress" rejection.
+  Future<bool> _uploadBytes({
+    required String uploadKind,
+    required String? filename,
+    required Uint8List bytes,
+    required TerminalBinaryKind binaryKind,
+  }) async {
     if (!acceptsInput) return false;
-    final payload = encodePasteFilePayload(filename, content);
-    if (payload == null) return false;
+    if (_activeUpload != null) return false;
     final currentStreamId = streamId;
     if (currentStreamId == null) return false;
-    final frame = TerminalBinaryFrame(
-      kind: TerminalBinaryKind.pasteFile,
-      streamId: currentStreamId,
-      seq: 0,
-      bytes: payload,
-      compressed: false,
+
+    final upload = _ActiveUpload();
+    _activeUpload = upload;
+    uploadProgress = UploadProgress(
+      label: filename ?? 'image',
+      bytesWritten: 0,
+      totalBytes: bytes.length,
     );
-    final sent = await sendBinary(frame);
-    if (!sent) transportLost('Terminal file paste was not sent');
-    return sent;
+    notifyListeners();
+
+    final sentBegin = await send('terminal_chunked_upload_begin', {
+      'streamId': currentStreamId,
+      'uploadKind': uploadKind,
+      'totalBytes': bytes.length,
+      'filename': ?filename,
+    });
+    if (!sentBegin) {
+      transportLost('Terminal upload request was not sent');
+      _clearUpload();
+      return false;
+    }
+
+    final accepted = await upload.beginAccepted.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => false,
+    );
+    if (!accepted || !identical(_activeUpload, upload)) {
+      _clearUpload();
+      return false;
+    }
+
+    var offset = 0;
+    var seq = 0;
+    while (offset < bytes.length) {
+      final end = min(offset + terminalUploadChunkBytes, bytes.length);
+      final frame = TerminalBinaryFrame(
+        kind: binaryKind,
+        streamId: currentStreamId,
+        seq: seq,
+        bytes: Uint8List.sublistView(bytes, offset, end),
+        compressed: false,
+      );
+      final sentChunk = await sendBinary(frame);
+      if (!sentChunk || !identical(_activeUpload, upload)) {
+        if (sentChunk) return false; // upload was cancelled/cleared out from under us mid-send
+        transportLost('Terminal upload chunk was not sent');
+        _clearUpload();
+        return false;
+      }
+      offset = end;
+      seq++;
+    }
+
+    final finished = await upload.finished.future.timeout(
+      const Duration(minutes: 2),
+      onTimeout: () => false,
+    );
+    if (identical(_activeUpload, upload)) _clearUpload();
+    return finished;
+  }
+
+  void _clearUpload() {
+    _activeUpload = null;
+    uploadProgress = null;
+    notifyListeners();
   }
 
   void _onTerminalOutput(String data) {
@@ -998,6 +1161,7 @@ class TerminalSession extends ChangeNotifier {
     status = TerminalSessionStatus.error;
     errorCode = 'TERMINAL_DISCONNECTED';
     errorMessage = message;
+    _abortActiveUpload();
     notifyListeners();
   }
 
@@ -1009,7 +1173,24 @@ class TerminalSession extends ChangeNotifier {
     status = TerminalSessionStatus.error;
     errorCode = code;
     errorMessage = message;
+    _abortActiveUpload();
     notifyListeners();
+  }
+
+  /// A safety net for any path that resets the stream (transport loss, a real failure) while an
+  /// image/file upload happens to be in flight — resolves its awaiting Future rather than leaving
+  /// it to hang until [_uploadBytes]'s own 2-minute timeout. The specific error codes that mean
+  /// "the upload itself failed" already call this via [transportLost]/[_fail]; this also covers
+  /// every OTHER way the stream can go away mid-upload.
+  void _abortActiveUpload() {
+    if (_activeUpload?.beginAccepted.isCompleted == false) {
+      _activeUpload!.beginAccepted.complete(false);
+    }
+    if (_activeUpload?.finished.isCompleted == false) {
+      _activeUpload!.finished.complete(false);
+    }
+    _activeUpload = null;
+    uploadProgress = null;
   }
 
   bool _matchesStream(Map<String, dynamic> payload) =>

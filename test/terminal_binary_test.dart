@@ -126,25 +126,23 @@ void main() {
     );
   });
 
-  test('a pasteFile carries filename + content at its own ceiling, independent of paste/imagePaste', () {
+  test('a pasteFile chunk (raw bytes, seq is the chunk index) carries at its own ceiling, independent of paste/imagePaste', () {
     final content = Uint8List.fromList(
       List<int>.filled(terminalLocalPasteFileMaxPayloadBytes - 1024, 0xcd),
     );
-    final payload = encodePasteFilePayload('archive.zip', content)!;
     final frame = TerminalBinaryFrame(
       kind: TerminalBinaryKind.pasteFile,
       streamId: streamId,
-      seq: 0,
-      bytes: payload,
+      seq: 3,
+      bytes: content,
       compressed: false,
     );
     final encoded = encodeTerminalLocal(frame);
     expect(encoded, isNotNull);
     final decoded = decodeTerminalLocal(encoded!);
     expect(decoded?.kind, TerminalBinaryKind.pasteFile);
-    final decodedPayload = decodePasteFilePayload(decoded!.bytes);
-    expect(decodedPayload?.filename, 'archive.zip');
-    expect(decodedPayload?.content, content);
+    expect(decoded?.seq, 3);
+    expect(decoded?.bytes, content);
 
     final tooBig = Uint8List(terminalLocalPasteFileMaxPayloadBytes + 1);
     expect(
@@ -174,28 +172,6 @@ void main() {
       ),
       isNull,
     );
-  });
-
-  group('pasteFile payload sub-format', () {
-    test('round-trips filename + content', () {
-      final content = Uint8List.fromList(const [1, 2, 3, 4, 5]);
-      final payload = encodePasteFilePayload('xin chào.txt', content)!;
-      final decoded = decodePasteFilePayload(payload);
-      expect(decoded?.filename, 'xin chào.txt');
-      expect(decoded?.content, content);
-    });
-
-    test('rejects an empty filename', () {
-      expect(encodePasteFilePayload('', Uint8List.fromList(const [1])), isNull);
-    });
-
-    test('rejects malformed/truncated payloads', () {
-      expect(decodePasteFilePayload(Uint8List(0)), isNull);
-      expect(decodePasteFilePayload(Uint8List.fromList(const [0, 0])), isNull);
-      final truncated = Uint8List(2);
-      ByteData.sublistView(truncated).setUint16(0, 10, Endian.big);
-      expect(decodePasteFilePayload(truncated), isNull);
-    });
   });
 
   test('local HTRL framing rejects truncation and reserved bytes', () {

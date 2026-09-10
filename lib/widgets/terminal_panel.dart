@@ -564,6 +564,18 @@ class _TerminalPanelState extends State<TerminalPanel>
                       ),
                     ),
                   ),
+                // Bottom, not top-right alongside ATTACHING/RESYNCING: the two are not mutually
+                // exclusive (a reconnect can happen mid-upload) and must not overlap each other.
+                if (session.uploadProgress != null)
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 12,
+                    child: _UploadProgressBadge(
+                      progress: session.uploadProgress!,
+                      onCancel: () => unawaited(session.cancelUpload()),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -849,6 +861,76 @@ class _OverlayBadge extends StatelessWidget {
               fontFamily: AppFonts.sans,
               fontSize: 10,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown while an image/file drag-drop upload is in flight — see [TerminalSession.uploadProgress].
+/// Same container language as [_OverlayBadge] (panelBg@0.93, borderStrong border, radius 4,
+/// textSoft label) with a thin [LinearProgressIndicator] in place of a spinner, plus a Cancel
+/// affordance mirroring `lib/share/widgets/model_manager_dialog.dart`'s `PullBanner` — the closest
+/// existing analog in this app for "a known-size transfer with a percentage".
+class _UploadProgressBadge extends StatelessWidget {
+  final UploadProgress progress;
+  final VoidCallback onCancel;
+  const _UploadProgressBadge({required this.progress, required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final percentLabel = '${(progress.percent * 100).round()}%';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: grid.AppPalette.panelBg.withValues(alpha: 0.93),
+        border: Border.all(color: AppColors.borderStrong),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Uploading ${progress.label} · $percentLabel',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.textSoft,
+                    fontFamily: AppFonts.sans,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: onCancel,
+                child: Text(
+                  'CANCEL',
+                  style: TextStyle(
+                    color: AppColors.textSoft,
+                    fontFamily: AppFonts.sans,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              minHeight: 4,
+              value: progress.percent,
+              backgroundColor: AppColors.border,
+              color: AppColors.accent,
             ),
           ),
         ],

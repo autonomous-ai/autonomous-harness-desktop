@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 const terminalLocalVersion = 1;
@@ -217,30 +216,8 @@ TerminalBinaryFrame? decodeTerminalLocal(List<int> raw) {
   );
 }
 
-/// [TerminalBinaryKind.pasteFile]'s payload (the frame's opaque `bytes`) is itself a tiny
-/// sub-format: a 2-byte big-endian filename length, the UTF-8 filename, then the file's own
-/// content — one small header inside the existing opaque `bytes` field, so the outer frame format
-/// needs no changes for this. Mirrors the harness CLI's `encodePasteFilePayload` in
-/// terminalBinary.ts — keep the two in step.
-Uint8List? encodePasteFilePayload(String filename, Uint8List content) {
-  final nameBytes = utf8.encode(filename);
-  if (nameBytes.isEmpty || nameBytes.length > 0xffff) return null;
-  final out = Uint8List(2 + nameBytes.length + content.length);
-  ByteData.sublistView(out).setUint16(0, nameBytes.length, Endian.big);
-  out.setRange(2, 2 + nameBytes.length, nameBytes);
-  out.setRange(2 + nameBytes.length, out.length, content);
-  return out;
-}
-
-({String filename, Uint8List content})? decodePasteFilePayload(Uint8List payload) {
-  if (payload.length < 2) return null;
-  final nameLength = ByteData.sublistView(payload).getUint16(0, Endian.big);
-  if (nameLength == 0 || payload.length < 2 + nameLength) return null;
-  final String filename;
-  try {
-    filename = utf8.decode(payload.sublist(2, 2 + nameLength), allowMalformed: false);
-  } on FormatException {
-    return null;
-  }
-  return (filename: filename, content: Uint8List.sublistView(payload, 2 + nameLength));
-}
+/// Per-chunk size for a chunked image/file upload — comfortably under the 512 KiB per-binary-message
+/// ceiling shared by the backend relay and the P2P data channel (with AEAD/framing overhead room to
+/// spare). Every chunk but the last is exactly this size; `seq` is the chunk index. Mirrors the
+/// harness CLI's `UPLOAD_CHUNK_BYTES` in terminalStreamManager.ts — keep the two in step.
+const terminalUploadChunkBytes = 256 * 1024;
