@@ -1053,4 +1053,56 @@ void main() {
       expect(imagePastes(), isEmpty);
     });
   });
+
+  group('pasteFile', () {
+    /// The `TerminalBinaryKind.pasteFile` frames this session put on the wire.
+    List<TerminalBinaryFrame> filePastes() => [
+      for (final frame in binarySent)
+        if (frame.kind == TerminalBinaryKind.pasteFile) frame,
+    ];
+
+    Future<void> live() async {
+      await ready();
+      await session.handleBinary(
+        output(0, utf8.encode(r'$ '), keyframe: true, cols: 100, rows: 30),
+      );
+      sent.clear();
+      binarySent.clear();
+    }
+
+    test('sends filename + content as one binary frame, uncompressed', () async {
+      await live();
+      final content = Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]);
+
+      expect(await session.pasteFile('report.pdf', content), isTrue);
+
+      expect(filePastes(), hasLength(1));
+      final decoded = decodePasteFilePayload(filePastes().single.bytes);
+      expect(decoded?.filename, 'report.pdf');
+      expect(decoded?.content, content);
+      expect(filePastes().single.streamId, streamId);
+      expect(filePastes().single.compressed, isFalse);
+      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.input), isEmpty);
+      expect(sent, isEmpty);
+    });
+
+    test('sends nothing while the stream is not accepting input', () async {
+      expect(session.acceptsInput, isFalse);
+      expect(
+        await session.pasteFile('a.txt', Uint8List.fromList(const [1])),
+        isFalse,
+      );
+      expect(filePastes(), isEmpty);
+    });
+
+    test('sends nothing for an empty filename', () async {
+      await live();
+
+      expect(
+        await session.pasteFile('', Uint8List.fromList(const [1])),
+        isFalse,
+      );
+      expect(filePastes(), isEmpty);
+    });
+  });
 }

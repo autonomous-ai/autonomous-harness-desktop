@@ -60,6 +60,7 @@ dependencies:
   # build, which is the same shape the other two scanners use for "nothing to
   # read".
   sqlite3: ^2.4.0
+  desktop_drop: ^0.8.4
 
 dev_dependencies:
   flutter_test:

@@ -660,6 +660,33 @@ class TerminalSession extends ChangeNotifier {
     return sent;
   }
 
+  /// A dropped (non-image) FILE — sends its bytes so the daemon can write it to disk on its own
+  /// (REMOTE) machine and paste that path as text; nothing round-trips back through this method.
+  /// Only meaningful for a genuinely remote pane: a LOCAL file already has a valid path on this
+  /// same machine, so callers should paste that path directly via [pasteText] instead and never
+  /// reach this method at all — see [MachineState.isLocalMachine].
+  ///
+  /// The caller must check [MachineState.terminalPasteFileAvailable] first, same reason
+  /// [pasteImage] checks `terminalImagePasteAvailable`: an older CLI does not know this binary kind
+  /// at all, so sending it there would silently go nowhere.
+  Future<bool> pasteFile(String filename, Uint8List content) async {
+    if (!acceptsInput) return false;
+    final payload = encodePasteFilePayload(filename, content);
+    if (payload == null) return false;
+    final currentStreamId = streamId;
+    if (currentStreamId == null) return false;
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.pasteFile,
+      streamId: currentStreamId,
+      seq: 0,
+      bytes: payload,
+      compressed: false,
+    );
+    final sent = await sendBinary(frame);
+    if (!sent) transportLost('Terminal file paste was not sent');
+    return sent;
+  }
+
   void _onTerminalOutput(String data) {
     if (!acceptsInput || data.isEmpty) return;
     final bytes = utf8.encode(data);
