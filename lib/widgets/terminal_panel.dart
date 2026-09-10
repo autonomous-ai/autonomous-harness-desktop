@@ -633,6 +633,12 @@ class _TerminalHeader extends StatelessWidget {
       TerminalSessionStatus.error => AppColors.danger,
       TerminalSessionStatus.closed => AppColors.mutedStrong,
     };
+    final profile = notifier
+        .stateOf(session.machineId)
+        ?.agents
+        .where((agent) => agent.id == session.agentId)
+        .firstOrNull
+        ?.codexHome;
     final statusLabel = switch (session.status) {
       TerminalSessionStatus.controlling => 'controlling',
       TerminalSessionStatus.opening => 'attaching',
@@ -689,10 +695,14 @@ class _TerminalHeader extends StatelessWidget {
                     ),
                   ),
                   child: Tooltip(
-                    message: 'Double-click to rename',
+                    message: profile == null
+                        ? 'Double-click to rename'
+                        : 'Codex profile: $profile\nDouble-click to rename',
                     waitDuration: const Duration(milliseconds: 700),
                     child: Text(
-                      session.agentName,
+                      profile == null
+                          ? session.agentName
+                          : '${session.agentName} · ${profile.split('/').last}',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppColors.text,

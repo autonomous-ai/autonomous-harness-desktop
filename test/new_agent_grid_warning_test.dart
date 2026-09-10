@@ -49,6 +49,7 @@ class RecordingCreateAgentNotifier extends AppNotifier {
     required String folder,
     bool bypassPermission = false,
     GridAgentOverride? grid,
+    String? codexHome,
   }) async {
     createAgentCalled = true;
     lastGrid = grid;

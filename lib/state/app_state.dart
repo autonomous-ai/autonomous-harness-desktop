@@ -1587,6 +1587,7 @@ class AppNotifier extends ChangeNotifier {
           prev.engine != agent.engine ||
           prev.engineDisplayName != agent.engineDisplayName ||
           prev.engineIconHint != agent.engineIconHint ||
+          prev.codexHome != agent.codexHome ||
           prev.parentAgentId != agent.parentAgentId ||
           prev.status != agent.status ||
           prev.terminalAvailable != agent.terminalAvailable ||
@@ -2413,9 +2414,18 @@ class AppNotifier extends ChangeNotifier {
     required String folder,
     bool bypassPermission = false,
     GridAgentOverride? grid,
+    String? codexHome,
   }) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
+    if (codexHome != null) {
+      if (engine != 'codex' || grid != null || !machine.isLocalMachine) {
+        return 'Choose a local Codex profile only for Codex on this computer’s own account';
+      }
+      if (machine.engines['codex']?.supportsCodexHome != true) {
+        return 'Update the harness CLI on this computer to choose a Codex profile';
+      }
+    }
     final connection = _conn(machineId);
     Map<String, dynamic> result;
     try {
@@ -2429,6 +2439,7 @@ class AppNotifier extends ChangeNotifier {
           // sends byte for byte the frame it sent before this existed — see
           // GridAgentOverride for what the CLI still has to do with it.
           if (grid != null) 'grid': grid.toJson(),
+          'codexHome': ?codexHome,
         },
         timeout: const Duration(seconds: 20),
       );

@@ -124,6 +124,7 @@ class Agent {
   final String? engine;
   final String? engineDisplayName;
   final String? engineIconHint;
+  final String? codexHome;
   final String? parentAgentId;
   final String status;
   final String launchState;
@@ -143,6 +144,7 @@ class Agent {
     this.engine,
     this.engineDisplayName,
     this.engineIconHint,
+    this.codexHome,
     this.parentAgentId,
     this.status = 'active',
     this.launchState = 'ready',
@@ -184,6 +186,7 @@ class Agent {
       engine: _safeEngine(j['engine']),
       engineDisplayName: _safeLabel(j['engineDisplayName']),
       engineIconHint: _safeLabel(j['engineIconHint']),
+      codexHome: j['engine'] == 'codex' ? _safeCodexHome(j['codexHome']) : null,
       parentAgentId: _safeLabel(j['parentAgentId'] ?? j['parentId']),
       status: (j['status'] as String?) ?? 'active',
       launchState: launchState,
@@ -207,6 +210,7 @@ class Agent {
     engine: engine,
     engineDisplayName: engineDisplayName,
     engineIconHint: engineIconHint,
+    codexHome: codexHome,
     parentAgentId: parentAgentId,
     status: status,
     launchState: launchState,
@@ -220,6 +224,16 @@ class Agent {
   static String? _safeEngine(Object? raw) {
     if (raw is! String || raw.isEmpty || raw.length > 64) return null;
     return RegExp(r'^[a-zA-Z0-9._-]+$').hasMatch(raw) ? raw : null;
+  }
+
+  static String? _safeCodexHome(Object? raw) {
+    if (raw is! String ||
+        !raw.startsWith('/') ||
+        raw.length > 4096 ||
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(raw)) {
+      return null;
+    }
+    return raw;
   }
 
   static String? _safeLabel(Object? raw) {

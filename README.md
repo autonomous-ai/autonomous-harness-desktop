@@ -27,6 +27,25 @@ flutter build linux --release   # must run on an Ubuntu host — no cross-compil
 The terminal core is vendored at `third_party/xterm`. Do not replace it with an
 upstream package upgrade without preserving the local rendering and IME fixes.
 
+## Local Codex profiles
+
+New Agent → Codex offers a profile picker when the local Harness CLI advertises
+`supportsCodexHome`. It discovers existing `~/.codex` and `~/.codex-*` folders;
+use **Link a profile folder…** for another location. Choose the `CODEX_HOME`
+directory used by a shortcut such as `codex1` or `codex2`, rather than the shortcut
+executable or a named Codex configuration preset. Only directory paths are saved.
+
+The selected directory supplies that agent’s Codex login, configuration, hooks,
+history and model cache, and stays attached across restarts. The terminal header
+shows its folder name and exposes the full path in a tooltip. **Default** keeps
+the machine’s normal launch behavior. This picker applies to local agents using
+Codex’s own account; remote machines and Grid launches use their existing flows.
+The rail’s Codex usage panel still reports the default `~/.codex` profile.
+
+This requires the companion CLI support for `agent_create.codexHome`. Older CLIs
+show update guidance and keep default launches available; Desktop refuses an
+explicit profile when support is missing rather than silently using another login.
+
 ## Local and production terminal E2E
 
 The terminal E2E scripts exercise this desktop client together with source
