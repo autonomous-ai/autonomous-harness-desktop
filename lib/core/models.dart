@@ -237,8 +237,11 @@ class Agent {
 
 /// What the daemon answered when asked where a typed task belongs (⌘B).
 ///
-/// `candidates` is the pick followed by its runners-up. The window reads it only when `confidence` is
-/// too low to act on — the whole point of the number being on the wire.
+/// `candidates` is the pick followed by EVERY other agent the daemon weighed — ranked where the router
+/// ranked them, in rail order after that. Not a shortlist: when the router is unsure the right agent is
+/// often the one it put fourth, and a picker that cannot show it leaves no way forward but Esc.
+/// The window reads it only when `confidence` is too low to act on — the whole point of the number
+/// being on the wire.
 class RouteAnswer {
   const RouteAnswer({
     required this.agentId,

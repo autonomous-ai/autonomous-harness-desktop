@@ -78,6 +78,54 @@ void main() {
     );
   });
 
+  test('an image paste carries binary (non-UTF-8) bytes at its own ceiling, independent of paste', () {
+    final bytes = Uint8List.fromList(
+      List<int>.filled(terminalLocalImagePasteMaxPayloadBytes - 1024, 0xab),
+    );
+    final frame = TerminalBinaryFrame(
+      kind: TerminalBinaryKind.imagePaste,
+      streamId: streamId,
+      seq: 0,
+      bytes: bytes,
+      compressed: false,
+    );
+    final encoded = encodeTerminalLocal(frame);
+    expect(encoded, isNotNull);
+    final decoded = decodeTerminalLocal(encoded!);
+    expect(decoded?.kind, TerminalBinaryKind.imagePaste);
+    expect(decoded?.bytes, bytes);
+
+    // Its own ceiling, independent of paste's 6 MiB one.
+    final tooBig = Uint8List(terminalLocalImagePasteMaxPayloadBytes + 1);
+    expect(
+      encodeTerminalLocal(
+        TerminalBinaryFrame(
+          kind: TerminalBinaryKind.imagePaste,
+          streamId: streamId,
+          seq: 0,
+          bytes: tooBig,
+          compressed: false,
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('an image paste is never compressed', () {
+    expect(
+      encodeTerminalPlain(
+        TerminalBinaryFrame(
+          kind: TerminalBinaryKind.imagePaste,
+          streamId: streamId,
+          seq: 0,
+          bytes: Uint8List.fromList(const [1, 2, 3]),
+          compressed: true,
+        ),
+      ),
+      isNull,
+    );
+  });
+
   test('local HTRL framing rejects truncation and reserved bytes', () {
     final encoded = encodeTerminalLocal(
       TerminalBinaryFrame(

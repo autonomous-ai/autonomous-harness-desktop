@@ -533,11 +533,15 @@ finish() {
 trap finish EXIT
 
 if command -v apt-get >/dev/null 2>&1; then
-  echo 'Installing tmux (you may be asked for your password)…'
-  # Installing one package does not require refreshing every configured apt
+  echo 'Installing tmux, xclip and wl-clipboard (you may be asked for your password)…'
+  # Installing these packages does not require refreshing every configured apt
   # source first. An error in any source would otherwise abort this repair
-  # before apt ever reached the tmux install.
-  sudo apt-get install -y tmux
+  # before apt ever reached the install. xclip/wl-clipboard (native image paste
+  # into a remote OS clipboard) are bundled into this one password prompt
+  # rather than a second one, but — unlike tmux — are best-effort: this step
+  # only gates on tmux, so a clipboard-tool failure here still lets the retry
+  # succeed and just falls back to pasting a file path instead.
+  sudo apt-get install -y tmux xclip wl-clipboard || sudo apt-get install -y tmux
   command -v tmux >/dev/null 2>&1
   tmux -V
 else

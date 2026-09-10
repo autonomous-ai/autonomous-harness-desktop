@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -17,6 +18,59 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+// Dart calls into this channel to read a native image off the GTK clipboard. Flutter's own
+// `Clipboard` API only ever sees text/plain — see terminal_panel.dart's `_paste()` — so a real
+// image (a screenshot, "Copy Image" from a browser, ...) needs this native round trip instead.
+// Mirrors macOS's `harness/clipboard_image` channel (MainFlutterWindow.swift).
+static void clipboard_image_method_call_cb(FlMethodChannel* channel,
+                                            FlMethodCall* method_call,
+                                            gpointer user_data) {
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(fl_method_call_get_name(method_call), "readImagePng") != 0) {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  GdkPixbuf* pixbuf = gtk_clipboard_wait_for_image(clipboard);
+  if (pixbuf == nullptr) {
+    // No image on the clipboard (the normal case for a plain-text paste) — the Dart side falls
+    // back to today's text-paste behaviour.
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_null()));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  gchar* buffer = nullptr;
+  gsize buffer_size = 0;
+  g_autoptr(GError) error = nullptr;
+  if (gdk_pixbuf_save_to_buffer(pixbuf, &buffer, &buffer_size, "png", &error, nullptr)) {
+    g_autoptr(FlValue) bytes = fl_value_new_uint8_list(
+        reinterpret_cast<const uint8_t*>(buffer), buffer_size);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(bytes));
+    g_free(buffer);
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "ENCODE_FAILED",
+        error != nullptr ? error->message : "failed to encode the clipboard image as PNG",
+        nullptr));
+  }
+  g_object_unref(pixbuf);
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
+// Held for the app's lifetime (same scope as the window itself), never unreffed — there is no
+// natural teardown point before process exit, the same reason `fl_register_plugins` below registers
+// its plugins on `view` with no matching cleanup in this function.
+static void install_clipboard_image_channel(FlView* view) {
+  FlMethodChannel* channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)), "harness/clipboard_image",
+      FL_METHOD_CODEC(fl_standard_method_codec_new()));
+  fl_method_channel_set_method_call_handler(
+      channel, clipboard_image_method_call_cb, nullptr, nullptr);
 }
 
 // Implements GApplication::activate.
@@ -116,6 +170,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  install_clipboard_image_channel(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

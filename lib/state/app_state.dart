@@ -117,6 +117,10 @@ class MachineState {
   // one atomic tmux paste-buffer, not chunked like ordinary keystrokes — see TerminalSession.pasteText).
   // False for any CLI published before this existed; the panel falls back to the old chunked path.
   bool terminalPasteRawAvailable = false;
+  // Whether this machine's CLI daemon understands TerminalBinaryKind.imagePaste (a native clipboard
+  // IMAGE paste — see TerminalSession.pasteImage). False for any CLI published before this existed;
+  // the panel falls back to forwarding a bare Ctrl+V, today's only option for an image paste.
+  bool terminalImagePasteAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -157,6 +161,30 @@ class MachineState {
 
 /// Auth, Remote-machine discovery, E2EE and one explicit terminal attachment.
 /// Structured chat intentionally does not exist in the Desktop MVP state.
+/// A spoken task the daemon wants THIS window to route — see the `voice_route_request` case below.
+///
+/// Deliberately not the palette's own [SpokenTask]: this layer holds no callback and knows nothing about
+/// dialogs. The screen that can open one turns this into that, and wires the answer back through
+/// [AppNotifier.reportVoiceRoute].
+class SpokenTaskRequest {
+  const SpokenTaskRequest({
+    required this.voiceId,
+    required this.machineId,
+    required this.text,
+    required this.cmd,
+  });
+
+  final String voiceId;
+
+  /// Which daemon asked — the answer has to go back to that one, not to whichever is selected when the
+  /// person finally picks.
+  final String machineId;
+  final String text;
+
+  /// 'goal', 'loop', or empty: which of the dial's three buttons was held.
+  final String cmd;
+}
+
 class AppNotifier extends ChangeNotifier {
   final AuthSession session;
   AppConfig config;
@@ -164,6 +192,15 @@ class AppNotifier extends ChangeNotifier {
   final CliLogin cliLogin;
   final CliLink cliLink;
   final ConfigStore? _store;
+
+  /// Spoken tasks waiting for a palette. Broadcast because the screen subscribes and unsubscribes with
+  /// its own lifetime, and a request that arrives with no screen up is dropped rather than queued — the
+  /// daemon's own deadline is the thing that decides how long a spoken task stays interesting.
+  final StreamController<SpokenTaskRequest> _spokenTasks =
+      StreamController<SpokenTaskRequest>.broadcast();
+
+  /// Words from the dial, for whoever can put a palette on screen.
+  Stream<SpokenTaskRequest> get spokenTasks => _spokenTasks.stream;
   final LocalManualFixture? localManualFixture;
   final Duration turnActivityTimeout;
   final LocalCliDiscovery? localCliDiscovery;
@@ -530,6 +567,31 @@ class AppNotifier extends ChangeNotifier {
   /// Rides the app's own rpc convention (`ws_conn.request`), so the pending map, the timeout and the
   /// logging are the ones every other request already uses. Returns null when there is nobody to ask —
   /// no local machine, or its socket is not up — which the palette says out loud rather than spinning.
+  /// Answer the daemon about a spoken task it asked this window to route.
+  ///
+  /// Fire and forget, and correlated by `voiceId` rather than by the rpc convention ⌘B uses: the question
+  /// travelled the other way this time, so the pending id belongs to the daemon and this is a report, not
+  /// a request. Sent back to the machine that ASKED — with two daemons attached, answering the selected
+  /// one leaves the asker waiting on a reply that went to a stranger.
+  void reportVoiceRoute(
+    String machineId,
+    String voiceId,
+    String state,
+    String agentId,
+  ) {
+    final connection = _pool?[machineId];
+    if (connection == null) return;
+    unawaited(
+      connection
+          .sendTerminalFrame('voice_route_reply', {
+            'voiceId': voiceId,
+            'state': state,
+            if (agentId.isNotEmpty) 'agentId': agentId,
+          })
+          .catchError((_) => false),
+    );
+  }
+
   Future<RouteAnswer?> routeTask(String text) async {
     final machineId = localMachineState?.machine.machineId;
     final connection = machineId == null ? null : _pool?[machineId];
@@ -2071,11 +2133,14 @@ class AppNotifier extends ChangeNotifier {
       final features = result['features'];
       machine.terminalPasteRawAvailable =
           features is Map && features['pasteRaw'] == true;
+      machine.terminalImagePasteAvailable =
+          features is Map && features['imagePaste'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
       machine.terminalCapabilityError = 'Could not negotiate terminal protocol';
       machine.terminalPasteRawAvailable = false;
+      machine.terminalImagePasteAvailable = false;
     }
   }
 
@@ -3427,6 +3492,32 @@ class AppNotifier extends ChangeNotifier {
           }
         }
         break;
+      case 'voice_route_request':
+        // WORDS SPOKEN INTO THE DIAL, handed here to be routed.
+        //
+        // The dial used to pick the agent itself with an older copy of this router — no candidate cap,
+        // untrimmed recaps, a shorter budget, and no way to ask when it was unsure, so an uncertain
+        // route was still a send. This window has the palette that can hold the answer up, so the
+        // decision moved to it and the dial became the microphone.
+        //
+        // The daemon is waiting on a reply for this voiceId; SpokenTask is what guarantees one goes
+        // back on every path out of the palette.
+        final voiceId = payload['voiceId'];
+        final spokenText = payload['text'];
+        if (voiceId is String &&
+            voiceId.isNotEmpty &&
+            spokenText is String &&
+            spokenText.trim().isNotEmpty) {
+          _spokenTasks.add(
+            SpokenTaskRequest(
+              voiceId: voiceId,
+              machineId: machineId,
+              text: spokenText.trim(),
+              cmd: payload['cmd'] is String ? payload['cmd'] as String : '',
+            ),
+          );
+        }
+        break;
       case 'dial_open':
         // A notification was tapped on the dial. Unlike `dial_focus` this asks for a tile of its own —
         // see openAgentFromDial for why a finished turn is not a replacement for what is on screen.
@@ -3636,6 +3727,7 @@ class AppNotifier extends ChangeNotifier {
       pane.session?.dispose();
     }
     panes.clear();
+    unawaited(_spokenTasks.close());
     super.dispose();
   }
 }

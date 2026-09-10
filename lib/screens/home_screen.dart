@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
+import '../core/desktop_window.dart';
 import '../state/app_state.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
@@ -41,13 +42,14 @@ class _HomeScreenState extends State<HomeScreen> {
   /// disagreed with.
   final UsageController _usage = UsageController();
 
-  @override
-  void dispose() {
-    // The shell made it, so the shell cancels its timer. The rail is handed it
-    // and deliberately does not dispose what it did not create.
-    _usage.dispose();
-    super.dispose();
-  }
+  /// Spoken tasks from the dial, waiting for a palette. Subscribed here because this is the lowest
+  /// place that has both a [BuildContext] to open a dialog on and a lifetime to cancel with.
+  StreamSubscription<SpokenTaskRequest>? _spokenTasks;
+
+  /// One palette at a time. Two people cannot speak into one dial at once, but a request can arrive
+  /// while the previous one is still open — from a retry, or from a second daemon — and stacking two
+  /// dialogs would leave the one underneath answering for words nobody can see.
+  bool _spokenPaletteOpen = false;
 
   // User-dragged override. null until the resize handle is used, so the
   // window-relative default below keeps applying on its own.
@@ -57,6 +59,59 @@ class _HomeScreenState extends State<HomeScreen> {
   // Guards against opening a second popup for the same machine while one is already up — showDialog
   // itself has no such de-dup, and this rebuilds on every notifier change while the popup is open.
   String? _linkDialogMachineId;
+
+  @override
+  void initState() {
+    super.initState();
+    _spokenTasks = widget.notifier.spokenTasks.listen(_openSpokenTask);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_spokenTasks?.cancel());
+    // The shell made it, so the shell cancels its timer. The rail is handed it
+    // and deliberately does not dispose what it did not create.
+    _usage.dispose();
+    super.dispose();
+  }
+
+  /// The dial spoke: raise the window and run the palette on those words.
+  ///
+  /// The raise is not a nicety. The person is looking at a dial, not at this screen, and the palette may
+  /// have a question for them — a route this window is not sure enough about to send in silence. Behind
+  /// another app, that question is never asked and the spoken sentence dies on a deadline.
+  Future<void> _openSpokenTask(SpokenTaskRequest request) async {
+    final spoken = SpokenTask(
+      voiceId: request.voiceId,
+      text: request.text,
+      cmd: request.cmd,
+      report: (voiceId, state, agentId) => widget.notifier.reportVoiceRoute(
+        request.machineId,
+        voiceId,
+        state,
+        agentId,
+      ),
+    );
+    // Busy: answer immediately rather than let the daemon hold the dial's overlay open for a minute
+    // waiting on a palette this window is never going to show.
+    if (_spokenPaletteOpen || !mounted) {
+      spoken.cancelled();
+      return;
+    }
+    _spokenPaletteOpen = true;
+    try {
+      await revealWindow();
+      if (!mounted) {
+        spoken.cancelled();
+        return;
+      }
+      await showTaskPalette(context, widget.notifier, spoken: spoken);
+    } finally {
+      _spokenPaletteOpen = false;
+      // Belt: showTaskPalette answers on every exit of its own, and this is a no-op after any of them.
+      spoken.cancelled();
+    }
+  }
 
   /// Pops open the link popup for whichever machine was most recently SELECTED (not
   /// `activeMachineState`, which prefers whatever pane currently has a terminal focused — clicking
