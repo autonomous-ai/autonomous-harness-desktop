@@ -67,6 +67,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   LocalCodexProfile? _codexProfile;
   bool _codexProfilesBusy = true;
   bool _bypassPermission = false;
+
+  /// Whether the fold is open. Closed on every open of the dialog, deliberately:
+  /// it is shut for the case it exists to serve, and a drawer that remembers
+  /// being open is a drawer that is open for somebody who never asked.
+  bool _advancedOpen = false;
   bool _submitting = false;
 
   @override
@@ -138,15 +143,10 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     return entry != null && !entry.installed && entry.installable;
   }
 
-  /// The engine will have to be installed before it can run.
-  bool get _willInstall => _willInstallEngine(_engine);
-
-  /// The machine was ASKED which engines it has, and could not answer.
-  ///
-  /// Distinct from the probe still being out, which is the ordinary first
-  /// second of this dialog and says nothing worth printing. This one is
-  /// settled, and it is what stands between the panel and every claim below:
-  /// a remote box on an older CLI does not know `engines_probe` — and does not
+  /// The system panel is modal and slow enough to notice. Without this the
+  /// button stays live and a second click stacks a second panel behind the
+  /// first — on macOS that leaves one the user cannot reach until they dismiss
+  /// the one on top.
   /// refuse it either, it simply never replies, so this arrives 30s later —
   /// and until it is rendered the panel says "Ready to launch" over an engine
   /// nobody checked for, which the create then fails on at the far end.
@@ -160,15 +160,29 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   /// example, an explicit ENGINE_PATH override points at a missing file, or an
   /// older CLI has no recipe. Stated rather than silently offered, because the
   /// create WILL fail and the person needs to fix that machine first.
-  bool get _missingAndUnfixable {
-    final entry = _availability(_engine);
-    return entry != null && !entry.installed && !entry.installable;
+
+  /// What the fold says about itself while it is shut.
+  ///
+  /// Two facts in the order they matter: which Codex home, and whether the
+  /// prompts are on. It is the ONLY thing on screen reporting either once the
+  /// drawer is closed, which is why it is built here rather than left to a
+  /// string in the widget — the two have to stay in step.
+  String _advancedState() {
+    // THE PROFILE ONLY. It also carried "prompts on" / "prompts OFF", and that
+    // was cut on the owner's call for the reason that decides most copy here:
+    // it did not say what it meant. "Prompts" names a thing the sentence inside
+    // the fold explains and the row outside it does not, so the row was asking
+    // people to already know.
+    if (_engine != 'codex') return '';
+    return _codexProfile?.label ?? 'default profile';
   }
 
-  /// The system panel is modal and slow enough to notice. Without this the
-  /// button stays live and a second click stacks a second panel behind the
-  /// first — on macOS that leaves one the user cannot reach until they dismiss
-  /// the one on top.
+  /// This engine is absent and Harness would install it before launching.
+  bool get _willInstall {
+    final entry = _availability(_engine);
+    return entry != null && !entry.installed && entry.installable;
+  }
+
   bool _picking = false;
   bool _folderHovered = false;
   bool _bypassHovered = false;
@@ -287,11 +301,12 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         _folder != null && !_submitting && !_waitingForCodexProfile;
 
     return AlertDialog(
-      title: Text('New agent on $_machineName'),
+      // JUST "New agent". The machine used to be named here, and it was telling
+      // somebody what they had already done: this dialog is opened FROM a
+      // machine — its row, its `+`, its empty pane — so there is no other one it
+      // could be for.
+      title: const Text('New agent'),
       titleTextStyle: Theme.of(context).textTheme.titleMedium,
-      // Scrollable because the content grows: the preflight note, the
-      // permissions block and an error line can all be present at once, and a
-      // short window would otherwise clip the actions.
       content: SizedBox(
         width: _dialogWidth,
         child: SingleChildScrollView(
@@ -299,47 +314,23 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final choices = AbsorbPointer(
-                    absorbing: _submitting,
-                    child: _choices(bypassFlag),
-                  );
-                  final summary = _NewAgentSummary(
-                    engine: _engine,
-                    folder: _folder,
-                    machineName: _machineName,
-                    machineIsThisComputer: _machineIsThisComputer,
-                    bypassFlag: _bypassPermission ? bypassFlag : null,
-                    installCommand: _willInstall
-                        ? _availability(_engine)?.installCommand
-                        : null,
-                    missingWithoutRecipe: _missingAndUnfixable,
-                    checkFailed: _engineCheckFailed,
-                    codexProfile: _engine == 'codex' ? _codexProfile : null,
-                  );
-                  // Below this the two columns would each be too narrow to hold
-                  // a path, so the summary goes back on top of the choices
-                  // instead of beside them.
-                  if (constraints.maxWidth < _stackBelow) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        summary,
-                        const SizedBox(height: _gapField),
-                        choices,
-                      ],
-                    );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: choices),
-                      const SizedBox(width: _gapColumns),
-                      SizedBox(width: _summaryWidth, child: summary),
-                    ],
-                  );
-                },
+              // ONE COLUMN, and no summary card beside it.
+              //
+              // The card held three facts and every one of them was already on
+              // screen: the folder a field above it, the machine in the title,
+              // and the command a restatement of the engine that had just been
+              // picked. Only the bypass FLAG was its own — and that has moved to
+              // the Advanced row, which is the one thing still reporting what is
+              // folded away.
+              //
+              // Dropping it takes the dialog from 712px to 520. The old width
+              // was not chosen for the content: it was measured against
+              // `--dangerously-bypass-approvals-and-sandbox`, so the rarest
+              // thing on the screen was setting the size of the window for
+              // everybody who never turns it on.
+              AbsorbPointer(
+                absorbing: _submitting,
+                child: _choices(bypassFlag),
               ),
               if (_error != null) ...[
                 const SizedBox(height: _gapBlock),
@@ -417,36 +408,43 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
         ),
         // Unconditional now: Codex here is always on its own login, so the
         // profile it runs under is always a live question.
-        if (_engine == 'codex') ...[
-          const SizedBox(height: _gapField),
-          if (_availability('codex')?.supportsCodexHome == true)
-            CodexProfileField(
-              notifier: widget.notifier,
-              machineId: widget.machineId,
-              machineIsThisComputer: _machineIsThisComputer,
-              value: _codexProfile,
-              observedPaths: {
-                for (final agent
-                    in widget.notifier.stateOf(widget.machineId)!.agents)
-                  if (agent.engine == 'codex' && agent.codexHome != null)
-                    agent.codexHome!,
-              },
-              onChanged: (profile) => setState(() => _codexProfile = profile),
-              onBusyChanged: (busy) {
-                if (_codexProfilesBusy != busy) {
-                  setState(() => _codexProfilesBusy = busy);
-                }
-              },
-            )
-          else
-            Text(
-              _availability('codex') == null
-                  ? _engineCheckFailed
-                        ? 'Could not check Codex profiles. Reopen this dialog to retry.'
-                        : 'Checking whether this computer supports Codex profiles…'
-                  : 'Update Harness CLI to choose a local Codex profile.',
-              style: Theme.of(context).textTheme.bodySmall,
+        // WHAT THE SUMMARY'S HEADING USED TO SAY, minus the half that had
+        // somewhere else to live.
+        //
+        // Four states were printed on that card. Two of them already have a
+        // home: "not installed" is a note on the engine's own row, and "pick a
+        // folder" is the Create button being disabled. These two had nowhere
+        // else, and losing them would have made a machine that Harness has not
+        // managed to reach look exactly like one it has.
+        if (_willInstall || _engineCheckFailed) ...[
+          const SizedBox(height: 6),
+          Text(
+            _willInstall
+                ? 'Not here yet — Harness will install '
+                      '${engineIdentity(_engine).label} first.'
+                // Faint and phrased as an absence, not a fault: nothing is
+                // wrong with the launch, we simply could not look, and painting
+                // that as a problem would cry wolf on every older remote box.
+                //
+                // THE WHOLE PARAGRAPH, not a headline. It was tempting to leave
+                // this at "Could not check this machine" — the dialog is being
+                // made smaller, after all — but the sentence that got cut was
+                // the one naming the way out. This line only appears when the
+                // check actually failed, so its length costs nothing on the
+                // launches that work.
+                : '$_machineName did not say which engines it has, so Harness '
+                      'could not check for '
+                      '${engineIdentity(_engine).label} before offering to '
+                      'launch it. The create will still run — if the engine is '
+                      'missing there, that will only show up when it fails. '
+                      'Updating the Harness CLI on $_machineName lets this be '
+                      'checked first.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _willInstall
+                  ? grid.AppPalette.accentOnSurface
+                  : grid.AppPalette.textFaint,
             ),
+          ),
         ],
         const SizedBox(height: _gapField),
         const FieldLabel('Working folder'),
@@ -459,24 +457,72 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
           onHover: (value) => setState(() => _folderHovered = value),
           onPressed: _browse,
         ),
-        const SizedBox(height: _gapField),
-        const FieldLabel('Permissions'),
-        if (bypassFlag != null)
-          _BypassCheck(
-            value: _bypassPermission,
-            flag: bypassFlag,
-            hovered: _bypassHovered,
-            onHover: (value) => setState(() => _bypassHovered = value),
-            onChanged: (value) => setState(() => _bypassPermission = value),
-          )
-        else
-          // Not silence: an engine with no checkbox looks identical to one whose
-          // checkbox the user simply missed.
-          Text(
-            '${engineIdentity(_engine).label} has no permission flag this app '
-            'can pass — it asks in the terminal.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+        // THE FOLD. What is behind it is what most people never touch: a Codex
+        // home to run under, and the flag that turns the approvals off. Leaving
+        // them in the main column made this a four-question dialog to do a
+        // two-question job.
+        //
+        // The row REPORTS ITS OWN STATE on the right, and that is what makes
+        // folding them away safe rather than merely tidy. A drawer that hides
+        // what it is set to is a drawer people open every time to check.
+        const SizedBox(height: _gapBlock),
+        _Advanced(
+          open: _advancedOpen,
+          state: _advancedState(),
+          onToggle: () => setState(() => _advancedOpen = !_advancedOpen),
+          children: [
+            if (_engine == 'codex') ...[
+              if (_availability('codex')?.supportsCodexHome == true)
+                CodexProfileField(
+                  notifier: widget.notifier,
+                  machineId: widget.machineId,
+                  machineIsThisComputer: _machineIsThisComputer,
+                  value: _codexProfile,
+                  observedPaths: {
+                    for (final agent
+                        in widget.notifier.stateOf(widget.machineId)!.agents)
+                      if (agent.engine == 'codex' && agent.codexHome != null)
+                        agent.codexHome!,
+                  },
+                  onChanged: (profile) =>
+                      setState(() => _codexProfile = profile),
+                  onBusyChanged: (busy) {
+                    if (_codexProfilesBusy != busy) {
+                      setState(() => _codexProfilesBusy = busy);
+                    }
+                  },
+                )
+              else
+                Text(
+                  _availability('codex') == null
+                      ? _engineCheckFailed
+                            ? 'Could not check Codex profiles. Reopen this dialog to retry.'
+                            : 'Checking whether this computer supports Codex profiles…'
+                      : 'Update Harness CLI to choose a local Codex profile.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
+            // No 'Permissions' heading. It sat over a single checkbox whose own
+            // label already says what it does, so it was a section title for a
+            // section of one.
+            if (bypassFlag != null)
+              _BypassCheck(
+                value: _bypassPermission,
+                flag: bypassFlag,
+                hovered: _bypassHovered,
+                onHover: (value) => setState(() => _bypassHovered = value),
+                onChanged: (value) => setState(() => _bypassPermission = value),
+              )
+            else
+              // Not silence: an engine with no checkbox looks identical to one whose
+              // checkbox the user simply missed.
+              Text(
+                '${engineIdentity(_engine).label} has no permission flag this app '
+                'can pass — it asks in the terminal.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -491,32 +537,15 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
 /// `--dangerously-bypass-approvals-and-sandbox`, a hostname, and a path. At an
 /// even split the longest flag broke across two lines mid-word.
 ///
-/// 352 is measured, not chosen: the longest flag any engine here passes is
-/// `--dangerously-bypass-approvals-and-sandbox` (Codex, 42 characters), which at
-/// the 12pt mono this card sets needs ~318px once its two-space continuation
-/// indent is counted — plus the card's 12px padding on each side.
-const double _dialogWidth = 712;
-const double _summaryWidth = 352;
-
-/// The width a string inside the summary actually gets, once the card's own
-/// padding is taken off. Exposed so the test that guards the longest flag
-/// measures against the real number rather than a copy of it.
-@visibleForTesting
-const double summaryContentWidth = _summaryWidth - _summaryPad * 2;
-
-const double _summaryPad = 12;
-
-/// The advance of one character at the 12pt SF Mono the summary sets — the face
-/// is 0.6em wide, like every monospaced face in this family.
+/// ⚠️ THAT REASONING IS GONE WITH THE SUMMARY, and it is worth keeping the
+/// record of it: 712 was 360 for the controls plus 352 for a card, and the 352
+/// was measured against `--dangerously-bypass-approvals-and-sandbox` — 42
+/// characters of a flag most people never turn on. The width of the dialog was
+/// being set by the rarest thing that could appear in it.
 ///
-/// Used to decide whether a command fits on one line. Measured arithmetically
-/// rather than with a `TextPainter`: this runs on every rebuild, and a layout
-/// pass to answer a question this cheap is a poor trade.
-const double _monoAdvance = 12 * 0.6;
-
-/// Whether `\$ <engine> <flag>` still fits the summary's one line.
-bool _fitsOneLine(String engine, String flag) =>
-    ('\$ $engine $flag'.length) * _monoAdvance <= summaryContentWidth;
+/// 520 is what two fields and a fold need. A path still ellipsizes from its
+/// HEAD (see `_ellipsizeHead`), which is what keeps the leaf readable.
+const double _dialogWidth = 520;
 
 /// A path shortened from its HEAD, so the leaf survives.
 ///
@@ -534,6 +563,13 @@ bool _fitsOneLine(String engine, String flag) =>
 /// while a dropped segment reads as a path someone abbreviated. Windows paths
 /// come back untouched — they are separated by `\`, and a wrong guess about the
 /// separator would mangle the string rather than shorten it.
+/// The advance of one character at the 12pt mono the path control sets — the
+/// face is 0.6em wide, like every monospaced face in this family.
+///
+/// Arithmetic rather than a `TextPainter`: this runs on every rebuild, and a
+/// layout pass to answer a question this cheap is a poor trade.
+const double _monoAdvance = 12 * 0.6;
+
 String _ellipsizeHead(String path, double maxWidth) {
   final fits = path.length * _monoAdvance <= maxWidth;
   if (fits || !path.contains('/')) return path;
@@ -546,10 +582,6 @@ String _ellipsizeHead(String path, double maxWidth) {
   }
   return '…/${segments.last}';
 }
-
-/// Below this the columns stack. Derived from the summary's own width plus the
-/// gap and the narrowest a select field stays usable at.
-const double _stackBelow = _summaryWidth + _gapColumns + 190;
 
 /// A path or a flag, in the face the user chose for code.
 ///
@@ -569,10 +601,6 @@ TextStyle _mono({required Color color}) => TextStyle(
   color: color,
 );
 
-/// Wide enough for the longest key the summary states ("Machine"), so the
-/// values line up on one left edge.
-const double _factKeyWidth = 62;
-
 // The dialog's spacing scale. Four steps, named, rather than the run of
 // 3/6/7/8/10/12/14/16/18 this file grew — a column whose gaps are all slightly
 // different is what "the padding feels off" actually is.
@@ -589,15 +617,119 @@ const double _gapBlock = 12;
 /// One field and the next, down the choices column.
 const double _gapField = 16;
 
-/// The choices column and the summary beside it.
-const double _gapColumns = 18;
-
 /// The folder control: one target, not a text box with a button beside it.
 ///
 /// The old shape put a read-only `InputDecorator` next to a `Browse…` button,
 /// which read as a field you could type in and as the loudest control in the
 /// dialog. Here the whole row is the button — the path is what it displays, and
 /// the trailing word says what clicking does.
+/// The fold that holds what most people never touch.
+///
+/// A ROW THAT REPORTS ITSELF. Everything about this is ordinary — a twisty, a
+/// label, some children — except the state printed on the right, and that is the
+/// part doing the work. Two settings were moved out of sight here; a drawer that
+/// hides what it is set to is one people open every time to check, which costs
+/// more than leaving the controls where they were.
+///
+/// AMBER, NOT RED, when the prompts are off. Red on this desktop means destroy,
+/// and it was tried: a red "Create without prompts" button read as though the
+/// button itself were dangerous rather than the setting behind it. Amber is
+/// already what this app gives that flag wherever else it appears.
+class _Advanced extends StatelessWidget {
+  const _Advanced({
+    required this.open,
+    required this.state,
+    required this.onToggle,
+    required this.children,
+  });
+
+  final bool open;
+
+  /// What is set, in a few words — see `_advancedState`. Empty says nothing.
+  final String state;
+
+  final VoidCallback onToggle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Divider(height: 1, color: grid.AppGlass.hair),
+        InkWell(
+          key: const Key('new-agent-advanced'),
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            child: Row(
+              children: [
+                // Rotated rather than swapped for a second glyph: one shape
+                // turning reads as the same control in two positions, which is
+                // what it is.
+                AnimatedRotation(
+                  turns: open ? 0 : -0.25,
+                  duration: const Duration(milliseconds: 120),
+                  child: Icon(
+                    Icons.expand_more,
+                    size: 16,
+                    color: grid.AppPalette.textFaint,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Advanced',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: grid.AppPalette.textSecondary,
+                  ),
+                ),
+                const Spacer(),
+                Flexible(
+                  child: Text(
+                    key: const Key('new-agent-advanced-state'),
+                    state,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: _mono(color: grid.AppPalette.textFaint)
+                        .copyWith(fontSize: 11.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // HIDDEN, NOT UNMOUNTED, and that is not a preference — it is what the
+        // dialog needs to work at all.
+        //
+        // It was `if (open)` first, on the reasoning that a shut drawer should
+        // not pay for a question nobody asked. The Codex profile field is the
+        // thing that asks the machine for its profiles, and TWO things downstream
+        // depend on its having asked: it clears `_codexProfilesBusy`, which gates
+        // the Create button, and it auto-selects when there is exactly one
+        // profile. Unmounted, neither ever happens — so Create stayed disabled
+        // forever on Codex, with nothing on screen saying why.
+        //
+        // Offstage builds and runs it, and merely declines to paint it.
+        Offstage(
+          offstage: !open,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: children,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _FolderControl extends StatelessWidget {
   const _FolderControl({
     required this.folder,
@@ -770,7 +902,11 @@ class _BypassCheck extends StatelessWidget {
           // Bled out to the left so the row's fill lines up with the fields
           // above it, and the text still starts on their left edge once the
           // box and its gap are counted.
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          // NO SIDE PADDING. Ten pixels of it pushed the box in from the
+          // margin every other control on this dialog starts at, so the one row
+          // that is not a labelled field was also the one row that did not line
+          // up with them. The hover fill simply spans the row instead.
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: hovered ? grid.AppSurface.hoverFill : Colors.transparent,
             borderRadius: BorderRadius.circular(grid.AppControl.radius),
@@ -824,319 +960,6 @@ class _BypassCheck extends StatelessWidget {
 ///
 /// Read-only on purpose, and shaped so: it takes the recessed inset fill, never
 /// a field's, so nothing here invites a click.
-class _NewAgentSummary extends StatelessWidget {
-  const _NewAgentSummary({
-    required this.engine,
-    required this.folder,
-    required this.machineName,
-    required this.machineIsThisComputer,
-    required this.bypassFlag,
-    this.installCommand,
-    this.missingWithoutRecipe = false,
-    this.checkFailed = false,
-    this.codexProfile,
-  });
-
-  final String engine;
-  final LocalCodexProfile? codexProfile;
-  final String? folder;
-  final String machineName;
-  final bool machineIsThisComputer;
-
-  /// Non-null only when the box is actually ticked — this states what WILL run,
-  /// not what could.
-  final String? bypassFlag;
-
-  /// The line this machine will run before the engine, when the engine is not
-  /// there yet. Named in full rather than summarised: installing software on a
-  /// computer — and this reaches remote ones — is not something to do behind a
-  /// button that says "Create agent".
-  final String? installCommand;
-
-  /// The engine is absent and Harness has no install line for it. Distinct from
-  /// [installCommand] being null, which is also the state while the machine has
-  /// not answered — this one is a settled "we know, and we cannot fix it".
-  final bool missingWithoutRecipe;
-
-  /// The machine could not say which engines it has. The opposite settled
-  /// answer to [missingWithoutRecipe]: not "we know and cannot fix it" but
-  /// "we do not know", which is the one thing this panel may not round off to
-  /// "Ready to launch".
-  final bool checkFailed;
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    final theme = Theme.of(context);
-    final warn = grid.AppPalette.warn;
-    final flag = bypassFlag;
-    final install = installCommand;
-    final ready = folder != null;
-
-    final Color dot;
-    final String heading;
-    if (missingWithoutRecipe && ready) {
-      // The app is not the thing saying no. The create will reach the machine
-      // and fail there, and the only useful thing to say is which half is
-      // missing.
-      dot = warn;
-      heading = 'Not installed on this machine';
-    } else if (install != null && ready) {
-      dot = grid.AppPalette.accentOnSurface;
-      heading = 'Will install, then launch';
-    } else if (checkFailed && ready) {
-      // Faint, not the accent: the accent dot is a claim, and there is nothing
-      // here to claim. Not the warning colour either — nothing is wrong with
-      // the launch, we simply could not look, and painting an absence of
-      // information as a problem would cry wolf on every older remote box.
-      dot = grid.AppPalette.textFaint;
-      heading = 'Could not check this machine';
-    } else if (ready) {
-      dot = grid.AppPalette.accentOnSurface;
-      heading = 'Ready to launch';
-    } else {
-      dot = grid.AppPalette.textFaint;
-      heading = 'Pick a folder to continue';
-    }
-
-    return AnimatedContainer(
-      duration: grid.AppMotion.swap,
-      curve: grid.AppMotion.curve,
-      padding: const EdgeInsets.all(_summaryPad),
-      decoration: BoxDecoration(
-        color: grid.AppSurface.recess,
-        borderRadius: BorderRadius.circular(grid.AppControl.radius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              // Sized and animated like the status dots elsewhere in the app:
-              // the colour is what carries the state, so it moves on
-              // [AppMotion.swap] rather than snapping.
-              AnimatedContainer(
-                duration: grid.AppMotion.swap,
-                curve: grid.AppMotion.curve,
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  heading,
-                  // Sentence case at [labelSmall]. The tracked 10.5pt caps this
-                  // replaced are the web-dashboard idiom `FieldLabel` was made
-                  // to retire — see its note; a heading inside the app should
-                  // not wear a costume the captions above it just took off.
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: grid.AppPalette.textSecondary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: _gapBlock),
-          // The command, so a flag that disables an engine's prompts is read in
-          // the shape it will be typed — and in the warning colour, which is the
-          // only place accent-vs-warning carries meaning in this dialog.
-          //
-          // One line where it fits — which is three of the four engines that take
-          // a flag at all — and a wrap only for the one that cannot: Codex's
-          // `--dangerously-bypass-approvals-and-sandbox` is 42 characters and
-          // overruns this column at any width this dialog can reasonably take.
-          // Breaking the other three to keep the long one company would leave
-          // most of the card's width empty to no purpose.
-          //
-          // The break is a real newline the flag carries, not a wrap: a wrap
-          // would land mid-word, on a `-` inside the flag, and split the one
-          // string here that has to be read whole.
-          //
-          // No `\` continuation, deliberately. This is not a command anyone can
-          // copy — the CLI builds the real one, with a working directory and a
-          // tmux session this string never shows — so a shell's line-continuation
-          // mark would dress it up as something you could paste and run. The
-          // indent alone carries the same "this belongs to the line above".
-          Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: '\$ ',
-                  style: TextStyle(color: grid.AppPalette.textFaint),
-                ),
-                TextSpan(text: engine),
-                if (flag != null)
-                  TextSpan(
-                    text: _fitsOneLine(engine, flag) ? ' $flag' : '\n  $flag',
-                    style: TextStyle(color: warn),
-                  ),
-              ],
-            ),
-            style: _mono(color: grid.AppPalette.textPrimary)
-                .copyWith(height: 1.5),
-          ),
-          const SizedBox(height: _gapBlock),
-          _fact(
-            context,
-            'Folder',
-            folder ?? 'not chosen',
-            faint: folder == null,
-          ),
-          _fact(
-            context,
-            'Machine',
-            machineName,
-            // Its own line, not a "· " appended to the name. A hostname like
-            // `MacBooks-MacBook-Pro.local` fills this column on its own, and
-            // the qualifier then wrapped at a hyphen mid-name — a deliberate
-            // second line reads as structure where an accidental one reads as
-            // a bug.
-            note: machineIsThisComputer ? 'this computer' : 'remote',
-          ),
-          // Which login a Codex agent starts on, when one other than the
-          // machine's default was chosen — restated here with the rest of what
-          // this launch is.
-          if (codexProfile case final profile?)
-            _fact(context, 'Profile', profile.label, note: profile.path),
-          if (missingWithoutRecipe) ...[
-            const SizedBox(height: _gapBlock),
-            Container(
-              padding: const EdgeInsets.only(top: _gapBlock),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: warn.withValues(alpha: 0.28)),
-                ),
-              ),
-              child: Text(
-                '${engineIdentity(engine).label} is not on $machineName, and '
-                'Harness has no install line for it. Install it there first, '
-                'or choose another engine.',
-                style: theme.textTheme.bodySmall?.copyWith(color: warn),
-              ),
-            ),
-          ],
-          if (checkFailed) ...[
-            const SizedBox(height: _gapBlock),
-            Container(
-              padding: const EdgeInsets.only(top: _gapBlock),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: grid.AppPalette.textFaint.withValues(alpha: 0.28),
-                  ),
-                ),
-              ),
-              // Faint like the rule above it, not the warning colour the two
-              // blocks before this wear. Those name something that WILL go
-              // wrong; this names something nobody could find out. Reading the
-              // same as a real refusal would teach the reader to skip both.
-              child: Text(
-                '$machineName did not say which engines it has, so Harness '
-                'could not check for '
-                '${engineIdentity(engine).label} before offering to launch it. '
-                'The create will still run — if the engine is missing there, '
-                'that will only show up when it fails. Updating the Harness '
-                'CLI on $machineName lets this be checked first.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: grid.AppPalette.textSecondary,
-                ),
-              ),
-            ),
-          ],
-          if (install != null) ...[
-            const SizedBox(height: _gapBlock),
-            Container(
-              padding: const EdgeInsets.only(top: _gapBlock),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: grid.AppPalette.textFaint.withValues(alpha: 0.28),
-                  ),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${engineIdentity(engine).label} is not on $machineName '
-                    'yet. The terminal runs this first:',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: grid.AppPalette.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: _gapTight),
-                  // Verbatim, in the engine's own type. A summarised or
-                  // prettified command is one the reader cannot check against
-                  // what they would have typed, which defeats showing it.
-                  SelectableText(
-                    install,
-                    style: _mono(color: grid.AppPalette.textPrimary)
-                        .copyWith(height: 1.4),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _fact(
-    BuildContext context,
-    String key,
-    String value, {
-    String? note,
-    bool faint = false,
-  }) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: _gapTight + 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: _factKeyWidth,
-            child: Text(
-              key,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: grid.AppPalette.textFaint,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  value,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: faint
-                        ? grid.AppPalette.textFaint
-                        : grid.AppPalette.textPrimary,
-                  ),
-                ),
-                if (note != null)
-                  Text(
-                    note,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: grid.AppPalette.textFaint,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// "Not here yet — Harness will fetch it first."
 ///
 /// A download arrow rather than the words, because this state recurs down the

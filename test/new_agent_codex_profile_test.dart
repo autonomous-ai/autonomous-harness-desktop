@@ -18,6 +18,19 @@ class _Folders extends FileSelectorPlatform {
   }) async => '/work';
 }
 
+/// The profile the dialog says it will use, read off the Advanced row.
+///
+/// That row is the only place reporting it now: the summary card that used to
+/// print a `Profile` fact is gone with the rest of the second column, and the
+/// row carries the same answer by LABEL rather than by full path — which is what
+/// a person reading a folded drawer actually needs.
+void expectProfile(WidgetTester tester, String label) {
+  final state = tester.widget<Text>(
+    find.byKey(const Key('new-agent-advanced-state')),
+  );
+  expect(state.data, contains(label), reason: 'Advanced should name $label');
+}
+
 String _labelFor(String path) =>
     path.split('/').where((p) => p.isNotEmpty).last;
 
@@ -153,6 +166,21 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Codex').last);
     await tester.pumpAndSettle();
+    // The profile lives behind the fold now: it and the bypass flag are the two
+    // settings most people never touch, so they are off the path of somebody who
+    // wants neither. Every test below is about the profile, so every one of them
+    // opens it.
+    await tester.tap(find.byKey(const Key('new-agent-advanced')));
+    await tester.pumpAndSettle();
+    for (final t in [
+      'Permissions',
+      'Codex profile',
+      'Link a profile folder…',
+      '/custom/work-login',
+      'Checking whether this computer supports Codex profiles…',
+    ])
+      // ignore: avoid_print
+      print('PROBE $t -> ' + tester.widgetList(find.text(t)).length.toString());
     return n;
   }
 
@@ -192,7 +220,7 @@ void main() {
       findsNothing,
     );
     expect(find.text('Codex profile'), findsNothing);
-    expect(find.text('/custom/work-login'), findsOneWidget);
+    expectProfile(tester, 'work-login');
     expect(find.text('Link a profile folder…'), findsOneWidget);
     await tester.tap(find.text('Browse…'));
     await tester.pumpAndSettle();
@@ -214,7 +242,7 @@ void main() {
         find.byKey(const Key('new-agent-codex-profile-field')),
         findsNothing,
       );
-      expect(find.text('/custom/work-login'), findsOneWidget);
+      expectProfile(tester, 'work-login');
       expect(find.text('Link a profile folder…'), findsOneWidget);
     },
   );
@@ -237,7 +265,7 @@ void main() {
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsOneWidget,
     );
-    expect(find.text('/accounts/codex1'), findsOneWidget);
+    expectProfile(tester, 'codex1');
     await selectSecond(tester);
     notifier.paths.remove('/accounts/codex1');
     await tester.tap(find.byTooltip('Refresh profiles'));
@@ -246,7 +274,7 @@ void main() {
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsNothing,
     );
-    expect(find.text('/accounts/codex2'), findsOneWidget);
+    expectProfile(tester, 'codex2');
   });
 
   testWidgets('creation waits for discovery to select the single account', (
@@ -281,10 +309,10 @@ void main() {
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsNothing,
     );
-    expect(find.text('/accounts/codex2'), findsOneWidget);
+    expectProfile(tester, 'codex2');
     await tester.tap(find.text('Use codex1'));
     await tester.pumpAndSettle();
-    expect(find.text('/accounts/codex1'), findsOneWidget);
+    expectProfile(tester, 'codex1');
     await tester.tap(find.text('Browse…'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
@@ -308,7 +336,12 @@ void main() {
       find.byKey(const Key('new-agent-codex-profile-field')),
       findsNothing,
     );
-    expect(find.text('/accounts/codex1'), findsNothing);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('new-agent-advanced-state')))
+          .data,
+      isNot(contains('codex1')),
+    );
     await tester.tap(find.text('Browse…'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
@@ -321,7 +354,7 @@ void main() {
     (tester) async {
       final notifier = await open(tester);
       await selectSecond(tester);
-      expect(find.text('/accounts/codex2'), findsOneWidget);
+      expectProfile(tester, 'codex2');
       await tester.tap(find.text('Browse…'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
@@ -365,7 +398,7 @@ void main() {
       expect(find.text('private-account'), findsNothing);
       await tester.tap(find.text('work-login'));
       await tester.pumpAndSettle();
-      expect(find.text('/unusual/location/work-login'), findsOneWidget);
+      expectProfile(tester, 'work-login');
     },
   );
 
@@ -377,12 +410,12 @@ void main() {
       notifier.extraPaths.add('/elsewhere/new-profile');
       await tester.tap(find.byTooltip('Refresh profiles'));
       await tester.pumpAndSettle();
-      expect(find.text('/accounts/codex2'), findsOneWidget);
+      expectProfile(tester, 'codex2');
       await tester.tap(find.byKey(const Key('new-agent-codex-profile-field')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('new-profile'));
       await tester.pumpAndSettle();
-      expect(find.text('/elsewhere/new-profile'), findsOneWidget);
+      expectProfile(tester, 'new-profile');
     },
   );
 

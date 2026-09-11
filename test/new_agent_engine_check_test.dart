@@ -79,12 +79,13 @@ void main() {
       (engines) => engines.error = 'This machine could not report its engines',
     );
 
+    // "Ready to launch" is gone with the summary card, and so is the promise it
+    // was making. What survives is the half that could not be said anywhere
+    // else: that this machine was never reached.
     expect(
-      find.text('Ready to launch'),
-      findsNothing,
-      reason: 'the panel may not promise a launch it could not check',
+      find.textContaining('did not say which engines it has'),
+      findsOneWidget,
     );
-    expect(find.text('Could not check this machine'), findsOneWidget);
     // The way out is named, and so is what happens if it is ignored — the
     // create still runs, and a missing engine surfaces only as its failure.
     expect(
@@ -111,9 +112,12 @@ void main() {
       ]),
     );
 
-    expect(find.text('Ready to launch'), findsOneWidget);
+    // A machine that answered says nothing at all now. The old card printed
+    // "Ready to launch" over every healthy launch, which is a line that tells
+    // somebody the default is the default; the line below only appears when
+    // there is something to say.
     expect(
-      find.text('Could not check this machine'),
+      find.textContaining('did not say which engines it has'),
       findsNothing,
       reason: 'a probe that landed is not a probe that failed',
     );
