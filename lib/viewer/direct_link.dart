@@ -54,8 +54,12 @@ class DirectLink implements PeerLinkClient {
           fingerprint: fingerprint,
         );
       case PasswordLinkFailed(:final code, :final retryAt):
+        // Named the way the CLI's `--name` names it: the id is all a stranger to this rail sees.
+        final name = displayName == null || displayName.isEmpty
+            ? machineId
+            : displayName;
         return CliLinkConnectResult(
-          error: humanizeLinkError(code, machineId, retryAt: retryAt),
+          error: humanizeLinkError(code, name, retryAt: retryAt),
         );
     }
   }
