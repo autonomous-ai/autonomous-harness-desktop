@@ -31,6 +31,7 @@ class _FakeCliLink implements CliLink {
     String machineId,
     String password, {
     void Function(String stage)? onProgress,
+    String? displayName,
   }) async => const CliLinkConnectResult();
 
   @override

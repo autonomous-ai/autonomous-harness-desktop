@@ -139,14 +139,23 @@ class CliLink {
   /// the password-authenticated replacement for the old token `import`. [onProgress], if given,
   /// is called with each stage name the CLI reports (`connecting`, `deriving_key`, `exchanging`,
   /// `verifying`) as the handshake proceeds; best-effort UI feedback only, never required for
-  /// correctness.
+  /// correctness. [displayName], when given, is how the CLI's error messages name the machine —
+  /// otherwise they show the raw [machineId], which is all a terminal user would have.
   Future<CliLinkConnectResult> connect(
     String machineId,
     String password, {
     void Function(String stage)? onProgress,
+    String? displayName,
   }) async {
     final invocation = await _runStdinNdjson(
-      ['link', 'connect', machineId, '--stdin', '--json'],
+      [
+        'link',
+        'connect',
+        machineId,
+        '--stdin',
+        '--json',
+        if (displayName != null && displayName.isNotEmpty) '--name=$displayName',
+      ],
       password,
       label: 'harness link connect',
       onLine: (json) {
