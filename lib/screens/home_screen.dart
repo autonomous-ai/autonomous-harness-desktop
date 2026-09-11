@@ -15,8 +15,6 @@ import '../widgets/machine_rail_mini.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_section.dart';
 import '../shortcuts/app_shortcuts.dart';
-import '../analytics/analytics.dart';
-import '../analytics/analytics_events.dart';
 import '../widgets/agent_switcher.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/task_palette.dart';
@@ -215,17 +213,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _maybeShowLinkDialog(notifier);
         return CallbackShortcuts(
           bindings: buildShortcutBindings(
-            // Reported from the one place every shortcut is wired, so a key
-            // bound later is measured the day it is bound. `source` separates
-            // hjkl from the arrows, which is the only way to learn whether
-            // binding both was worth it.
-            onUsed: (action, source) =>
-                analytics.featureUsed(feature: action.name, source: source),
             handlers: {
-              ShortcutAction.toggleRail: () => setState(() {
-                _collapsed = !_collapsed;
-                notifier.railFolded = _collapsed;
-              }),
+              ShortcutAction.toggleRail: () =>
+                  setState(() => _collapsed = !_collapsed),
               ShortcutAction.nextAgent: () => _stepAgent(1),
               ShortcutAction.previousAgent: () => _stepAgent(-1),
               // All four directions read the GEOMETRY now. Left and right used
@@ -345,10 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                         notifier: notifier,
                                         collapsed: _collapsed,
                                         wideWidth: railWidth,
-                                        onCollapse: () => setState(() {
-                                          _collapsed = true;
-                                          notifier.railFolded = true;
-                                        }),
+                                        onCollapse: () =>
+                                            setState(() => _collapsed = true),
                                         onExpand: () =>
                                             setState(() => _collapsed = false),
                                       ),
@@ -395,10 +383,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               bottom: 0,
                               child: _RailReveal(
                                 notifier: notifier,
-                                onExpand: () => setState(() {
-                                  _collapsed = false;
-                                  notifier.railFolded = false;
-                                }),
+                                onExpand: () =>
+                                    setState(() => _collapsed = false),
                               ),
                             ),
                           if (notifier.lastError != null)
