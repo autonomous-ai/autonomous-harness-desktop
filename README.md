@@ -13,7 +13,13 @@ root:
 flutter pub get
 flutter test
 flutter run -d macos   # or: flutter run -d linux
+flutter run -d macos --no-enable-impeller   # on an Intel Mac — see below
 ```
+
+On an **Intel Mac**, always pass `--no-enable-impeller`. Impeller, Flutter's
+default macOS renderer, corrupts on Intel GPUs: the window flashes triangle
+streaks every few seconds. The released Intel build is pinned to Skia for the
+same reason (RELEASE.md, "Two macOS builds"), but a build from source is not.
 
 Useful validation commands:
 

@@ -298,10 +298,15 @@ void main() {
   testWidgets(
     'shows a green icon and an always-visible link button when reachable but not yet linked',
     (tester) async {
-      // A NO_PEER_LINK close is itself proof the daemon answered — this reads
-      // as online, and the fix is one click away on the row itself, not
-      // hidden behind hover or a Link this machine… row nobody expanded to.
+      // The backend says the machine is up; only our own link to it is
+      // missing. That reads as online — our socket bouncing off NO_PEER_LINK
+      // says nothing about the other computer — and the fix is one click away
+      // on the row itself, not hidden behind hover or a Link this machine… row
+      // nobody expanded to.
       final notifier = notifierWithLoadState(AgentLoadStatus.needsLink);
+      notifier.machineStates[machine.machineId]!
+        ..nodeOnline = true
+        ..connectionStatus = ConnectionStatus.disconnected;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -322,6 +327,39 @@ void main() {
       await tester.tap(linkButton);
       await tester.pump();
       expect(notifier.selectedMachineId, machine.machineId);
+      notifier.dispose();
+    },
+  );
+
+  testWidgets(
+    'an unlinked machine of unknown reachability is offered a link but not called online',
+    (tester) async {
+      // NO_PEER_LINK is the local CLI's peer table saying no before anything is
+      // dialled, so with no REST verdict yet there is nothing to paint green —
+      // the machine may well be off. The link is still offered, as
+      // _LinkMachineRow does, because "unknown" is not "off".
+      final notifier = notifierWithLoadState(AgentLoadStatus.needsLink);
+      notifier.machineStates[machine.machineId]!
+        ..nodeOnline = null
+        ..connectionStatus = ConnectionStatus.disconnected;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(width: 320, child: MachineRail(notifier: notifier)),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final machineIcon = tester.widget<Icon>(
+        find.byKey(const ValueKey('machine-connection-icon')),
+      );
+      expect(machineIcon.color, AppPalette.textFaint);
+      expect(find.text('offline'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('machine-link-affordance')),
+        findsOneWidget,
+      );
       notifier.dispose();
     },
   );
@@ -757,6 +795,34 @@ void main() {
     },
   );
 
+  test('a mid-session NO_PEER_LINK marks the open terminal lost without calling the node offline', () async {
+    // The CLI closes with 4404 when the peer revokes trust while terminals
+    // are open. The socket drop that follows must no longer paint the
+    // machine offline (NO_PEER_LINK is a local lookup, not a verdict on the
+    // other computer) — but the tiles still have to know, and what they
+    // showed still has to be recorded for the reattach after relinking.
+    final notifier = notifierWithTree();
+    final state = notifier.machineStates[machine.machineId]!..nodeOnline = true;
+    final terminal = TerminalSession(
+      machineId: machine.machineId,
+      agentId: 'parent',
+      agentName: 'backend-api',
+      engineId: 'codex',
+      send: (_, _) async => true,
+      sendBinary: (_) async => true,
+    )..status = TerminalSessionStatus.controlling;
+    notifier.adoptSessionForTest(terminal);
+
+    notifier.localFailureForTest(machine.machineId, 4404, 'peer revoked trust');
+
+    expect(state.needsLink, isTrue);
+    expect(state.agentLoadStatus, AgentLoadStatus.needsLink);
+    expect(state.nodeOnline, isTrue);
+    expect(state.pendingOfflineAgentId, 'parent');
+    expect(terminal.status, TerminalSessionStatus.error);
+    notifier.dispose();
+  });
+
   test('collapse only changes the tree and does not close active terminal', () {
     final notifier = notifierWithTree();
     final terminal = TerminalSession(
@@ -816,6 +882,7 @@ void main() {
     'shows link-required, loading, and retryable agent error states',
     (tester) async {
       var notifier = notifierWithLoadState(AgentLoadStatus.needsLink);
+      notifier.machineStates[machine.machineId]!.nodeOnline = true;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -829,8 +896,8 @@ void main() {
       expect(find.text('Link this machine…'), findsOneWidget);
       expect(find.text('link required'), findsNothing);
       // The same fact is also on the caption row itself, not just the
-      // expanded tree — reachable-but-unlinked reads as online, with its own
-      // one-click way to fix it right beside the name.
+      // expanded tree — a machine the backend calls up, merely unlinked, reads
+      // as online, with its own one-click way to fix it right beside the name.
       final machineIcon = tester.widget<Icon>(
         find.byKey(const ValueKey('machine-connection-icon')),
       );

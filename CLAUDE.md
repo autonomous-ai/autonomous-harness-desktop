@@ -40,6 +40,7 @@ flutter test                                      # whole unit/widget suite (tes
 flutter test test/terminal_session_test.dart      # one file
 flutter test test/ws_conn_test.dart --plain-name "reconnects"   # one test by name substring
 flutter run -d macos                              # or: flutter run -d linux
+flutter run -d macos --no-enable-impeller         # Intel Mac: Impeller corrupts there (RELEASE.md, "Two macOS builds")
 flutter build macos --debug
 flutter build macos --release
 flutter build linux --release                     # Ubuntu build host only — no cross-compiling

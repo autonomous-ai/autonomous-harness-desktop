@@ -37,6 +37,12 @@ class HarnessFileStore implements LocalKeyValueStore {
   }) {
     final env = environment ?? Platform.environment;
     var home = env['HOME'];
+    // Dart gives an iOS app no environment at all — `Platform.environment` is empty there even
+    // though the process was started with HOME — so it never arrives. The sandbox container it
+    // would have named is the parent of the app's temporary directory, `<container>/tmp`.
+    if ((home == null || home.isEmpty) && Platform.isIOS) {
+      home = Directory.systemTemp.parent.path;
+    }
     if ((home == null || home.isEmpty) && Platform.isWindows) {
       home = env['USERPROFILE'];
       if (home == null || home.isEmpty) {

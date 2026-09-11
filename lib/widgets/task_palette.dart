@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../core/models.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../analytics/analytics.dart';
+import '../analytics/analytics_events.dart';
 import '../state/app_state.dart';
 import 'engine_identity.dart';
 
@@ -272,6 +274,22 @@ class _TaskPaletteState extends State<_TaskPalette> {
 
   @override
   void dispose() {
+    // ABANDONED — a list was offered and nobody was chosen from it.
+    //
+    // Rank -1 rather than leaving the route unreported: a router whose
+    // suggestions get closed is failing in a way that looks, in the `picked`
+    // numbers alone, exactly like a router nobody uses. The two need telling
+    // apart, and this is the only place that can.
+    final offered = _answer;
+    if (offered != null && _committed.isEmpty) {
+      analytics.taskRouted(
+        outcome: 'abandoned',
+        candidates: _choices.length,
+        chosenRank: -1,
+        confidence: offered.confidence,
+        via: offered.via,
+      );
+    }
     _generation++; // anything still in flight now answers to nobody
     _ticker?.cancel();
     _text.dispose();
@@ -316,6 +334,15 @@ class _TaskPaletteState extends State<_TaskPalette> {
 
     if (answer.confidence >= _confidentEnough) {
       _answer = answer; // so the receipt can name who took it
+      // Rank 0: nobody was asked, so the router's first pick IS the choice. The
+      // outcome that follows says whether it was a good one.
+      analytics.taskRouted(
+        outcome: 'auto',
+        candidates: answer.candidates.length,
+        chosenRank: 0,
+        confidence: answer.confidence,
+        via: answer.via,
+      );
       await _commit(answer.agentId, answer.machineId, task);
       return;
     }
@@ -453,7 +480,18 @@ class _TaskPaletteState extends State<_TaskPalette> {
       return KeyEventResult.handled;
     }
     if (isEnter && !shift) {
-      final pick = _choices[_cursor.clamp(0, _choices.length - 1)];
+      final at = _cursor.clamp(0, _choices.length - 1);
+      final pick = _choices[at];
+      // HOW FAR DOWN THEY HAD TO GO. This is the number the whole event exists
+      // for: a list where people routinely take row three is a router that is
+      // ranking badly, and no amount of reading its reasons would have said so.
+      analytics.taskRouted(
+        outcome: 'picked',
+        candidates: _choices.length,
+        chosenRank: at,
+        confidence: _answer?.confidence ?? 0,
+        via: _answer?.via ?? '',
+      );
       unawaited(_commit(pick.agentId, pick.machineId, _text.text.trim()));
       return KeyEventResult.handled;
     }

@@ -26,6 +26,7 @@ import '../widgets/engine_identity.dart' show allEngines;
 import 'pane_layout_store.dart';
 import 'terminal_pane.dart';
 import '../terminal/terminal_binary.dart';
+import '../core/app_version.dart';
 import '../update/desktop_updater.dart';
 import '../update/manual_update_check.dart';
 import '../viewer/sign_in_browser.dart';
@@ -484,6 +485,14 @@ class AppNotifier extends ChangeNotifier {
   bool isAgentInPane(String machineId, String agentId) =>
       paneOfAgent(machineId, agentId) != null;
 
+  /// Whether the sidebar is folded away.
+  ///
+  /// Held here rather than only in the screen's own state because it is a fact
+  /// about the workspace, and two things outside that screen ask about it: the
+  /// snapshot below, and anything that wants to know whether a person works with
+  /// the rail hidden. The screen still owns the toggling.
+  bool railFolded = false;
+
   /// True while the KEYBOARD is in the rail rather than on the grid.
   ///
   /// Folded into [isPaneFocused] on purpose, and it does two jobs at once. The
@@ -845,6 +854,9 @@ class AppNotifier extends ChangeNotifier {
     // The task goes to the LOCAL daemon whichever machine the agent is on: it owns the dispatch that
     // knows the difference (its own registry, or the fleet link to the other computer). Sending it down
     // the remote machine's own socket would be a second delivery path for the same thing.
+    // Armed BEFORE the send, so the `turn_started` that follows finds it. The
+    // daemon can answer faster than this method returns.
+    armTurnSource(agentId, 'palette');
     try {
       final reply = await connection.request(
         'route_send',
@@ -1406,6 +1418,15 @@ class AppNotifier extends ChangeNotifier {
     if (availableUpdate?.version == info.version) return;
     availableUpdate = info;
     updateError = null;
+    // The top of the funnel. Offered, then taken or waved away — three events
+    // for one decision, because the DROPS between them are the finding and a
+    // single "installed" count cannot show one.
+    unawaited(
+      runningAppVersion().then(
+        (from) => analytics.updateOffered(from: from, to: info.version),
+        onError: (_) {},
+      ),
+    );
     notifyListeners();
   }
 
@@ -1446,6 +1467,12 @@ class AppNotifier extends ChangeNotifier {
     if (info == null) return;
     _skippedDesktopUpdateVersion = info.version;
     await _store?.saveSkippedDesktopUpdateVersion(info.version);
+    unawaited(
+      runningAppVersion().then(
+        (from) => analytics.updateSkipped(from: from, to: info.version),
+        onError: (_) {},
+      ),
+    );
     availableUpdate = null;
     updateError = null;
     notifyListeners();
@@ -1472,6 +1499,14 @@ class AppNotifier extends ChangeNotifier {
             'This copy of Harness cannot install updates automatically.';
         return false;
       }
+      // BEFORE exit(0), and awaited — this is the last instruction that runs in
+      // this process, and the queue is in memory. An `update_installed` reported
+      // after the call that ends the program is one that never leaves.
+      analytics.updateInstalled(
+        from: await runningAppVersion(),
+        to: info.version,
+      );
+      await analytics.close();
       exit(0);
     } catch (error) {
       updateError = 'Could not install Harness ${info.version}: $error';
@@ -1560,6 +1595,35 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onLocalFailure(String machineId, int code, String reason) {
+    final machine = machineStates[machineId];
+    if (machine == null || code != 4404) return;
+    // The machine no longer trusts this device (`harness unpair` on its side), so the pin is
+    // stale too — kept, it would only have the next dial refused again.
+    if (reason == 'E2E_DENIED') unawaited(viewer?.keys.unlink(machineId));
+    // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
+    // A `harness link connect` run in a terminal (or another app instance) has no way to notify
+    // this one directly, so poll every few seconds until it's picked up instead of waiting for
+    // the user to click back into this machine.
+    machine.needsLink = true;
+    machine.agentLoadStatus = AgentLoadStatus.needsLink;
+    // A 4404 can also arrive MID-SESSION ("peer revoked trust" in the CLI's
+    // remoteRelay.ts) with terminals open on this machine. The disconnect
+    // that follows deliberately no longer marks the node offline (see the
+    // onStatus branch in _ensurePool), so the tiles have to be told here
+    // instead — otherwise they keep rendering as live until a heartbeat
+    // fails, and nothing records what to reattach once the machine is linked
+    // again.
+    _markSessionsUnreachable(
+      machine,
+      'This machine is no longer linked. Link it again to reconnect.',
+    );
+    notifyListeners();
+    // A viewer's links change only through its own link form, which reconnects when it lands —
+    // there is nothing out of band to poll for, and every poll would be one more refused dial.
+    if (viewer == null) _startLinkRetry(machineId);
+  }
+
   void _ensurePool() {
     if (_pool != null) return;
     _pool = WsPool(
@@ -1581,23 +1645,7 @@ class AppNotifier extends ChangeNotifier {
       },
       relayCodecs: viewer?.relayCodecs,
       onAuthFailure: _signedOutAtRuntime,
-      onLocalFailure: (machineId, code, reason) {
-        final machine = machineStates[machineId];
-        if (machine == null || code != 4404) return;
-        // The machine no longer trusts this device (`harness unpair` on its side), so the pin is
-        // stale too — kept, it would only have the next dial refused again.
-        if (reason == 'E2E_DENIED') unawaited(viewer?.keys.unlink(machineId));
-        // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
-        // A `harness link connect` run in a terminal (or another app instance) has no way to notify
-        // this one directly, so poll every few seconds until it's picked up instead of waiting for
-        // the user to click back into this machine.
-        machine.needsLink = true;
-        machine.agentLoadStatus = AgentLoadStatus.needsLink;
-        notifyListeners();
-        // A viewer's links change only through its own link form, which reconnects when it lands —
-        // there is nothing out of band to poll for, and every poll would be one more refused dial.
-        if (viewer == null) _startLinkRetry(machineId);
-      },
+      onLocalFailure: _onLocalFailure,
       onEvent: _handleEvent,
       onStatus: (machineId, nextStatus) {
         final machine = machineStates[machineId];
@@ -1644,11 +1692,14 @@ class AppNotifier extends ChangeNotifier {
           // used to be local-only, which is why a remote machine's terminal never came back on its own
           // after `harness start` on that machine, even though the guide screen promised it would.
           //
-          // NOT when this disconnect IS the machine's own NO_PEER_LINK: needsLink is only ever set by
-          // onLocalFailure, which now runs before this branch for close code 4404 (see WsConn._onDone) —
-          // a NO_PEER_LINK rejection is proof the relay/daemon answered. Forcing nodeOnline false here
-          // would fight the REST status and node_status push, the only signals honest about real
-          // reachability; a machine merely unlinked from THIS app instance is not offline.
+          // NOT while the machine is unlinked. NO_PEER_LINK is the local CLI failing a lookup in its
+          // own peer table (remoteRelay.ts `dial`) before anything is dialled, so neither that close
+          // nor the one `_startLinkRetry`'s `closeMachine` fires every few seconds says anything about
+          // whether the OTHER computer is up — our socket never reaches it. Forcing nodeOnline false
+          // here overwrote the REST `/api/machines` status, the one signal that does, and painted
+          // every unlinked machine as off. Keyed on the sticky flag rather than the 4404 close on
+          // purpose: the retry loop's own close() lands as a plain `disconnected` too. needsLink is
+          // set by onLocalFailure, which runs before this branch for 4404 (see WsConn._onDone).
           if (!machine.needsLink) {
             unawaited(_applyNodeStatus(machine, false));
           }
@@ -1701,10 +1752,27 @@ class AppNotifier extends ChangeNotifier {
         Future<LocalCliEndpoint?>.value();
     final list = await _fetchMachines();
     final localEndpoint = await localFuture;
+    final previous = machines.map((machine) => machine.machineId).toSet();
     machines = list
         .where((machine) => machine.authMode == MachineAuthMode.remote)
         .toList();
     final visible = machines.map((machine) => machine.machineId).toSet();
+    // THE EVENT, which the snapshot cannot be: two machines linked and one
+    // unlinked in a week reads as "one more machine" in snapshots alone.
+    //
+    // Skipped on the FIRST load, when `previous` is empty and every machine
+    // would report itself as newly linked — that is a person signing in, not a
+    // person pairing a computer.
+    if (previous.isNotEmpty) {
+      for (final machine in machines) {
+        if (!previous.contains(machine.machineId)) {
+          analytics.machineLinked(mode: machine.authMode.name);
+        }
+      }
+      for (final id in previous) {
+        if (!visible.contains(id)) analytics.machineUnlinked();
+      }
+    }
     for (final entry in machineStates.entries) {
       if (!visible.contains(entry.key)) {
         _clearMachineActivity(entry.value);
@@ -2585,6 +2653,53 @@ class AppNotifier extends ChangeNotifier {
   /// already mid-turn when this app connected, are both work that was under way
   /// before anybody here typed anything — counting either would report a
   /// near-zero wait for a returning user who has not said a word.
+  /// Which door sent the turn that is about to start, per agent.
+  ///
+  /// Armed by the surfaces that KNOW — the composer, the ⌘B palette — and read
+  /// by `turn_started`, which is the one place every turn passes through
+  /// whatever sent it. Doing it the other way round (reporting at each send
+  /// site) would miss every turn typed straight into the terminal, which is how
+  /// most people drive these engines.
+  final Map<String, String> _turnSource = {};
+
+  /// Remember the door, for the turn this agent is about to start.
+  void armTurnSource(String agentId, String source) {
+    _turnSource[agentId] = source;
+  }
+
+  /// Report one turn, and forget the door.
+  ///
+  /// Unarmed means the terminal: typing into the pty is invisible to this app by
+  /// design, so a turn nobody claimed is one somebody typed. A turn the dial
+  /// sent outside the window's palette lands here too — see `turnSent`.
+  void _reportTurnSent(MachineState machine, String agentId) {
+    final source = _turnSource.remove(agentId) ?? 'terminal';
+    var engine = '';
+    for (final agent in machine.agents) {
+      if (agent.id == agentId) {
+        engine = agent.engine ?? '';
+        break;
+      }
+    }
+    analytics.turnSent(engine: engine, source: source);
+    _paneTurns[agentId] = (_paneTurns[agentId] ?? 0) + 1;
+  }
+
+  /// The engine an agent runs, or '' when this window does not know it.
+  String _engineOf(String machineId, String agentId) {
+    for (final agent in machineStates[machineId]?.agents ?? const <Agent>[]) {
+      if (agent.id == agentId) return agent.engine ?? '';
+    }
+    return '';
+  }
+
+  /// Turns seen per agent, for `pane_closed`. Keyed by AGENT, not by pane: a
+  /// tile that swapped agents has not carried the new one's history.
+  final Map<String, int> _paneTurns = {};
+
+  /// When each open tile went on screen, for `pane_closed`.
+  final Map<int, DateTime> _paneOpenedAt = {};
+
   void _reportFirstMessage() {
     if (_awaitingFirstMessage case final login?) {
       _awaitingFirstMessage = null;
@@ -2996,6 +3111,29 @@ class AppNotifier extends ChangeNotifier {
     return RestartAgentResult(resumed: resumed is bool ? resumed : true);
   }
 
+  /// Every tile on the machine, not just the focused one: the machine is what
+  /// went away, so a tile of the same machine sitting in another corner of the
+  /// grid is just as dead and must say so rather than keep showing a terminal
+  /// that can no longer receive anything. Records what was open so the next
+  /// `connected` can put it back (`_recoverPendingAgent`).
+  void _markSessionsUnreachable(MachineState machine, String message) {
+    for (final pane in panesFor(machine.machine.machineId)) {
+      final session = pane.session;
+      if (session == null) continue;
+      machine.activeAgentId ??= session.agentId;
+      // A pane someone else already took over must stay frozen until the user retries it
+      // themselves (see `_paneNeedsAttach`) — recording it here would have `_recoverPendingAgent`
+      // call `selectAgent` on reconnect and silently win it back the moment the connection
+      // returns, fighting whichever machine holds it now.
+      if (session.status != TerminalSessionStatus.takenOver) {
+        machine.pendingOfflineAgentId ??= session.agentId;
+      }
+      // Do not send terminal_close: the adapter is already gone and the
+      // next client attachment should be the only stream that owns the pane.
+      session.transportLost(message);
+    }
+  }
+
   Future<void> _applyNodeStatus(MachineState machine, bool online) async {
     if (_disposed) return;
     final machineId = machine.machine.machineId;
@@ -3003,28 +3141,12 @@ class AppNotifier extends ChangeNotifier {
     machine.nodeOnline = online;
 
     if (!online) {
-      // Every tile on it, not just the focused one: the machine is what went
-      // away, so a tile of the same machine sitting in another corner of the
-      // grid is just as dead and must say so rather than keep showing a
-      // terminal that can no longer receive anything.
-      final message = machine.isLocalMachine
-          ? 'Harness is offline. Run harness login to reconnect.'
-          : 'Harness is offline. Run harness start on that machine to reconnect.';
-      for (final pane in panesFor(machineId)) {
-        final session = pane.session;
-        if (session == null) continue;
-        machine.activeAgentId ??= session.agentId;
-        // A pane someone else already took over must stay frozen until the user retries it
-        // themselves (see `_paneNeedsAttach`) — recording it here would have `_recoverPendingAgent`
-        // call `selectAgent` on reconnect and silently win it back the moment the connection
-        // returns, fighting whichever machine holds it now.
-        if (session.status != TerminalSessionStatus.takenOver) {
-          machine.pendingOfflineAgentId ??= session.agentId;
-        }
-        // Do not send terminal_close: the adapter is already gone and the
-        // next client attachment should be the only stream that owns the pane.
-        session.transportLost(message);
-      }
+      _markSessionsUnreachable(
+        machine,
+        machine.isLocalMachine
+            ? 'Harness is offline. Run harness login to reconnect.'
+            : 'Harness is offline. Run harness start on that machine to reconnect.',
+      );
       _startOfflineRetry(machine);
     } else {
       _stopOfflineRetry(machineId);
@@ -3236,8 +3358,12 @@ class AppNotifier extends ChangeNotifier {
   Future<void> assignAgentToPane(
     int? paneId,
     String machineId,
-    String agentId,
-  ) async {
+    String agentId, {
+
+    /// Which door — `rail`, `switcher`, `drag`, `dial`, `palette`. Defaults to
+    /// `rail`, the oldest and by far the commonest caller.
+    String source = 'rail',
+  }) async {
     final machine = machineStates[machineId];
     if (machine == null) return;
 
@@ -3275,10 +3401,20 @@ class AppNotifier extends ChangeNotifier {
         agentId: agentId,
       );
       panes.add(pane);
+      _paneOpenedAt[pane.id] = DateTime.now();
+      analytics.paneOpened(
+        engine: _engineOf(machineId, agentId),
+        source: source,
+      );
     } else {
       await _detachSession(pane, sendClose: true);
       pane.machineId = machineId;
       pane.agentId = agentId;
+      _paneOpenedAt[pane.id] = DateTime.now();
+      analytics.paneOpened(
+        engine: _engineOf(machineId, agentId),
+        source: source,
+      );
     }
 
     focusedPaneId = pane.id;
@@ -3628,6 +3764,17 @@ class AppNotifier extends ChangeNotifier {
     final index = panes.indexWhere((pane) => pane.id == paneId);
     if (index == -1) return;
     final pane = panes.removeAt(index);
+    // Reported here rather than from each of the callers that close a tile —
+    // the rail's menu, ⌘W, an agent being deleted, a machine going away — which
+    // is the same reason `turn_sent` is reported from `turn_started`.
+    final since = _paneOpenedAt.remove(pane.id);
+    if (since != null && pane.agentId != null) {
+      analytics.paneClosed(
+        engine: _engineOf(pane.machineId, pane.agentId!),
+        secondsOpen: DateTime.now().difference(since).inSeconds,
+        turns: _paneTurns.remove(pane.agentId!) ?? 0,
+      );
+    }
     // A zoom belongs to a tile, so closing that tile ends it. Left set, the grid
     // would try to fill itself with a pane that is no longer in the list and
     // draw nothing at all.
@@ -3654,7 +3801,50 @@ class AppNotifier extends ChangeNotifier {
     if (persist) _persistLayout();
   }
 
+  /// The last shape reported, so an unchanged desk costs nothing.
+  String _lastSnapshot = '';
+  Timer? _snapshotDebounce;
+
+  /// Report the desk, at most once a minute and only when it changed.
+  ///
+  /// DEBOUNCED AND DEDUPED, both. Dragging a divider or walking the focus fires
+  /// `_persistLayout` repeatedly and changes nothing this event carries; opening
+  /// four tiles in a row changes it four times and only the last is interesting.
+  /// Without the guard this would be the loudest event in the stream and the
+  /// least informative.
+  void _reportWorkspace() {
+    _snapshotDebounce?.cancel();
+    _snapshotDebounce = Timer(const Duration(seconds: 5), () {
+      final engines = <String>[
+        for (final pane in panes)
+          if (pane.agentId != null) _engineOf(pane.machineId, pane.agentId!),
+      ].where((e) => e.isNotEmpty).toSet().toList()..sort();
+      final online = machineStates.values
+          .where((m) => m.nodeOnline == true)
+          .length;
+      final agents = machineStates.values.fold<int>(
+        0,
+        (n, m) => n + m.agents.length,
+      );
+      final shape =
+          '${machines.length}/$online/$agents/${panes.length}/'
+          '${engines.join(",")}/${presetFor(panes.length)?.name}';
+      if (shape == _lastSnapshot) return;
+      _lastSnapshot = shape;
+      analytics.workspaceSnapshot(
+        machinesLinked: machines.length,
+        machinesOnline: online,
+        agentsTotal: agents,
+        panesOpen: panes.length,
+        railFolded: railFolded,
+        engines: engines,
+        layoutPreset: presetFor(panes.length)?.name,
+      );
+    });
+  }
+
   void _persistLayout() {
+    _reportWorkspace();
     // The roster and the saved layout describe the same fact — which agents are
     // on the grid — so they are announced and written from the same place.
     // Before the early return below: a window with no layout store still has
@@ -4012,7 +4202,11 @@ class AppNotifier extends ChangeNotifier {
         // A turn that STARTS is somebody sending something; a heartbeat is a
         // turn already under way, which for an agent this app merely reconnected
         // to is work nobody here just asked for.
-        if (type == 'turn_started') _reportFirstMessage();
+        if (type == 'turn_started') {
+          _reportFirstMessage();
+          final started = _eventAgentId(machine, event, payload);
+          if (started != null) _reportTurnSent(machine, started);
+        }
         final agentId = _eventAgentId(machine, event, payload);
         if (agentId != null) {
           _markAgentProcessing(machine, agentId);
@@ -4081,6 +4275,12 @@ class AppNotifier extends ChangeNotifier {
     String machineId,
     Map<String, dynamic> event,
   ) => _handleEvent(machineId, event);
+
+  /// What the local CLI closing this machine's socket with [code] does to the
+  /// model — the `WsPool.onLocalFailure` path, without a socket.
+  @visibleForTesting
+  void localFailureForTest(String machineId, int code, String reason) =>
+      _onLocalFailure(machineId, code, reason);
 
   @override
   void dispose() {

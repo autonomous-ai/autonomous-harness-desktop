@@ -93,16 +93,24 @@ arm64 build renders on exactly what it must not, however new. Apple Silicon read
 build, and one that only moved `desktop-macos` (a hand publish that stopped halfway, say) still reaches
 it rather than hiding behind an older arm64 entry.
 
-**TODO(BE): this is a workaround, not a diagnosis, and it has a real cost.** Every machine this app is
-developed on is Apple Silicon, on Impeller, so Intel users now run a renderer nobody here looks at, and a
-Skia-only rendering bug reaches them unseen. Nothing here has measured that Skia cures the stutter
-either — confirm it with an Intel user on the first release that carries it, and if they still stutter
-on Skia, the renderer was not the cause and this split should go. The Grid app is the precedent both
-ways: it added this exact opt-out for Intel (`autonomous-grid-app` `87def3c6`) and removed it the same
-day (`58687e7f`), because its real cause turned out to be CI shipping a newer Flutter than the team ran,
-fixed by pinning. Harness's release already builds with the Flutter it is developed on (`FLUTTER_VERSION` in
-`release.yml`), so that cause
-does not apply here. **Re-check on every Flutter bump**: the engine reads `FLTEnableImpeller` in
+**Confirmed on an Intel Mac, 2026-09-11.** One build from source, run twice on the same machine with
+only the renderer changed. On Impeller the window flashed GPU garbage every 1.5–3 s: for 100–300 ms at a
+time the main pane smeared into triangle streaks of stretched glyphs. With `--no-enable-impeller` it was
+clean. That switch and `FLTEnableImpeller = false` reach the same Skia path in `FlutterEngine.mm`, so the
+split stays. The Grid app's precedent does not apply: it added this exact opt-out for Intel
+(`autonomous-grid-app` `87def3c6`) and removed it the same day (`58687e7f`) because its real cause was CI
+shipping a newer Flutter than the team ran — here the Flutter was one and the same, and the renderer was
+the only thing that changed.
+
+⚠️ **A build from source carries no pin.** The tracked `Info.plist` has no `FLTEnableImpeller` — only
+`publish-macos-variant.sh intel` writes one — so `flutter run` on an Intel Mac renders on Impeller and
+corrupts exactly as above. Run it as `flutter run -d macos --no-enable-impeller`. Do not add the key to
+the tracked plist instead: the Apple Silicon build refuses to publish with it, and every Apple Silicon
+developer would lose Impeller.
+
+**TODO(BE): the split still has a real cost.** Every machine this app is developed on is Apple Silicon,
+on Impeller, so Intel users run a renderer nobody here looks at, and a Skia-only rendering bug reaches
+them unseen. **Re-check on every Flutter bump**: the engine reads `FLTEnableImpeller` in
 `FlutterDartProject.mm`, and the day that read goes away the Intel build silently goes back to Impeller.
 
 ## Publishing by hand

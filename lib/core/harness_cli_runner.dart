@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../logging/cli_transcript.dart';
+import 'harness_file_store.dart';
 
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
@@ -47,21 +48,15 @@ class HarnessCliRunner {
     })?
     startProcess,
   }) : environment = environment ?? Platform.environment,
-       harnessHome = harnessHome ?? Directory(_defaultHarnessHome()),
+       harnessHome = harnessHome ?? _defaultHarnessHome(),
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start;
 
-  static String _defaultHarnessHome() {
-    // HOME, then USERPROFILE: Windows sets only the latter, so a launch from Explorer threw here
-    // before any UI existed to report it.
-    final home = Platform.environment['HOME'];
-    final profile = Platform.environment['USERPROFILE'];
-    final resolved = home != null && home.isNotEmpty ? home : profile;
-    if (resolved == null || resolved.isEmpty) {
-      throw StateError('Could not resolve the current user home directory');
-    }
-    return '$resolved${Platform.pathSeparator}.harness';
-  }
+  /// `~/.harness`, from the one resolver that knows every platform this runs on — the Windows
+  /// fallbacks, and iOS, where Dart hands the app no HOME at all. A viewer builds a runner it never
+  /// runs (see `CliLink`), so a copy that could not find HOME there was a crash before any frame.
+  static Directory _defaultHarnessHome() =>
+      Directory(HarnessFileStore.defaultDirectoryPath()).parent;
 
   Directory get _runtimeDirectory =>
       Directory('${harnessHome.path}${Platform.pathSeparator}runtime');
