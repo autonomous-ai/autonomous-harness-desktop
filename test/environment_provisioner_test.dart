@@ -47,6 +47,7 @@ void main() {
     List<String>? calls,
     int tmuxInstallExitCode = 0,
     int linuxInstallExitCode = 0,
+    String linuxInstallStderr = 'apt install failed',
     int gridInstallExitCode = 0,
   }) {
     return (executable, arguments, {environment}) async {
@@ -56,7 +57,7 @@ void main() {
       for (final missing in missingCommands) {
         if (shell.contains('command -v $missing ')) return result(1);
       }
-      if (shell.contains('apt-get install -y')) {
+      if (shell.contains('apt_as_root install -y')) {
         final packages = <String>[
           for (final package in [
             'dash',
@@ -82,7 +83,7 @@ void main() {
           stdout: linuxInstallExitCode == 0
               ? 'apt installed ${packages.join(' ')}'
               : '',
-          stderr: linuxInstallExitCode == 0 ? '' : 'apt install failed',
+          stderr: linuxInstallExitCode == 0 ? '' : linuxInstallStderr,
         );
       }
       if (shell.contains('brew install tmux')) {
@@ -416,7 +417,7 @@ void main() {
       expect(terminalScript, isNotNull);
       expect(calls.where((line) => line.contains('install.sh')), isEmpty);
       final script = await File(terminalScript!).readAsString();
-      expect(script, contains('install_with_apt tmux'));
+      expect(script, contains('apt_as_root install -y tmux'));
       expect(script, contains('if [ "\$(id -u)" -eq 0 ]'));
       expect(script, contains('terminal.log'));
       expect(script, contains('tmux -V'));
@@ -464,8 +465,11 @@ void main() {
       expect(readiness.terminalSetup, EnvironmentTerminalSetup.linuxHost);
       expect(terminalScript, isNotNull);
       final script = await File(terminalScript!).readAsString();
-      expect(script, contains('install_with_apt xclip'));
-      expect(script, isNot(contains('install_with_apt tmux')));
+      expect(script, contains('apt_as_root install -y xclip'));
+      expect(script, isNot(contains('apt_as_root install -y tmux')));
+      expect(script, contains('timedatectl set-ntp true'));
+      expect(script, contains('NTPSynchronized'));
+      expect(script, isNot(contains('apt_as_root update || true')));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
         0,
@@ -509,7 +513,7 @@ void main() {
     );
     expect(terminalLaunches, 0);
     final install = calls.singleWhere(
-      (line) => line.contains('apt-get install -y'),
+      (line) => line.contains('apt_as_root install -y'),
     );
     expect(install, contains('wl-clipboard'));
     expect(install, isNot(contains(' xclip')));
@@ -544,6 +548,68 @@ void main() {
     expect(terminalScript, isNotNull);
     expect(readiness.output.join('\n'), contains('exited 7'));
     expect(readiness.output.join('\n'), contains('Terminal opened'));
+  });
+
+  test('failed automatic clock sync stops with actionable guidance', () async {
+    await createManagedHarness();
+    var terminalLaunches = 0;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (_) async => terminalLaunches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+        passwordlessSudo: true,
+        linuxInstallExitCode: 31,
+        linuxInstallStderr: 'Automatic time synchronization did not become ready within 30 seconds.',
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.failed);
+    expect(readiness.failure?.title, contains('clock'));
+    expect(readiness.failure?.command, contains('timedatectl set-ntp true'));
+    expect(terminalLaunches, 0);
+  });
+
+  test('failed apt refresh does not retry with stale indexes', () async {
+    await createManagedHarness();
+    var terminalLaunches = 0;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (_) async => terminalLaunches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+        passwordlessSudo: true,
+        linuxInstallExitCode: 32,
+        linuxInstallStderr: 'Package repository refresh failed.',
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.failed);
+    expect(readiness.failure?.title, contains('repository refresh'));
+    expect(readiness.failure?.command, 'sudo apt-get update');
+    expect(terminalLaunches, 0);
   });
 
   test('non-apt Linux returns package-manager guidance', () async {
@@ -751,7 +817,7 @@ void main() {
         EnvironmentStepStatus.needsTerminal,
       );
       final script = await File(terminalScript!).readAsString();
-      expect(script, contains('install_with_apt xclip tmux'));
+      expect(script, contains('apt_as_root install -y xclip tmux'));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
         0,
@@ -799,7 +865,9 @@ void main() {
     expect(curlPresent, isTrue);
     expect(harnessInstalled, isTrue);
     expect(readiness.isReady, isTrue);
-    final apt = calls.indexWhere((line) => line.contains('apt-get install -y'));
+    final apt = calls.indexWhere(
+      (line) => line.contains('apt_as_root install -y'),
+    );
     final harness = calls.indexWhere(
       (line) => line.contains('cdn.autonomous.ai/harness/cli/install.sh'),
     );
@@ -862,6 +930,43 @@ void main() {
       expect(failed.failure?.exitCode, 42);
       expect(failed.output.join('\n'), contains('apt: package failed'));
       expect(launches, 1, reason: 'a polling probe must not reopen Terminal');
+    },
+  );
+
+  test(
+    'an apt future-release error is reported as system clock skew',
+    () async {
+      var launches = 0;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        openTerminal: (_) async => launches++,
+        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+      );
+      final waiting = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+      await File(waiting.terminalLogPath!).writeAsString(
+        'E: Release file for http://archive.ubuntu.com/InRelease is not valid yet '
+        '(invalid for another 1d 7h).',
+      );
+      await File(waiting.terminalResultPath!).writeAsString('100\n');
+
+      final failed = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: waiting,
+        install: false,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(failed.phase, EnvironmentSetupPhase.failed);
+      expect(failed.failure?.title, contains('clock'));
+      expect(failed.failure?.command, contains('timedatectl set-ntp true'));
+      expect(failed.output.join('\n'), contains('is not valid yet'));
+      expect(launches, 1);
     },
   );
 

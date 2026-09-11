@@ -12,6 +12,13 @@ const String kHarnessDesktopInstallCommand =
     'curl -fsSL https://cdn.autonomous.ai/harness/cli/install.sh | '
     '/bin/sh -s -- --desktop';
 
+const int _linuxClockSyncFailureExitCode = 31;
+const int _linuxAptUpdateFailureExitCode = 32;
+const int _linuxAptInstallFailureExitCode = 33;
+const String _linuxClockRepairCommand =
+    'sudo timedatectl set-ntp true && '
+    'sudo systemctl restart systemd-timesyncd';
+
 enum EnvironmentStep {
   clipboard,
   harness,
@@ -329,10 +336,12 @@ class EnvironmentProvisioner {
     }
 
     final previousTerminalLog = state.terminalLogPath;
+    var previousTerminalLogText = '';
     EnvironmentTerminalSetup? completedTerminalSetup;
     if (previousTerminalLog != null) {
       try {
         final text = await File(previousTerminalLog).readAsString();
+        previousTerminalLogText = text;
         final snapshot = 'Terminal log:\n${text.trim()}';
         if (text.trim().isNotEmpty && !state.output.contains(snapshot)) {
           emit(output: snapshot);
@@ -376,6 +385,12 @@ class EnvironmentProvisioner {
               status: EnvironmentStepStatus.failed,
             );
           }
+          final classifiedFailure = linuxHost
+              ? _classifiedLinuxPackageFailure(
+                  exitCode,
+                  previousTerminalLogText,
+                )
+              : null;
           emit(
             step: linuxHost ? null : EnvironmentStep.tmux,
             status: linuxHost ? null : EnvironmentStepStatus.failed,
@@ -391,12 +406,17 @@ class EnvironmentProvisioner {
                   : tmuxFailed
                   ? EnvironmentStep.tmux
                   : null,
-              title: 'System package installation failed',
+              title:
+                  classifiedFailure?.title ??
+                  'System package installation failed',
               detail:
+                  classifiedFailure?.detail ??
                   'Terminal exited with code $exitCode. Review the complete log below.',
-              command: linuxHost
-                  ? await _linuxHostManualCommand()
-                  : _manualCommandFor(EnvironmentStep.tmux),
+              command:
+                  classifiedFailure?.command ??
+                  (linuxHost
+                      ? await _linuxHostManualCommand()
+                      : _manualCommandFor(EnvironmentStep.tmux)),
               exitCode: exitCode,
             ),
           );
@@ -615,7 +635,13 @@ class EnvironmentProvisioner {
           try {
             backgroundInstall = await _shellStreaming(
               _linuxAptInstallCommand(packages, nonInteractiveSudo: true),
-              onOutput: (line) => emit(output: line),
+              onOutput: (line) => emit(
+                message:
+                    line.contains('Enabling automatic time synchronization')
+                    ? 'Synchronizing the system clock before retrying Ubuntu packages…'
+                    : null,
+                output: line,
+              ),
             );
           } catch (error) {
             emit(output: 'Background Linux package install failed: $error');
@@ -636,6 +662,39 @@ class EnvironmentProvisioner {
                       : EnvironmentStepStatus.failed
                 : EnvironmentStepStatus.notApplicable,
           );
+          final classifiedBackgroundFailure = backgroundInstall == null
+              ? null
+              : _classifiedLinuxPackageFailure(
+                  backgroundInstall.exitCode,
+                  _resultText(backgroundInstall),
+                );
+          if (classifiedBackgroundFailure != null) {
+            if (!tmuxReady) {
+              emit(
+                step: EnvironmentStep.tmux,
+                status: EnvironmentStepStatus.failed,
+              );
+            }
+            emit(
+              message: classifiedBackgroundFailure.detail,
+              phase: EnvironmentSetupPhase.failed,
+              systemReady: systemReady,
+              failure: EnvironmentFailure(
+                step: !systemReady
+                    ? null
+                    : !clipboardReady
+                    ? EnvironmentStep.clipboard
+                    : !tmuxReady
+                    ? EnvironmentStep.tmux
+                    : null,
+                title: classifiedBackgroundFailure.title,
+                detail: classifiedBackgroundFailure.detail,
+                command: classifiedBackgroundFailure.command,
+                exitCode: classifiedBackgroundFailure.exitCode,
+              ),
+            );
+            return state;
+          }
           if (systemReady && clipboardReady && tmuxReady) {
             emit(
               step: EnvironmentStep.tmux,
@@ -1059,23 +1118,114 @@ class EnvironmentProvisioner {
     return sudo.exitCode == 0;
   }
 
+  bool _isLinuxClockSkewOutput(String output) {
+    final normalized = output.toLowerCase();
+    return normalized.contains('is not valid yet') ||
+        normalized.contains('certificate is not yet valid');
+  }
+
+  EnvironmentFailure? _classifiedLinuxPackageFailure(
+    int exitCode,
+    String output,
+  ) {
+    if (exitCode == _linuxClockSyncFailureExitCode ||
+        _isLinuxClockSkewOutput(output)) {
+      return const EnvironmentFailure(
+        title: 'System clock could not be synchronized',
+        detail: 'Ubuntu reports that repository metadata is in the future relative to this computer. Enable automatic time synchronization, confirm the clock is correct, then retry.',
+        command: _linuxClockRepairCommand,
+        exitCode: _linuxClockSyncFailureExitCode,
+      );
+    }
+    if (exitCode == _linuxAptUpdateFailureExitCode) {
+      return const EnvironmentFailure(
+        title: 'Package repository refresh failed',
+        detail: 'Ubuntu could not refresh its package indexes, so Harness stopped instead of retrying with stale package data.',
+        command: 'sudo apt-get update',
+        exitCode: _linuxAptUpdateFailureExitCode,
+      );
+    }
+    return null;
+  }
+
   String _linuxAptInstallCommand(
     List<String> packages, {
     required bool nonInteractiveSudo,
   }) {
     final names = packages.toSet().join(' ');
-    final rootInstall =
-        'DEBIAN_FRONTEND=noninteractive apt-get install -y $names';
-    final rootUpdate = 'DEBIAN_FRONTEND=noninteractive apt-get update';
     final sudoFlag = nonInteractiveSudo ? '-n ' : '';
-    final sudoInstall =
-        'sudo ${sudoFlag}env DEBIAN_FRONTEND=noninteractive apt-get install -y $names';
-    final sudoUpdate =
-        'sudo ${sudoFlag}env DEBIAN_FRONTEND=noninteractive apt-get update';
-    return '''if [ "\$(id -u)" -eq 0 ]; then
-  $rootInstall || { echo 'Refreshing package indexes before retrying…'; $rootUpdate || true; $rootInstall; }
+    return '''set -o pipefail
+export LC_ALL=C
+run_as_root() {
+  if [ "\$(id -u)" -eq 0 ]; then
+    "\$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo $sudoFlag"\$@"
+  else
+    echo 'Installing Linux system packages needs root access, but sudo is unavailable.' >&2
+    return 126
+  fi
+}
+apt_as_root() {
+  run_as_root env DEBIAN_FRONTEND=noninteractive apt-get "\$@"
+}
+repair_system_clock() {
+  if ! command -v timedatectl >/dev/null 2>&1; then
+    echo 'System clock is behind repository metadata, but timedatectl is unavailable.' >&2
+    return $_linuxClockSyncFailureExitCode
+  fi
+  echo 'Repository metadata is ahead of this computer. Enabling automatic time synchronization…'
+  run_as_root timedatectl set-ntp true || return $_linuxClockSyncFailureExitCode
+  if command -v systemctl >/dev/null 2>&1; then
+    run_as_root systemctl restart systemd-timesyncd >/dev/null 2>&1 || true
+  fi
+  clock_attempt=0
+  while [ "\$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" != 'yes' ]; do
+    clock_attempt=\$((clock_attempt + 1))
+    if [ "\$clock_attempt" -ge 15 ]; then
+      echo 'Automatic time synchronization did not become ready within 30 seconds.' >&2
+      return $_linuxClockSyncFailureExitCode
+    fi
+    sleep 2
+  done
+  echo 'System clock synchronized.'
+}
+refresh_package_indexes() {
+  apt_update_log="\${TMPDIR:-/tmp}/harness-apt-update-\$\$.log"
+  if apt_as_root update 2>&1 | tee "\$apt_update_log"; then
+    rm -f "\$apt_update_log"
+    return 0
+  fi
+  if grep -Eiq 'is not valid yet|certificate is not yet valid' "\$apt_update_log"; then
+    rm -f "\$apt_update_log"
+    if ! repair_system_clock; then
+      echo 'System clock could not be synchronized automatically.' >&2
+      return $_linuxClockSyncFailureExitCode
+    fi
+    if ! apt_as_root update; then
+      echo 'Package repository refresh still failed after clock synchronization.' >&2
+      return $_linuxAptUpdateFailureExitCode
+    fi
+    return 0
+  fi
+  rm -f "\$apt_update_log"
+  echo 'Package repository refresh failed. Harness will not retry with stale package indexes.' >&2
+  return $_linuxAptUpdateFailureExitCode
+}
+install_linux_packages() {
+  apt_as_root install -y $names && return 0
+  echo 'Refreshing package indexes before retrying…'
+  refresh_package_indexes || return \$?
+  if ! apt_as_root install -y $names; then
+    echo 'Package installation still failed after a successful repository refresh.' >&2
+    return $_linuxAptInstallFailureExitCode
+  fi
+}
+if install_linux_packages; then
+  :
 else
-  $sudoInstall || { echo 'Refreshing package indexes before retrying…'; $sudoUpdate || true; $sudoInstall; }
+  install_status=\$?
+  exit "\$install_status"
 fi''';
   }
 
@@ -1324,6 +1474,10 @@ echo 'tmux is ready. Return to Harness.'
               : 'command -v $command >/dev/null 2>&1',
         )
         .join('\n');
+    final aptInstallCommand = _linuxAptInstallCommand(
+      packageList,
+      nonInteractiveSudo: false,
+    );
     final script = File('${directory.path}/install-linux-dependencies.sh');
     await script.writeAsString('''#!/bin/bash
 set -eu
@@ -1347,24 +1501,8 @@ finish() {
 trap finish EXIT
 
 if command -v apt-get >/dev/null 2>&1; then
-  apt_as_root() {
-    if [ "\$(id -u)" -eq 0 ]; then
-      DEBIAN_FRONTEND=noninteractive apt-get "\$@"
-    elif command -v sudo >/dev/null 2>&1; then
-      sudo env DEBIAN_FRONTEND=noninteractive apt-get "\$@"
-    else
-      echo 'Installing Linux system packages needs root access, but sudo is unavailable.' >&2
-      return 1
-    fi
-  }
-  install_with_apt() {
-    apt_as_root install -y "\$@" && return 0
-    echo 'Refreshing package indexes before retrying…'
-    apt_as_root update || true
-    apt_as_root install -y "\$@"
-  }
   echo 'Installing Linux host dependencies (you may be asked for your password)…'
-  install_with_apt $packages
+  $aptInstallCommand
   $verification
   echo 'Installed packages: $packages'
 else
