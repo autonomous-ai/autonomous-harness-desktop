@@ -15,6 +15,7 @@ import '../../state/app_state.dart';
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
+import '../../usage/usage_accounts.dart';
 import '../../usage/usage_controller.dart';
 import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
@@ -279,7 +280,11 @@ class _ReadoutState extends State<_Readout> {
   /// grid, and otherwise the first account with figures to show.
   _PanelKind get _defaultKind {
     if (_grid != null) return _PanelKind.power;
-    final first = widget.usage.answered.firstOrNull;
+    // Any account with figures — a remote machine's included, since on a
+    // computer signed in to nothing it can be the only one there is.
+    final first = widget.usage.accounts
+        .where((account) => account.reading.hasFigures)
+        .firstOrNull;
     return first == null
         ? _PanelKind.power
         : _PanelKind.forProvider(first.provider);
@@ -542,7 +547,7 @@ class _ReadoutState extends State<_Readout> {
           ],
           Expanded(
             child: UsageReadout<_PanelKind>(
-              readings: widget.usage.readings,
+              accounts: widget.usage.accounts,
               loading: widget.usage.loading,
               anchorFor: (provider) => _usageAnchors[provider]!,
               kindFor: _PanelKind.forProvider,
@@ -836,10 +841,17 @@ class _ReadoutState extends State<_Readout> {
   /// figures, and the extra width would go to the bar alone — which is the one
   /// thing here that carries no reading of its own.
   Widget _usagePanel(_PanelKind kind, UsageProvider provider) {
+    // THIS computer's reading drives the offer below, whatever else the panel
+    // lists: a remote account running out is no reason to move this Mac's
+    // agents anywhere (see `UsageController.accounts`).
     final reading = widget.usage.readings.firstWhere(
       (r) => r.provider == provider,
       orElse: () => ProviderUsage.loading(provider),
     );
+    final accounts = [
+      for (final account in widget.usage.accounts)
+        if (account.provider == provider) account,
+    ];
     // The same offer the card above the rail makes, in the one place that is
     // always reachable: that card shows once per window and can be closed, and
     // somebody who closed it an hour ago still needs a door.
@@ -855,7 +867,9 @@ class _ReadoutState extends State<_Readout> {
       kind,
       _usageAnchors[provider]!,
       UsagePanelContent(
-        reading: reading,
+        accounts: accounts.isEmpty
+            ? [UsageAccount(reading: reading, isLocal: true)]
+            : accounts,
         offer: offer,
         onAct: offer == null
             ? null
