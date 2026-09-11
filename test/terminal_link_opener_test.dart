@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/terminal/terminal_link_opener.dart';
+import 'package:harness/terminal/remote_media_download.dart';
 
 void main() {
   late List<Uri> launched;
@@ -57,6 +58,58 @@ void main() {
       contains('another machine'),
     );
     expect(checked, isEmpty);
+    expect(launched, isEmpty);
+  });
+  test('resolves remote paths on their owner and opens only the local completed copy', () async {
+    for (final target in [
+      '~/Pictures/ảnh.png',
+      'output/clip.mp4',
+      'file:///tmp/ảnh.png',
+    ]) {
+      String? requested;
+      expect(
+        await opener.open(
+          target,
+          isLocalMachine: false,
+          downloadRemote: (path) async {
+            requested = path;
+            return '/cache/completed.png';
+          },
+        ),
+        isNull,
+      );
+      expect(requested, target);
+      expect(checked.last, '/cache/completed.png');
+      expect(launched.last.toFilePath(), '/cache/completed.png');
+    }
+  });
+  test('cancelled and failed downloads never launch a viewer', () async {
+    expect(
+      await opener.open(
+        '/tmp/image.png',
+        isLocalMachine: false,
+        downloadRemote: (_) async => throw const RemoteMediaCancelled(),
+      ),
+      isNull,
+    );
+    expect(
+      await opener.open(
+        '/tmp/image.png',
+        isLocalMachine: false,
+        downloadRemote: (_) async =>
+            throw const RemoteMediaException('Disconnected'),
+      ),
+      'Disconnected',
+    );
+    expect(
+      await opener.open(
+        '/tmp/image.png',
+        isLocalMachine: false,
+        downloadRemote: (_) async => '/cache/image.png',
+        isCancelled: () => true,
+      ),
+      isNull,
+    );
     expect(launched, isEmpty);
   });
   test('does not invent the agent cwd for relative paths', () async {

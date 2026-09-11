@@ -282,6 +282,9 @@ class WsConn {
   /// contents of their editor to disk. The hardware dial's events are dropped
   /// for the volume alone.
   static const _unlogged = {
+    // File paths and media contents are user data, not frame diagnostics.
+    'agent_read_file',
+    'agent_read_file_result',
     'terminal_output',
     'terminal_input',
     'terminal_resize',

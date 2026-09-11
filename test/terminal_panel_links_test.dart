@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,9 +9,47 @@ import 'package:harness/core/config.dart';
 import 'package:harness/core/models.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/terminal/terminal_link_opener.dart';
+import 'package:harness/terminal/remote_media_download.dart';
 import 'package:harness/terminal/terminal_session.dart';
 import 'package:harness/widgets/terminal_panel.dart';
 import 'package:xterm/xterm.dart';
+
+class _PreviewNotifier extends AppNotifier {
+  _PreviewNotifier()
+    : super(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: null,
+      );
+  final reads = <(String, String, String, int)>[];
+  @override
+  Future<Map<String, dynamic>> readRemoteMediaChunk(
+    String machineId,
+    String agentId,
+    String target, {
+    required int offset,
+    String? revision,
+  }) async {
+    reads.add((machineId, agentId, target, offset));
+    return {};
+  }
+}
+
+class _PendingDownloader extends RemoteMediaDownloader {
+  final result = Completer<String>();
+  MediaDownloadCancellation? cancellation;
+  @override
+  Future<String> download({
+    required ReadRemoteMediaChunk readChunk,
+    required MediaDownloadCancellation cancellation,
+    required void Function(RemoteMediaProgress) onProgress,
+  }) async {
+    this.cancellation = cancellation;
+    await readChunk(offset: 0);
+    onProgress(const RemoteMediaProgress('preview.png', 5, 10));
+    return cancellation.wait(result.future);
+  }
+}
 
 void testOnPlatform(
   String description,
@@ -34,14 +74,17 @@ void main() {
     bool local = true,
     bool readOnly = false,
     bool exists = true,
+    RemoteMediaDownloader? downloader,
   }) async {
     launched = [];
     outbound = [];
-    notifier = AppNotifier(
-      config: AppConfig.dev,
-      authSession: AuthSession(),
-      configStore: null,
-    );
+    notifier = downloader != null
+        ? _PreviewNotifier()
+        : AppNotifier(
+            config: AppConfig.dev,
+            authSession: AuthSession(),
+            configStore: null,
+          );
     final machine = Machine(
       machineId: 'm1',
       apiKey: '',
@@ -50,7 +93,9 @@ void main() {
       status: 'online',
     );
     notifier.machines = [machine];
-    notifier.machineStates['m1'] = MachineState(machine)..localOnly = local;
+    notifier.machineStates['m1'] = MachineState(machine)
+      ..localOnly = local
+      ..connectionStatus = ConnectionStatus.connected;
     session =
         TerminalSession(
             machineId: 'm1',
@@ -71,6 +116,7 @@ void main() {
             session: session,
             focused: true,
             readOnly: readOnly,
+            mediaDownloader: downloader,
             linkOpener: TerminalLinkOpener(
               windows: false,
               fileExists: (_) async => exists,
@@ -172,7 +218,9 @@ void main() {
         expect(launched, isEmpty);
         expect(
           find.textContaining(
-            remote ? 'another machine' : 'not available on this computer',
+            remote
+                ? 'Update the Harness CLI'
+                : 'not available on this computer',
           ),
           findsOneWidget,
         );
@@ -180,6 +228,115 @@ void main() {
       },
     );
   }
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testOnPlatform(
+      '$platform remote preview shows progress then opens the downloaded file',
+      (tester) async {
+        final download = _PendingDownloader();
+        await mount(tester, local: false, downloader: download);
+        await click(
+          tester,
+          modifier: platform == TargetPlatform.macOS
+              ? LogicalKeyboardKey.metaLeft
+              : LogicalKeyboardKey.controlLeft,
+          platform: platform == TargetPlatform.macOS ? 'macos' : 'linux',
+        );
+        expect((notifier as _PreviewNotifier).reads, [
+          ('m1', 'a1', '/tmp/preview.png', 0),
+        ]);
+        expect(find.text('Downloading preview.png · 50%'), findsOneWidget);
+        expect(launched, isEmpty);
+        expect(outbound, isEmpty);
+        download.result.complete('/cache/downloaded.png');
+        await tester.pump();
+        expect(launched.single.toFilePath(), '/cache/downloaded.png');
+        expect(find.textContaining('Downloading'), findsNothing);
+      },
+      platform: platform,
+    );
+  }
+  testOnPlatform('Cancel removes download progress and ignores a late result', (
+    tester,
+  ) async {
+    final download = _PendingDownloader();
+    await mount(tester, local: false, downloader: download);
+    await click(tester, modifier: LogicalKeyboardKey.metaLeft);
+    await tester.tap(find.text('CANCEL'));
+    await tester.pump();
+    expect(download.cancellation!.isCancelled, isTrue);
+    expect(find.textContaining('Downloading'), findsNothing);
+    download.result.complete('/cache/downloaded.png');
+    await tester.pump();
+    expect(launched, isEmpty);
+  });
+  testOnPlatform(
+    'closing the pane cancels a download and never opens its late result',
+    (tester) async {
+      final download = _PendingDownloader();
+      await mount(tester, local: false, downloader: download);
+      await click(tester, modifier: LogicalKeyboardKey.metaLeft);
+      await tester.pumpWidget(const SizedBox());
+      expect(download.cancellation!.isCancelled, isTrue);
+      download.result.complete('/cache/downloaded.png');
+      await tester.pump();
+      expect(launched, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testOnPlatform(
+    'replacing the session cancels its preview without opening the old file',
+    (tester) async {
+      final download = _PendingDownloader();
+      await mount(tester, local: false, downloader: download);
+      await click(tester, modifier: LogicalKeyboardKey.metaLeft);
+      final previous = tester.widget<TerminalPanel>(find.byType(TerminalPanel));
+      final panelState = tester.state(find.byType(TerminalPanel));
+      final replacement = TerminalSession(
+        machineId: 'm1',
+        agentId: 'a2',
+        agentName: 'a2',
+        engineId: 'codex',
+        send: (_, _) async => true,
+        sendBinary: (_) async => true,
+      )..status = TerminalSessionStatus.controlling;
+      addTearDown(replacement.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalPanel(
+              notifier: notifier,
+              session: replacement,
+              focused: true,
+              mediaDownloader: download,
+              linkOpener: previous.linkOpener,
+            ),
+          ),
+        ),
+      );
+      expect(tester.state(find.byType(TerminalPanel)), same(panelState));
+      expect(download.cancellation!.isCancelled, isTrue);
+      expect(find.textContaining('Downloading'), findsNothing);
+      download.result.complete('/cache/downloaded.png');
+      await tester.pump();
+      expect(launched, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testOnPlatform(
+    'a failed remote download clears progress and explains the failure',
+    (tester) async {
+      final download = _PendingDownloader();
+      await mount(tester, local: false, downloader: download);
+      await click(tester, modifier: LogicalKeyboardKey.metaLeft);
+      download.result.completeError(
+        const RemoteMediaException('The remote machine disconnected.'),
+      );
+      await tester.pump();
+      expect(find.text('The remote machine disconnected.'), findsOneWidget);
+      expect(find.textContaining('Downloading'), findsNothing);
+      expect(launched, isEmpty);
+    },
+  );
   testOnPlatform('drag selection does not open media', (tester) async {
     await mount(tester);
     await tester.sendKeyDownEvent(
