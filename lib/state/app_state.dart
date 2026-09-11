@@ -1984,6 +1984,7 @@ class AppNotifier extends ChangeNotifier {
       machineId,
       password,
       onProgress: onProgress,
+      displayName: machineStates[machineId]?.machine.displayName,
     );
     if (result.error != null) return result.error;
     final targetId = result.linkedMachineId ?? machineId;

@@ -28,6 +28,7 @@ class DirectLink implements PeerLinkClient {
     String machineId,
     String password, {
     void Function(String stage)? onProgress,
+    String? displayName,
   }) async {
     final String token;
     try {

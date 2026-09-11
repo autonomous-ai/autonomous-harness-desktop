@@ -1,8 +1,7 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:xterm/xterm.dart';
 
+import '../core/apple_fonts.dart';
 import '../core/harness_file_store.dart';
 import '../core/local_key_value_store.dart';
 import 'terminal_typography.dart';
@@ -80,13 +79,13 @@ enum TerminalFontChoice {
   /// Windows falls in with Linux deliberately rather than with macOS: its
   /// runner is unexercised (see CLAUDE.md), and of the two lists the Linux one
   /// at least ends every fallback at the generic `monospace`, which Windows
-  /// does resolve.
+  /// does resolve. iOS takes the Mac list: it resolves the same faces ([hasAppleFonts]).
   static List<TerminalFontChoice> get available =>
-      Platform.isMacOS ? _macChoices : _linuxChoices;
+      hasAppleFonts ? _macChoices : _linuxChoices;
 
   /// What a fresh install opens with, and what `reset()` returns to.
   static TerminalFontChoice get defaultForPlatform =>
-      Platform.isMacOS ? sfMono : dejaVuSansMono;
+      hasAppleFonts ? sfMono : dejaVuSansMono;
 }
 
 /// The user's chosen terminal typography (family + size), remembered across
