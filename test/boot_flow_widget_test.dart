@@ -14,6 +14,7 @@ import 'package:harness/terminal/terminal_session.dart';
 import 'package:harness/update/desktop_updater.dart';
 import 'package:harness/update/manual_update_check.dart';
 import 'package:harness/widgets/update_notice.dart';
+import 'package:harness/widgets/bootstrapping_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -493,7 +494,7 @@ void main() {
     expect(find.byIcon(Icons.login), findsOneWidget);
   });
 
-  testWidgets('bootstrapping shows full-screen spinner (pre-login)', (
+  testWidgets('bootstrapping shows branded startup screen (pre-login)', (
     tester,
   ) async {
     final app = makeNotifier(AppStatus.bootstrapping);
@@ -505,8 +506,13 @@ void main() {
     );
     await tester.pump();
 
-    // RootShell renders a centered spinner while bootstrapping, not LoginScreen
+    // RootShell renders the designed startup bridge while bootstrapping, not
+    // LoginScreen. Keep this on the real RootShell so notifier wiring remains
+    // covered as well as the standalone screen's presentation tests.
+    expect(find.byType(BootstrappingScreen), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Getting Harness ready'), findsOneWidget);
+    expect(find.text('Opening Harness…'), findsOneWidget);
     expect(find.text('Sign in'), findsNothing);
   });
 

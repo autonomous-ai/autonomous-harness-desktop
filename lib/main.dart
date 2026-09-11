@@ -13,6 +13,7 @@ import 'state/app_state.dart';
 import 'shared/theme/app_theme.dart' as grid;
 import 'shared/theme/appearance_prefs_store.dart';
 import 'terminal/terminal_font_store.dart';
+import 'widgets/bootstrapping_screen.dart';
 import 'widgets/layout_palette.dart';
 import 'widgets/environment_preflight_screen.dart';
 import 'widgets/environment_setup_screen.dart';
@@ -205,20 +206,7 @@ class _RootShellState extends ConsumerState<RootShell> {
             // and again on success.
             screen = app.signingIn
                 ? LoginScreen(notifier: app)
-                : Scaffold(
-                    body: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(),
-                          if (app.bootStatusMessage != null) ...[
-                            const SizedBox(height: 16),
-                            Text(app.bootStatusMessage!),
-                          ],
-                        ],
-                      ),
-                    ),
-                  );
+                : BootstrappingScreen(statusMessage: app.bootStatusMessage);
           case AppStatus.checkingEnvironment:
             screen = EnvironmentPreflightScreen(
               readiness: app.environmentReadiness,
