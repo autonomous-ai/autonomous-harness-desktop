@@ -130,6 +130,7 @@ class EnvironmentReadiness {
     EnvironmentTerminalSetup? terminalSetup,
     bool? systemReady,
     bool clearFailure = false,
+    bool clearTerminalHandoff = false,
   }) => EnvironmentReadiness(
     steps: steps ?? this.steps,
     message: message ?? this.message,
@@ -137,9 +138,15 @@ class EnvironmentReadiness {
     phase: phase ?? this.phase,
     mode: mode ?? this.mode,
     failure: clearFailure ? null : failure ?? this.failure,
-    terminalLogPath: terminalLogPath ?? this.terminalLogPath,
-    terminalResultPath: terminalResultPath ?? this.terminalResultPath,
-    terminalSetup: terminalSetup ?? this.terminalSetup,
+    terminalLogPath: clearTerminalHandoff
+        ? null
+        : terminalLogPath ?? this.terminalLogPath,
+    terminalResultPath: clearTerminalHandoff
+        ? null
+        : terminalResultPath ?? this.terminalResultPath,
+    terminalSetup: clearTerminalHandoff
+        ? null
+        : terminalSetup ?? this.terminalSetup,
     systemReady: systemReady ?? this.systemReady,
   );
 }
@@ -272,12 +279,15 @@ class EnvironmentProvisioner {
     bool install = true,
     EnvironmentSetupMode? mode,
   }) async {
+    final retryingFailedSetup =
+        install && resumeFrom?.phase == EnvironmentSetupPhase.failed;
     var state = (resumeFrom ?? EnvironmentReadiness.initial()).copyWith(
       phase: install
           ? EnvironmentSetupPhase.installing
           : EnvironmentSetupPhase.preflight,
       mode: mode,
       clearFailure: true,
+      clearTerminalHandoff: retryingFailedSetup,
     );
     void emit({
       EnvironmentStep? step,

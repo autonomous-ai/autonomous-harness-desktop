@@ -866,6 +866,43 @@ void main() {
   );
 
   test(
+    'explicit Retry clears the failed Terminal result and opens one new run',
+    () async {
+      var launches = 0;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        openTerminal: (_) async => launches++,
+        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+      );
+      final waiting = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+      await File(waiting.terminalResultPath!).writeAsString('100\n');
+      final failed = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: waiting,
+        install: false,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      final retried = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: failed,
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(launches, 2);
+      expect(retried.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(retried.terminalResultPath, isNot(waiting.terminalResultPath));
+    },
+  );
+
+  test(
     'a fully prepared machine passes a fresh read-only launch probe',
     () async {
       await createManagedHarness();
