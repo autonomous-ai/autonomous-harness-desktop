@@ -23,10 +23,11 @@ import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
 import '../widgets/engine_identity.dart' show allEngines;
+import '../core/harness_file_store.dart';
+import 'dial_status.dart';
 import 'pane_layout_store.dart';
 import 'terminal_pane.dart';
 import '../terminal/terminal_binary.dart';
-import '../core/app_version.dart';
 import '../update/desktop_updater.dart';
 import '../update/manual_update_check.dart';
 import '../viewer/sign_in_browser.dart';
@@ -399,6 +400,12 @@ class AppNotifier extends ChangeNotifier {
     PaneLayoutStore? paneLayoutStore,
     this.turnActivityTimeout = const Duration(seconds: 12),
   }) : _paneLayout = paneLayoutStore,
+       // Remembers "a dial has been seen here" on the same terms the pane
+       // layout is remembered: with a layout store there is a state file, and
+       // without one (the tests) nothing is written anywhere.
+       dial = DialState(
+         paneLayoutStore == null ? null : HarnessFileStore.shared,
+       ),
        session = authSession,
        _store = configStore,
        cliLink = cliLink ?? CliLink(),
@@ -451,6 +458,11 @@ class AppNotifier extends ChangeNotifier {
   /// [appStateProvider].
   final PaneLayoutStore? _paneLayout;
 
+  /// The dial on this desk, for the rail's device row. Fed by `dial_status`
+  /// frames from the local daemon; its own notifier, so the row rebuilds
+  /// without dragging the whole rail through a machine-list rebuild.
+  final DialState dial;
+
   TerminalPane? get focusedPane {
     final id = focusedPaneId;
     if (id == null) return null;
@@ -484,14 +496,6 @@ class AppNotifier extends ChangeNotifier {
 
   bool isAgentInPane(String machineId, String agentId) =>
       paneOfAgent(machineId, agentId) != null;
-
-  /// Whether the sidebar is folded away.
-  ///
-  /// Held here rather than only in the screen's own state because it is a fact
-  /// about the workspace, and two things outside that screen ask about it: the
-  /// snapshot below, and anything that wants to know whether a person works with
-  /// the rail hidden. The screen still owns the toggling.
-  bool railFolded = false;
 
   /// True while the KEYBOARD is in the rail rather than on the grid.
   ///
@@ -854,9 +858,6 @@ class AppNotifier extends ChangeNotifier {
     // The task goes to the LOCAL daemon whichever machine the agent is on: it owns the dispatch that
     // knows the difference (its own registry, or the fleet link to the other computer). Sending it down
     // the remote machine's own socket would be a second delivery path for the same thing.
-    // Armed BEFORE the send, so the `turn_started` that follows finds it. The
-    // daemon can answer faster than this method returns.
-    armTurnSource(agentId, 'palette');
     try {
       final reply = await connection.request(
         'route_send',
@@ -1309,6 +1310,7 @@ class AppNotifier extends ChangeNotifier {
     // for as long as the slowest one takes, and would hand the first-run
     // auto-pick a window in which the grid still looks empty.
     await _restorePaneLayout();
+    await dial.restore();
     _ensurePool();
     try {
       await ensureCliDaemonReady();
@@ -1418,15 +1420,6 @@ class AppNotifier extends ChangeNotifier {
     if (availableUpdate?.version == info.version) return;
     availableUpdate = info;
     updateError = null;
-    // The top of the funnel. Offered, then taken or waved away — three events
-    // for one decision, because the DROPS between them are the finding and a
-    // single "installed" count cannot show one.
-    unawaited(
-      runningAppVersion().then(
-        (from) => analytics.updateOffered(from: from, to: info.version),
-        onError: (_) {},
-      ),
-    );
     notifyListeners();
   }
 
@@ -1467,12 +1460,6 @@ class AppNotifier extends ChangeNotifier {
     if (info == null) return;
     _skippedDesktopUpdateVersion = info.version;
     await _store?.saveSkippedDesktopUpdateVersion(info.version);
-    unawaited(
-      runningAppVersion().then(
-        (from) => analytics.updateSkipped(from: from, to: info.version),
-        onError: (_) {},
-      ),
-    );
     availableUpdate = null;
     updateError = null;
     notifyListeners();
@@ -1499,14 +1486,6 @@ class AppNotifier extends ChangeNotifier {
             'This copy of Harness cannot install updates automatically.';
         return false;
       }
-      // BEFORE exit(0), and awaited — this is the last instruction that runs in
-      // this process, and the queue is in memory. An `update_installed` reported
-      // after the call that ends the program is one that never leaves.
-      analytics.updateInstalled(
-        from: await runningAppVersion(),
-        to: info.version,
-      );
-      await analytics.close();
       exit(0);
     } catch (error) {
       updateError = 'Could not install Harness ${info.version}: $error';
@@ -1752,27 +1731,10 @@ class AppNotifier extends ChangeNotifier {
         Future<LocalCliEndpoint?>.value();
     final list = await _fetchMachines();
     final localEndpoint = await localFuture;
-    final previous = machines.map((machine) => machine.machineId).toSet();
     machines = list
         .where((machine) => machine.authMode == MachineAuthMode.remote)
         .toList();
     final visible = machines.map((machine) => machine.machineId).toSet();
-    // THE EVENT, which the snapshot cannot be: two machines linked and one
-    // unlinked in a week reads as "one more machine" in snapshots alone.
-    //
-    // Skipped on the FIRST load, when `previous` is empty and every machine
-    // would report itself as newly linked — that is a person signing in, not a
-    // person pairing a computer.
-    if (previous.isNotEmpty) {
-      for (final machine in machines) {
-        if (!previous.contains(machine.machineId)) {
-          analytics.machineLinked(mode: machine.authMode.name);
-        }
-      }
-      for (final id in previous) {
-        if (!visible.contains(id)) analytics.machineUnlinked();
-      }
-    }
     for (final entry in machineStates.entries) {
       if (!visible.contains(entry.key)) {
         _clearMachineActivity(entry.value);
@@ -2654,53 +2616,6 @@ class AppNotifier extends ChangeNotifier {
   /// already mid-turn when this app connected, are both work that was under way
   /// before anybody here typed anything — counting either would report a
   /// near-zero wait for a returning user who has not said a word.
-  /// Which door sent the turn that is about to start, per agent.
-  ///
-  /// Armed by the surfaces that KNOW — the composer, the ⌘B palette — and read
-  /// by `turn_started`, which is the one place every turn passes through
-  /// whatever sent it. Doing it the other way round (reporting at each send
-  /// site) would miss every turn typed straight into the terminal, which is how
-  /// most people drive these engines.
-  final Map<String, String> _turnSource = {};
-
-  /// Remember the door, for the turn this agent is about to start.
-  void armTurnSource(String agentId, String source) {
-    _turnSource[agentId] = source;
-  }
-
-  /// Report one turn, and forget the door.
-  ///
-  /// Unarmed means the terminal: typing into the pty is invisible to this app by
-  /// design, so a turn nobody claimed is one somebody typed. A turn the dial
-  /// sent outside the window's palette lands here too — see `turnSent`.
-  void _reportTurnSent(MachineState machine, String agentId) {
-    final source = _turnSource.remove(agentId) ?? 'terminal';
-    var engine = '';
-    for (final agent in machine.agents) {
-      if (agent.id == agentId) {
-        engine = agent.engine ?? '';
-        break;
-      }
-    }
-    analytics.turnSent(engine: engine, source: source);
-    _paneTurns[agentId] = (_paneTurns[agentId] ?? 0) + 1;
-  }
-
-  /// The engine an agent runs, or '' when this window does not know it.
-  String _engineOf(String machineId, String agentId) {
-    for (final agent in machineStates[machineId]?.agents ?? const <Agent>[]) {
-      if (agent.id == agentId) return agent.engine ?? '';
-    }
-    return '';
-  }
-
-  /// Turns seen per agent, for `pane_closed`. Keyed by AGENT, not by pane: a
-  /// tile that swapped agents has not carried the new one's history.
-  final Map<String, int> _paneTurns = {};
-
-  /// When each open tile went on screen, for `pane_closed`.
-  final Map<int, DateTime> _paneOpenedAt = {};
-
   void _reportFirstMessage() {
     if (_awaitingFirstMessage case final login?) {
       _awaitingFirstMessage = null;
@@ -3359,12 +3274,8 @@ class AppNotifier extends ChangeNotifier {
   Future<void> assignAgentToPane(
     int? paneId,
     String machineId,
-    String agentId, {
-
-    /// Which door — `rail`, `switcher`, `drag`, `dial`, `palette`. Defaults to
-    /// `rail`, the oldest and by far the commonest caller.
-    String source = 'rail',
-  }) async {
+    String agentId,
+  ) async {
     final machine = machineStates[machineId];
     if (machine == null) return;
 
@@ -3402,20 +3313,10 @@ class AppNotifier extends ChangeNotifier {
         agentId: agentId,
       );
       panes.add(pane);
-      _paneOpenedAt[pane.id] = DateTime.now();
-      analytics.paneOpened(
-        engine: _engineOf(machineId, agentId),
-        source: source,
-      );
     } else {
       await _detachSession(pane, sendClose: true);
       pane.machineId = machineId;
       pane.agentId = agentId;
-      _paneOpenedAt[pane.id] = DateTime.now();
-      analytics.paneOpened(
-        engine: _engineOf(machineId, agentId),
-        source: source,
-      );
     }
 
     focusedPaneId = pane.id;
@@ -3765,17 +3666,6 @@ class AppNotifier extends ChangeNotifier {
     final index = panes.indexWhere((pane) => pane.id == paneId);
     if (index == -1) return;
     final pane = panes.removeAt(index);
-    // Reported here rather than from each of the callers that close a tile —
-    // the rail's menu, ⌘W, an agent being deleted, a machine going away — which
-    // is the same reason `turn_sent` is reported from `turn_started`.
-    final since = _paneOpenedAt.remove(pane.id);
-    if (since != null && pane.agentId != null) {
-      analytics.paneClosed(
-        engine: _engineOf(pane.machineId, pane.agentId!),
-        secondsOpen: DateTime.now().difference(since).inSeconds,
-        turns: _paneTurns.remove(pane.agentId!) ?? 0,
-      );
-    }
     // A zoom belongs to a tile, so closing that tile ends it. Left set, the grid
     // would try to fill itself with a pane that is no longer in the list and
     // draw nothing at all.
@@ -3802,50 +3692,7 @@ class AppNotifier extends ChangeNotifier {
     if (persist) _persistLayout();
   }
 
-  /// The last shape reported, so an unchanged desk costs nothing.
-  String _lastSnapshot = '';
-  Timer? _snapshotDebounce;
-
-  /// Report the desk, at most once a minute and only when it changed.
-  ///
-  /// DEBOUNCED AND DEDUPED, both. Dragging a divider or walking the focus fires
-  /// `_persistLayout` repeatedly and changes nothing this event carries; opening
-  /// four tiles in a row changes it four times and only the last is interesting.
-  /// Without the guard this would be the loudest event in the stream and the
-  /// least informative.
-  void _reportWorkspace() {
-    _snapshotDebounce?.cancel();
-    _snapshotDebounce = Timer(const Duration(seconds: 5), () {
-      final engines = <String>[
-        for (final pane in panes)
-          if (pane.agentId != null) _engineOf(pane.machineId, pane.agentId!),
-      ].where((e) => e.isNotEmpty).toSet().toList()..sort();
-      final online = machineStates.values
-          .where((m) => m.nodeOnline == true)
-          .length;
-      final agents = machineStates.values.fold<int>(
-        0,
-        (n, m) => n + m.agents.length,
-      );
-      final shape =
-          '${machines.length}/$online/$agents/${panes.length}/'
-          '${engines.join(",")}/${presetFor(panes.length)?.name}';
-      if (shape == _lastSnapshot) return;
-      _lastSnapshot = shape;
-      analytics.workspaceSnapshot(
-        machinesLinked: machines.length,
-        machinesOnline: online,
-        agentsTotal: agents,
-        panesOpen: panes.length,
-        railFolded: railFolded,
-        engines: engines,
-        layoutPreset: presetFor(panes.length)?.name,
-      );
-    });
-  }
-
   void _persistLayout() {
-    _reportWorkspace();
     // The roster and the saved layout describe the same fact — which agents are
     // on the grid — so they are announced and written from the same place.
     // Before the early return below: a window with no layout store still has
@@ -4023,6 +3870,11 @@ class AppNotifier extends ChangeNotifier {
       // ── the dial, over the cable, forwarded by the local daemon ──────────────────────────────────
       // Local-only frames (backend.sendLocal in the harness CLI): they describe a hand at THIS desk, so
       // they never reach the cloud web audience, who may be sitting at another computer entirely.
+      case 'dial_status':
+        // The dial came, went, or started taking an update. Its own notifier —
+        // see [dial] — so nothing else in the window rebuilds for it.
+        dial.apply(DialStatus.fromJson(payload));
+        break;
       case 'dial_scroll':
         // Straight through, including the reports carrying no travel — the ends of a stroke are the point
         // of the message. The window does no arithmetic here; the terminal that owns the scrollback does.
@@ -4203,11 +4055,7 @@ class AppNotifier extends ChangeNotifier {
         // A turn that STARTS is somebody sending something; a heartbeat is a
         // turn already under way, which for an agent this app merely reconnected
         // to is work nobody here just asked for.
-        if (type == 'turn_started') {
-          _reportFirstMessage();
-          final started = _eventAgentId(machine, event, payload);
-          if (started != null) _reportTurnSent(machine, started);
-        }
+        if (type == 'turn_started') _reportFirstMessage();
         final agentId = _eventAgentId(machine, event, payload);
         if (agentId != null) {
           _markAgentProcessing(machine, agentId);

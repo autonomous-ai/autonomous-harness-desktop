@@ -728,18 +728,7 @@ class _TerminalPanelState extends State<TerminalPanel>
               onPressed: widget.onToggleComposer!,
             ),
           if (showComposer)
-            TerminalComposer(
-              session: session,
-              focusNode: _composerFocus,
-              // The door this turn came through. ARMED, not reported: the one
-              // funnel every turn passes is `turn_started`, whatever sent it,
-              // and reporting here would count only the box and miss everything
-              // typed straight into the terminal.
-              onSend: () => widget.notifier.armTurnSource(
-                widget.session.agentId,
-                'composer',
-              ),
-            ),
+            TerminalComposer(session: session, focusNode: _composerFocus),
         ],
       ),
     );
