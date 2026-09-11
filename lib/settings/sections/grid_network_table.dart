@@ -348,7 +348,7 @@ class _NetworkRow extends StatelessWidget {
         _RowSurface(
           selected: selected,
           onTap: onUse,
-          semanticsLabel: 'Use ${network.displayName} for new agents',
+          semanticsLabel: 'Make ${network.displayName} the default provider',
           // The drawer under an open row carries the divider instead, so the
           // row and its details read as one block rather than two.
           divider: !expanded,

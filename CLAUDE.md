@@ -219,10 +219,17 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   vocabulary is `grid` and a half-renamed data layer is worse than an honestly split one. **"Grid"
   survives in the copy wherever it names the PRODUCT** — the sign-in card, `harness grid login`,
   "Join one from the Grid app" — since that is a real, separate account a person signs into.
-- **Picking a provider retargets NEW agents only, and ENABLED is a second, separate question.**
-  `gridSelectionStore` (`lib/grid/`, persisted like `themeModeStore`, loaded in
-  `loadPersistedSettings`) holds the DEFAULT — the one provider new agents launch against — and
-  `providerEnablementStore` (`grid/provider_enablement_store.dart`) holds which providers this
+- **The DEFAULT provider does NOT decide where a new agent launches, and ENABLED is a second,
+  separate question.** `gridSelectionStore` (`lib/grid/`, persisted like `themeModeStore`, loaded in
+  `loadPersistedSettings`) holds the DEFAULT — ⚠️ **once "the provider new agents launch against",
+  and no longer that.** A new agent always starts on the engine's own login (see the New agent
+  dialog bullet below); what the default still decides is what Share Intelligence offers first when
+  nothing is pinned there, which provider `usage_offer_actions.dart` moves agents to, and which
+  provider the rail's usage figures are about. Copy across four surfaces used to say "new agents run
+  on X" — the two pills, Settings ▸ Providers' subtitle and footnote, `grid_network_table`'s
+  semantics label — and all of it was rewritten when the behaviour changed; if you find that
+  sentence anywhere, it is a straggler, not a spec. `providerEnablementStore`
+  (`grid/provider_enablement_store.dart`) holds which providers this
   computer will offer at all, of which many can be on. They were one radio before, which made "stop
   offering me this provider" impossible to say without also moving every new agent. **Turning the
   default OFF hands the default to the next enabled provider** rather than refusing the click, and
@@ -259,16 +266,28 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   session written by `grid login` in a terminal directs nothing on its own), and
   **`GridSelectionStore.load`, which is the one that matters**: `state.json` is shared
   with the debug build where a grid IS picked, so without it a release build would inherit that
-  choice off disk and launch agents on a grid it shows no picker, no pane and no way out of. The
+  choice off disk and act on a grid it shows no picker, no pane and no way out of — no longer
+  *launching agents* on it (that stopped reading the store), but still sharing to it and counting
+  its usage, which is just as unexplainable from a build with the surface hidden. The
   stored key is left alone, not cleared — it is the other build's setting. `settingsGroupsFor` takes
   both gates as arguments so the shipped shape can be asserted from a test run, which by definition
   has everything switched on, and `kDefaultSettingsSection` is derived from the visible list rather
   than named (it used to name Grid, the first row a shipped build drops).
-  The model is chosen per agent, not globally, and **only once the agent exists**: the agent view's
-  header pill (`widgets/agent_model_menu.dart`) picks it for a running agent, and the New agent
-  dialog offers no model at all — every new agent launches on Auto (no `model` on the wire, the grid
-  chooses), because a model picked before there is an agent to apply it to is a second door onto a
-  setting the header already owns. **The pill prints one word — `Model` — not the model id**
+  The provider AND the model are chosen per agent, not globally, and **only once the agent exists**:
+  the agent view's header pill (`widgets/agent_model_menu.dart`) picks both for a running agent, and
+  the New agent dialog offers neither. **Every new agent launches with `grid: null`** — the frame
+  this app sent before grids existed — so it runs on whatever login the engine is already signed in
+  with on that machine, and the dialog's `Inference` line is a constant reading `kNoGridTargetLabel`
+  / `kNoGridTargetDetail` (the same two strings the pills and the model picker use, never a third
+  wording). The old behaviour read `gridSelectionStore` and minted a relay key on every Create,
+  which meant one value answered two questions — "which provider is my default" and "what should a
+  new agent start on" — and the only way to launch on the subscription already signed in here was to
+  change the default for the whole app. Three things fell out of `_submit` with it: the credentials
+  round trip (so there is no failure mode between the click and the launch), the `refused` gate (so
+  Cursor/Amp/Devin, which the CLI will not point at a grid, can be launched from here again), and
+  every `!refused &&` guard in the summary. ⚠️ `test/new_agent_grid_warning_test.dart` sets a grid
+  in the store on purpose in nearly every case — it is asserting the dialog IGNORES it, so do not
+  "tidy" those away; `agent_events_test.dart` guards the same thing from the analytics side. **The pill prints one word — `Model` — not the model id**
   (`kModelPillLabel`): a pane header already carries the agent's name, a status dot, a transport
   badge and the pane's own buttons, so four panes side by side leave it ~150px and a real id
   ellipsized to `DeepSeek-V4-F…`, which answers nothing and costs the width anyway. The answer is
@@ -306,10 +325,11 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   (`Loading models…`, or the failure when a load ended in one) — dropping the rows is right,
   dropping the fact that grids are still being asked is not, since the reader would otherwise watch
   the list grow with no idea why. A grid serving NOTHING is silent there: it is neither pending nor
-  broken, and there is nothing to wait for or fix. At create time the New agent
-  dialog calls `resolveGridAgentOverride()`, which mints a fresh relay key, and `createAgent` adds it
-  as `payload.grid` — **only when a grid is picked**, so an unselected build sends the frame it
-  always did. The harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
+  broken, and there is nothing to wait for or fix. ⚠️ **`resolveGridAgentOverride()` is no longer
+  called at create time** — the New agent dialog sends `grid: null` always. Its one caller is
+  `applyAgentModel` (`widgets/agent_model_menu.dart`), which mints a fresh relay key for the one
+  agent being moved, and `moveAgentToGrid`/`createAgent` put it on the wire as `payload.grid`. The
+  harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
   and gives the new tmux session `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` via
   `new-session -e`, so the key never lands in the engine's argv. **Seven engines are grid-capable —
   claude, codex, copilot, grok, hermes, opencode, pi**; the CLI refuses the rest with
@@ -365,10 +385,12 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
   is the page's own palette, copied value-for-value from Grid — keep the two in step.
 - **Which grid this computer SERVES is not `GridSelectionStore`.** It is
-  `share/share_target_store.dart`, and the split is the point: Providers' `DEFAULT` answers "where do
-  the agents I start get credentials" (what this machine *consumes*), the share target answers "who
-  do my GPU and my keys answer for" (what it *gives*). One value for both meant pointing the share
-  at a lab grid silently moved every new agent with it. `resolveShareTarget(pin, providersDefault)`
+  `share/share_target_store.dart`, and the split is the point: Providers' `DEFAULT` answers "which
+  provider does this computer fall back to" (what this machine *consumes*), the share target answers
+  "who do my GPU and my keys answer for" (what it *gives*). One value for both meant pointing the
+  share at a lab grid silently moved every new agent with it — ⚠️ that particular consequence is
+  gone (a new agent reads neither value now), but the split stands on its own: the share target is
+  where this computer's GPU is offered, and that is not a fallback. `resolveShareTarget(pin, providersDefault)`
   is the only place the precedence is written: **an absent pin means "follow Providers", not "no
   grid"**, so a machine that never opens the picker behaves exactly as it did before the picker
   existed, and a pin deliberately does NOT track the default afterwards. The page says which of the
@@ -507,7 +529,9 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   both off `candidates` was a real hole: a computer whose only Codex agent had been moved onto a
   provider by hand watched that account hit 97% and was offered nothing, while `New agent` would
   have launched the next one straight back onto the spent subscription because no DEFAULT was
-  picked. Moving asks `candidates` ("what is on that subscription now"); choosing a default asks
+  picked. ⚠️ That second half now happens **regardless of the DEFAULT** — a new agent always starts
+  on the engine's own login — which makes `Move my agents` the offer that carries this, not
+  `Choose a default`. Moving asks `candidates` ("what is on that subscription now"); choosing a default asks
   `present` ("does this computer run that engine at all"), and an agent parked on a provider
   answers yes. In every one of those cases the amber figure has already said the only thing left
   to say, and a warning the reader can only agree with is not worth interrupting for.
@@ -735,8 +759,9 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - **Settings ▸ Providers is a SPLIT, not a table** (`settings/sections/provider_split_pane.dart`,
   framed by `grid_section.dart`): a rail of every provider on the left, and on the right everything
   about whichever one the rail has selected. Selecting a row READS a provider; `Make default` is
-  what changes where agents launch — separated because the table's row-as-radio made looking at a
-  provider indistinguishable from moving every new agent onto it. The panel prints what the old
+  what changes this computer's fallback provider — separated because the table's row-as-radio made
+  looking at a provider indistinguishable from changing that (and, at the time, from moving every
+  new agent onto it). The panel prints what the old
   per-row drawer hid (id, signaling, owner, the router's models **by name**, created) with one
   deliberate omission: **`Provider type` is gone**, since it is the control plane's wire spelling
   (`permissioned-public`) of the rule "Who can join" states two rows above in words. Under 820px the

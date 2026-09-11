@@ -20,8 +20,6 @@ import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
 
-import 'support/fake_grid_api.dart';
-
 /// Keeps every tracked event, so a test can assert on the name AND the params
 /// — a stream is only as good as what its params carry.
 class RecordingAnalytics implements Analytics {
@@ -104,7 +102,6 @@ void main() {
                   notifier,
                   'machine-1',
                   source: source,
-                  gridApiClient: FakeGridApi(),
                 ),
                 child: const Text('open'),
               ),
@@ -143,6 +140,10 @@ void main() {
   });
 
   group('agent_created', () {
+    // The store is still set by these tests — not because the dialog reads it
+    // (it no longer does), but because the ONE thing worth asserting now is
+    // that it does not: a default provider sitting in the store must not turn
+    // up in this event.
     final before = gridSelectionStore.value;
     tearDown(() => gridSelectionStore.value = before);
 
@@ -160,7 +161,6 @@ void main() {
                   notifier,
                   'machine-1',
                   source: 'machine_row',
-                  gridApiClient: FakeGridApi(),
                 ),
                 child: const Text('open'),
               ),
@@ -181,9 +181,29 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('carries the engine, and Auto as a grid with no model', (
+    testWidgets('carries the engine, and never a grid', (tester) async {
+      await create(tester);
+
+      final params = tracked.paramsOf('agent_created');
+      expect(params['engine'], 'claude');
+      // A create is always the engine's own login now, so this is the one
+      // shape the event ever has from this door. Grid launches are reported
+      // from the agent view's model menu instead.
+      expect(params['on_grid'], isFalse);
+      expect(params['network_id'], isNull);
+      expect(params['model'], isNull);
+      expect(params['bypass_permission'], isFalse);
+    });
+
+    testWidgets('a default provider does not leak into the event', (
       tester,
     ) async {
+      // The regression this whole change is about, stated as an assertion: a
+      // grid sitting in the store as the default provider used to BE the
+      // launch target, and this event named it. It must now be invisible from
+      // here — if this ever goes back to reading the store, this is the test
+      // that says so rather than a user finding their agent on the wrong
+      // account.
       gridSelectionStore.value = const GridSelection(
         networkId: 'grid-3378218621364f16',
         networkName: 'autonomous.ai',
@@ -191,27 +211,14 @@ void main() {
       await create(tester);
 
       final params = tracked.paramsOf('agent_created');
-      expect(params['engine'], 'claude');
-      expect(params['on_grid'], isTrue);
-      expect(params['network_id'], 'grid-3378218621364f16');
-      // Auto: on a grid, with the grid choosing. Null here MEANS Auto, which is
-      // why `on_grid` has to be read beside it.
-      expect(params['model'], isNull);
-      expect(params['bypass_permission'], isFalse);
-    });
-
-    testWidgets('own login is a null model that is NOT on a grid', (
-      tester,
-    ) async {
-      // The distinction the notifier cannot see — both arrive there as a null
-      // override — and the reason this event is sent from the dialog.
-      gridSelectionStore.value = GridSelection.none;
-      await create(tester);
-
-      final params = tracked.paramsOf('agent_created');
       expect(params['on_grid'], isFalse);
-      expect(params['model'], isNull);
       expect(params['network_id'], isNull);
+      expect(params['model'], isNull);
+      expect(
+        params.values.join(' '),
+        isNot(contains('autonomous.ai')),
+        reason: 'the default provider is not what this agent launched on',
+      );
     });
 
     testWidgets('the working folder is never sent', (tester) async {

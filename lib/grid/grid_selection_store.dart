@@ -95,7 +95,19 @@ void resetThisComputerLabel() => _thisComputerName = '';
 /// the sentence has to live where only the picker shows it.
 const String kNoGridTargetDetail = 'Subscription or API key';
 
-/// The grid new agents are launched against, if any.
+/// This computer's default provider, if any.
+///
+/// ⚠️ **This is NOT what new agents launch against.** It was, and the name of
+/// everything here still leans that way. A new agent now always starts on the
+/// engine's own login — see `_submit` in `widgets/new_agent_dialog.dart` — and
+/// a running agent is moved onto a provider one at a time, from its own header
+/// menu (`widgets/agent_model_menu.dart`), which carries the provider AND the
+/// model because those are one decision.
+///
+/// What the default still decides: what Share Intelligence offers first when
+/// nothing is pinned there (`share/share_target_store.dart`), which provider
+/// the usage-limit offer moves agents to (`widgets/usage_offer_actions.dart`),
+/// and which provider the rail's usage figures are about.
 ///
 /// [networkName] is stored beside the id so a reader — Settings ▸ Grid, the
 /// New agent dialog — can name the grid on the first frame, before anything
@@ -132,7 +144,8 @@ class GridSelection {
   int get hashCode => Object.hash(networkId, networkName);
 }
 
-/// Remembers which grid new agents should run against.
+/// Remembers this computer's default provider — see [GridSelection] for the
+/// ⚠️ on what that does and does not decide.
 ///
 /// A persisted [ValueNotifier] singleton, like `terminalFontStore`: Settings ▸
 /// Grid writes it, and it is read by the New agent dialog, the agent view's

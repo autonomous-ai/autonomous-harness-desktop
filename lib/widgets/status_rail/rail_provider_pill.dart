@@ -14,7 +14,14 @@ import '../../shared/widgets/app_menu.dart';
 import '../../state/app_state.dart';
 import '../grid_target_pill.dart' show gridTargetMenuOptions;
 
-/// What new agents run on, at the left end of the status rail.
+/// Which provider this computer is on, at the left end of the status rail.
+///
+/// ⚠️ **Not "what new agents run on" any more.** That is what this pill was
+/// added to answer, and it is no longer the question it answers: a new agent
+/// starts on the engine's own login whatever is picked here. What the choice
+/// still decides is what the usage figures beside it count, what Share
+/// Intelligence offers first, and which provider the usage-limit offer moves
+/// agents to.
 ///
 /// **The rail said the consequence and never the cause.** Everything else on
 /// this strip is a measurement — how much of a rate limit is spent, how many
@@ -130,9 +137,14 @@ class _RailProviderPillState extends State<RailProviderPill> {
   }
 
   List<Widget> _rows(GridSelection chosen) => [
+    // ⚠️ This used to read "New agents only", and that stopped being true: a
+    // new agent starts on the engine's own login whatever is picked here (see
+    // `widgets/new_agent_dialog.dart`). The note now says where the choice is
+    // actually felt, and where an agent is moved onto a provider instead.
     const AppMenuNote(
-      'New agents only. Agents already running keep the provider they '
-      'started on.',
+      'This is what the figures beside it count, and what Share Intelligence '
+      'offers first. A new agent starts on its engine’s own login — move one '
+      'onto a provider from that agent’s model menu.',
       panelWidth: _panelMaxWidth,
     ),
     const AppMenuDivider(),
@@ -267,8 +279,8 @@ class _PillState extends State<_Pill> {
     return Semantics(
       button: true,
       label: widget.onProvider
-          ? 'new agents run on ${widget.label}'
-          : 'new agents run on this machine’s own accounts',
+          ? 'this computer’s provider is ${widget.label}'
+          : 'this computer is on no provider; engines use their own accounts',
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),

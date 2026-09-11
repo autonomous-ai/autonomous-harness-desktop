@@ -16,8 +16,6 @@ import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
 
-import 'support/fake_grid_api.dart';
-
 /// Stands in for the CLI round trip `createAgent` normally makes, so a test can drive a real
 /// Create click and inspect exactly what payload it built — the same shape
 /// `ReloadTrackingNotifier` (machine_tree_widget_test.dart) uses for its own notifier calls.
@@ -124,103 +122,72 @@ void main() {
   final warning = find.textContaining('cannot be pointed at a grid');
   Finder createButton() => find.widgetWithText(FilledButton, 'Create agent');
 
-  testWidgets('says nothing about grids when none is picked', (tester) async {
-    gridSelectionStore.value = GridSelection.none;
-    await openDialog(tester, engine: 'cursor');
-    // The summary still has to answer "on whose account", and with no grid the
-    // honest answer is the engine's own account.
-    expect(find.textContaining("Cursor's own account"), findsOneWidget);
-    expect(warning, findsNothing);
+  /// A grid sitting in the store as this computer's default provider — the
+  /// state every test below is checking the dialog now IGNORES.
+  const defaultProvider = GridSelection(
+    networkId: 'grid-3378218621364f16',
+    networkName: 'autonomous.ai',
+  );
+
+  testWidgets('the summary names the engine\'s own login, whatever the '
+      'default provider is', (tester) async {
+    gridSelectionStore.value = defaultProvider;
+    await openDialog(tester, engine: 'claude');
+    // The same two lines the sidebar's provider pill and the agent's model menu
+    // use for this state — not a third wording of its own.
+    expect(find.text(kNoGridTargetLabel), findsOneWidget);
+    expect(find.text(kNoGridTargetDetail), findsOneWidget);
+    // And emphatically NOT the grid, which is what this line used to read.
+    expect(find.textContaining('autonomous.ai'), findsNothing);
   });
 
-  // The note beside an engine's name, which said `no grid` for BOTH "you chose
-  // to use none" and "this one cannot use one" — the picker's own words for a
-  // deliberate choice, spent on an engine's limitation.
+  // The note beside an engine's name, which appeared for an engine the CLI
+  // would refuse to point at the chosen grid. No launch from here goes to a
+  // grid any more, so no engine can be refused for one.
   final gridNote = find.text('grid not supported');
 
-  testWidgets('no grid picked, no grid note beside any engine', (tester) async {
-    // The gate that matters: with nothing chosen, an engine's grid-capability
-    // decides nothing at all, so a caveat about grids down half the list is a
-    // warning about a feature this user has not opted into.
-    gridSelectionStore.value = GridSelection.none;
+  testWidgets('no engine is marked for a grid it cannot reach', (tester) async {
+    // ⚠️ The grid IS chosen here. That is the point: the note used to depend on
+    // this store, and now nothing on this screen does.
+    gridSelectionStore.value = defaultProvider;
     await openDialog(tester, engine: 'cursor');
     expect(gridNote, findsNothing);
-    // And the old words are gone with it — the picker owns those.
     expect(find.text('no grid'), findsNothing);
-  });
-
-  testWidgets('a chosen grid marks the engines that cannot reach it', (
-    tester,
-  ) async {
-    gridSelectionStore.value = const GridSelection(
-      networkId: 'grid-3378218621364f16',
-      networkName: 'autonomous.ai',
-    );
-    await openDialog(tester, engine: 'cursor');
-    expect(gridNote, findsOneWidget);
-  });
-
-  testWidgets('names the grid for an engine that can reach it', (tester) async {
-    // The summary reads the dialog's own state, never the store's — and a new
-    // agent is always Auto, which is what it names here.
-    gridSelectionStore.value = const GridSelection(
-      networkId: 'grid-3378218621364f16',
-      networkName: 'autonomous.ai',
-    );
-    await openDialog(tester, engine: 'claude');
-    expect(find.text('autonomous.ai · Auto'), findsOneWidget);
     expect(warning, findsNothing);
   });
 
-  testWidgets('offers no model to pick, even with a grid selected', (
+  testWidgets('an engine the CLI would refuse a grid can still be launched', (
     tester,
   ) async {
-    // A new agent launches on Auto and nothing else: the model is chosen per
-    // agent AFTER it is running, from the agent view's header menu. A control
-    // here would be a second door onto the same setting, open at the one moment
-    // there is no agent to apply it to.
-    gridSelectionStore.value = const GridSelection(
-      networkId: 'grid-3378218621364f16',
-      networkName: 'autonomous.ai',
+    // Cursor is outside kGridCapableEngines, and with a grid chosen the Create
+    // button used to be dead — the dialog knew the CLI would refuse. There is
+    // no grid to refuse now, so the only thing standing between this engine and
+    // a launch is the folder.
+    gridSelectionStore.value = defaultProvider;
+    // On this computer, so Browse… reaches the stubbed OS panel rather than the
+    // in-app remote browser, which would want an `fs_list_dir` this notifier
+    // does not fake.
+    await openDialog(tester, engine: 'cursor', thisComputer: true);
+    expect(tester.widget<FilledButton>(createButton()).onPressed, isNull);
+
+    await tester.tap(find.text('Browse…'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FilledButton>(createButton()).onPressed,
+      isNotNull,
+      reason: 'a folder is the only thing this engine was ever missing',
     );
+  });
+
+  testWidgets('offers no model to pick', (tester) async {
+    // The model is chosen per agent AFTER it is running, from the agent view's
+    // header menu — which is also the only place a grid is chosen now. A
+    // control here would be a second door onto the same setting, open at the
+    // one moment there is no agent to apply it to.
+    gridSelectionStore.value = defaultProvider;
     await openDialog(tester, engine: 'claude');
     expect(find.byKey(const Key('new-agent-model-field')), findsNothing);
     expect(find.text('Model'), findsNothing);
-  });
-
-  testWidgets('warns before the CLI refuses, and names the way out', (
-    tester,
-  ) async {
-    gridSelectionStore.value = const GridSelection(
-      networkId: 'grid-3378218621364f16',
-      networkName: 'autonomous.ai',
-    );
-    await openDialog(tester, engine: 'cursor');
-    expect(warning, findsOneWidget);
-    // The warning is only useful if it says what to do instead. It no longer names one engine:
-    // six can reach a grid now, and the picker right above it is the list.
-    // Case-insensitive: the sentence has moved between the middle of a paragraph
-    // and the start of one, and that is not what this test is about.
-    expect(
-      find.textContaining(
-        RegExp('choose another engine', caseSensitive: false),
-      ),
-      findsOneWidget,
-    );
-    // Names the sidebar's grid picker specifically, not a vague "the sidebar" — see
-    // grid_target_pill.dart, whose own "No grid" row is what this sentence points at.
-    expect(find.textContaining("sidebar's grid picker"), findsOneWidget);
-  });
-
-  testWidgets('a refused engine cannot be launched at all', (tester) async {
-    // The whole point of warning early. Before this the button stayed live, so
-    // the user got the warning AND the round trip to a CLI that refuses.
-    gridSelectionStore.value = const GridSelection(
-      networkId: 'grid-3378218621364f16',
-      networkName: 'autonomous.ai',
-    );
-    await openDialog(tester, engine: 'cursor');
-    expect(tester.widget<FilledButton>(createButton()).onPressed, isNull);
   });
 
   testWidgets('the summary states which machine, and whether it is this one', (
@@ -442,11 +409,13 @@ void main() {
     expect(find.byType(AppCheckbox), findsOneWidget);
   });
 
-  testWidgets('creates the agent on Auto, with no model on the wire', (
+  testWidgets('creates the agent with no grid on the wire at all', (
     tester,
   ) async {
-    // A new agent never pins a model: the dialog has no model control, and Auto means the grid
-    // chooses — which is not the same as pinning a model named Auto.
+    // ⚠️ THE test for this whole change. A grid is the default provider, and
+    // the frame that reaches the CLI must carry none: `grid: null` is the frame
+    // this app sent before grids existed, and it is the frame every Create
+    // sends now. The agent runs on whatever login the engine already has here.
     gridSelectionStore.value = const GridSelection(
       networkId: 'grid-abc',
       networkName: 'autonomous.ai',
@@ -465,9 +434,6 @@ void main() {
                 notifier,
                 'machine-1',
                 source: 'machine_row',
-                // A fake client, so the relay key this default (Auto) path still mints goes
-                // nowhere near the network — see resolveGridAgentOverride and FakeGridApi.
-                gridApiClient: FakeGridApi(),
               ),
               child: const Text('open'),
             ),
@@ -485,26 +451,22 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Select this folder'));
     await tester.pumpAndSettle();
 
-    // Nothing to pick: every new agent launches on Auto, so Create carries that straight through.
     await tester.tap(find.widgetWithText(FilledButton, 'Create agent'));
     await tester.pumpAndSettle();
 
     expect(notifier.createAgentCalled, isTrue);
-    final grid = notifier.lastGrid;
-    expect(grid, isNotNull);
-    expect(grid!.model, isNull, reason: 'Auto pins no model');
     expect(
-      grid.toJson().containsKey('model'),
-      isFalse,
-      reason:
-          'Auto means the key is left off the wire entirely, not sent as null',
+      notifier.lastGrid,
+      isNull,
+      reason: 'the default provider is not where a new agent launches',
     );
   });
 
   test('the grid-capable list matches what the CLI will accept', () {
     // Mirrors GRID_ENGINE_CONTRACTS in autonomous-harness/cli/src/lib/gridLaunch.ts, which has the
-    // same assertion on its own side. Drifting apart costs a warning that never appears, or one
-    // that appears for an engine that would have worked.
+    // same assertion on its own side. This dialog no longer reads it — every launch from here is
+    // the engine's own login — but `AgentModelMenu` does, and that is where an engine that cannot
+    // be pointed at a grid is now refused.
     expect(kGridCapableEngines, {
       'claude',
       'codex',

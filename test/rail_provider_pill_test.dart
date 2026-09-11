@@ -129,7 +129,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // The menu says what a pick does and does not do.
-    expect(find.textContaining('New agents only'), findsOneWidget);
+    // What a pick does — and, since it stopped being about new agents, what it
+    // does not: see `new_agent_dialog.dart`.
+    expect(
+      find.textContaining('A new agent starts on its engine’s own login'),
+      findsOneWidget,
+    );
     expect(find.text('hp-1-1'), findsOneWidget);
 
     await tester.tap(find.text('hp-1-1'));
