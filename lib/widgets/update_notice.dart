@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../core/app_version.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/skeleton.dart';
 import '../state/app_state.dart';
 import '../update/desktop_updater.dart';
@@ -259,7 +260,7 @@ Future<void> showUpdateCheckDialog(
 ) {
   final update = result.update;
   if (update == null) {
-    return showDialog<void>(
+    return showAppDialog<void>(
       context: context,
       builder: (context) => const _UpdateDialog(
         icon: LucideIcons.circleCheck300,
@@ -269,7 +270,7 @@ Future<void> showUpdateCheckDialog(
       ),
     );
   }
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) {

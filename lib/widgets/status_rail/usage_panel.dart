@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../grid/grid_selection_store.dart' show thisComputerLabel;
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../usage/usage_accounts.dart';
 import '../../usage/usage_offer.dart';
 import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
@@ -20,15 +22,33 @@ import 'usage_ink.dart';
 class UsagePanelContent extends StatelessWidget {
   const UsagePanelContent({
     super.key,
-    required this.reading,
+    required this.accounts,
+    this.machineName,
     this.offer,
     this.onAct,
   });
 
-  final ProviderUsage reading;
+  /// Every account of ONE provider, this computer's first
+  /// (`groupUsageAccounts`). With a single account — the common case, and every
+  /// case where the remote machines share this computer's subscription — the
+  /// panel is exactly the one it always was: captions appear only once there is
+  /// something to tell apart.
+  final List<UsageAccount> accounts;
 
-  /// What this account's nearly-spent window is worth doing about, or null when
-  /// there is nothing worth pressing — see `resolveUsageOffer`.
+  /// What to call THIS computer — the sidebar's own name for it, from
+  /// `AppNotifier.thisMachineName`.
+  ///
+  /// Replaces the words "This computer", which were right while that was the
+  /// only machine a panel could be about and are a wasted line now: a reader
+  /// with two machines signed in sees one caption naming a host and another
+  /// naming none, and has to work out that the nameless one is the one they
+  /// are sitting at. The name says it and matches the rail above it.
+  ///
+  /// Null falls back to those words rather than printing a blank caption.
+  final String? machineName;
+
+  /// What this computer's nearly-spent window is worth doing about, or null
+  /// when there is nothing worth pressing — see `resolveUsageOffer`.
   final UsageOffer? offer;
 
   /// Runs [offer]. Null drops the footer entirely rather than drawing a button
@@ -38,44 +58,143 @@ class UsagePanelContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final captioned = accounts.length > 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Header(reading: reading),
-        if (reading.provider == UsageProvider.codex) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Default profile · ~/.codex',
-            style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
-          ),
+        _Header(reading: accounts.first.reading),
+        // Whose spend this is, said the way the tokens panel beside it says
+        // its own (`Grid · autonomous.ai`). The two figures now sit together
+        // at the right of the rail, so a panel that named no scope left the
+        // reader to infer it from which figure they happened to hover.
+        //
+        // Only when there is ONE account: past that the per-account captions
+        // below already name every machine, and a heading claiming this
+        // computer over a list including two others would be wrong.
+        if (!captioned) ...[
+          const SizedBox(height: 4),
+          _PanelScope(name: machineName),
         ],
-        if (reading.hasFigures)
-          for (final window in reading.windows) ...[
-            const SizedBox(height: 12),
-            _WindowRow(
-              window: window,
-              color: engineIdentity(reading.provider.engineId).color,
-            ),
-          ]
-        else ...[
-          const SizedBox(height: 10),
-          Text(
-            // The source wrote this sentence, because the source is what knows
-            // whether signing in or retrying is the way out of it.
-            reading.message ?? 'No usage to show',
-            style: TextStyle(
-              color: grid.AppPalette.textFaint,
-              fontSize: 11.5,
-              height: 1.35,
-            ),
-          ),
+        for (final (index, account) in accounts.indexed) ...[
+          if (captioned) ...[
+            SizedBox(height: index == 0 ? 12 : 16),
+            _AccountCaption(account: account, machineName: machineName),
+          ],
+          ..._accountBody(account.reading),
         ],
         if (offer case final offer? when onAct != null) ...[
           const SizedBox(height: 12),
           _OfferFooter(offer: offer, onAct: onAct!),
         ],
       ],
+    );
+  }
+
+  /// One account's windows — or, when it has none, the sentence its source
+  /// wrote about why, because the source is what knows whether signing in or
+  /// retrying is the way out.
+  static List<Widget> _accountBody(ProviderUsage reading) {
+    if (!reading.hasFigures) {
+      return [
+        const SizedBox(height: 10),
+        Text(
+          reading.message ?? 'No usage to show',
+          style: TextStyle(
+            color: grid.AppPalette.textFaint,
+            fontSize: 11.5,
+            height: 1.35,
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final window in reading.windows) ...[
+        const SizedBox(height: 12),
+        _WindowRow(
+          window: window,
+          color: engineIdentity(reading.provider.engineId).color,
+        ),
+      ],
+    ];
+  }
+}
+
+/// Whose subscription a block of windows is, once a provider has more than one.
+class _AccountCaption extends StatelessWidget {
+  const _AccountCaption({required this.account, this.machineName});
+
+  final UsageAccount account;
+
+  /// This computer's own name, for the local block — see
+  /// [UsagePanelContent.machineName].
+  final String? machineName;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    _caption,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: grid.AppPalette.textSecondary,
+      fontSize: 11,
+      fontWeight: grid.AppFont.medium,
+    ),
+  );
+
+  String get _caption {
+    if (!account.isLocal) return account.machines.join(', ');
+    // The machine's own name, falling back to the words it replaced when the
+    // rail has none to give — a caption is worth more than a blank line. The
+    // fallback goes through `thisComputerLabel` rather than spelling the words
+    // again, so this caption and the pill cannot end up disagreeing.
+    final own = machineName?.trim();
+    final here = own == null || own.isEmpty ? thisComputerLabel : own;
+    return account.machines.isEmpty
+        ? here
+        : '$here · also ${account.machines.join(', ')}';
+  }
+}
+
+/// Whose spend a single-account panel is showing: this computer, named.
+///
+/// The counterpart to the tokens panel's `Grid · <name>` — same place, same
+/// ink, same shape — so the two panels that open from adjacent figures answer
+/// "whose?" in one voice instead of one answering and the other staying quiet.
+class _PanelScope extends StatelessWidget {
+  const _PanelScope({required this.name});
+
+  final String? name;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    final style = TextStyle(
+      fontSize: 11,
+      height: 1.35,
+      color: grid.AppPalette.textSecondary,
+    );
+    final own = name?.trim();
+    return RichText(
+      // One line: a hostname can be long and this panel is 248px across.
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: style,
+        children: [
+          // `Computer ·` against the tokens panel's `Grid ·`: the pair names
+          // the two worlds a figure on this rail can belong to, which is the
+          // whole distinction a reader is being helped with.
+          TextSpan(text: 'Computer · ', style: style),
+          TextSpan(
+            text: own == null || own.isEmpty ? thisComputerLabel : own,
+            style: style.copyWith(
+              color: grid.AppPalette.textPrimary,
+              fontWeight: grid.AppFont.medium,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

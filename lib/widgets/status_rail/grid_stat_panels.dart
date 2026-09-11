@@ -1148,10 +1148,26 @@ class _SpeedColumn extends StatelessWidget {
 /// what the grid handled. Printing `tokensIn` raw would show a panel whose rows
 /// sum to more than its own grid did.
 class GridTokensList extends StatelessWidget {
-  const GridTokensList({super.key, required this.answered});
+  const GridTokensList({super.key, required this.answered, this.gridName});
 
   /// The grid's own rollup. Null on a relay that computes none.
   final NodeAnswered? answered;
+
+  /// Whose work these tokens are — printed under the heading so the panel says
+  /// its own scope out loud.
+  ///
+  /// ⚠️ This is not decoration. On the status rail the figure this panel opens
+  /// from now sits at the right edge, immediately beside the `% used` windows
+  /// of the Claude and Codex accounts — and those are read from THIS COMPUTER's
+  /// credentials and are true of the account wherever it is spent. Two figures
+  /// that touch are read as two figures about one thing, so a panel headed
+  /// `TOKENS` with nothing naming the grid invites exactly the wrong reading:
+  /// that this is what the machine has used. It is what the GRID answered, on
+  /// whatever machines happen to be on it, including none of this one's.
+  ///
+  /// Null only when the rail has no name to give — the caption is then dropped
+  /// rather than guessed at, since a wrong scope is worse than an unstated one.
+  final String? gridName;
 
   @override
   Widget build(BuildContext context) {
@@ -1174,6 +1190,15 @@ class GridTokensList extends StatelessWidget {
           label: 'Tokens',
           trailing: window.isEmpty ? null : 'last $window',
         ),
+        // The scope, in the same place and the same ink the usage panel puts
+        // its own (`This computer`, `_AccountCaption`) — the two panels open
+        // from figures that now sit side by side, so they answer the "whose?"
+        // question in one voice or the reader has to work out that they are
+        // even answering it.
+        if (gridName case final name? when name.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          _TokensScope(gridName: name),
+        ],
         const SizedBox(height: 10),
         // The unit is pluralised off the raw count, not off what `formatCount`
         // printed: past a thousand it prints "1.2M" and the noun beside it is
@@ -1206,6 +1231,59 @@ class GridTokensList extends StatelessWidget {
           value: formatCount(answered.requests),
         ),
       ],
+    );
+  }
+}
+
+/// Whose work a [GridTokensList] is counting, in three words: the grid, named.
+///
+/// `Grid ·` is the whole of the disambiguation. It used to spell the contrast
+/// out — `Answered by autonomous.ai — not this computer` — which was a
+/// sentence where a label would do: the reader is inside a panel headed
+/// `TOKENS` whose every row already ends in `tokens`, so the only open
+/// question is *whose*, and naming the grid answers it. Telling somebody what
+/// a figure is NOT is the long way round, and it made the one line of prose
+/// here the widest thing in a popover 255px across.
+class _TokensScope extends StatelessWidget {
+  const _TokensScope({required this.gridName});
+
+  final String gridName;
+
+  @override
+  Widget build(BuildContext context) {
+    AppTheme.watch(context);
+    final style = TextStyle(
+      fontSize: 11,
+      height: 1.35,
+      color: AppPalette.textSecondary,
+    );
+    return RichText(
+      // One line, ellipsised: a grid may be named anything, and this panel is
+      // 255px wide. The heading above it already carries the window, so a name
+      // that runs long costs the reader the name's tail rather than the fact
+      // that a name is what they are looking at.
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: style,
+        children: [
+          // `Grid` rather than `Provider`, which is what the settings surface
+          // calls one: the reader is being told which of two WORLDS a figure
+          // belongs to, and the other one is an agent account. `Provider ·`
+          // beside a Claude percentage would name the wrong distinction,
+          // since Claude is a provider too in every sense a reader means it.
+          TextSpan(text: 'Grid · ', style: style),
+          // The name in the stronger ink, because it is the part that changes
+          // and the part somebody is checking.
+          TextSpan(
+            text: gridName,
+            style: style.copyWith(
+              color: AppPalette.textPrimary,
+              fontWeight: AppFont.medium,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

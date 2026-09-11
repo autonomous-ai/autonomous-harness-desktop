@@ -20,13 +20,27 @@ import '../grid/agent_grid.dart';
 import 'grid_models_controller.dart';
 import 'grid_network.dart';
 import 'grid_networks_controller.dart';
-import 'grid_selection_store.dart' show kNoGridTargetLabel;
+import 'grid_selection_store.dart'
+    show kNoGridTargetDetail, kNoGridTargetLabel, thisComputerLabel;
 import 'node_display.dart' show kAutoModelId, modelKey, withoutGridRunPrefix;
 
 /// What "let the provider choose" is called on screen — the state the launch
 /// leaves `ANTHROPIC_MODEL` unset in, distinct from the relay's own virtual
 /// `auto` router id (see [kAutoModelId]).
 const String kAutoModelLabel = 'Auto';
+
+/// Whether the picker opens with a `Recent` group over the providers.
+///
+/// **Off.** With the panel's own row for the engine's login above it and a
+/// provider's own group below, the same few models were printed twice within
+/// one screen — and the duplicates arrived before the list a reader came to
+/// read. The group made the panel taller and thinner-looking without answering
+/// anything the provider groups do not.
+///
+/// A constant rather than a deletion: what it would show is still worked out by
+/// [_recentRows], and the picker still accepts and stores `recents`, so this is
+/// one word to put back if the group earns its place again.
+const bool kRecentGroupEnabled = false;
 
 /// One picked row, in full: a provider, and a model on it.
 ///
@@ -61,7 +75,7 @@ class ModelChoice {
   /// the engine's own login, which is the one row on the list that reaches no
   /// provider to route anything.
   String get label {
-    if (!hasProvider) return kNoGridTargetLabel;
+    if (!hasProvider) return thisComputerLabel;
     final model = this.model;
     return model == null ? kAutoModelLabel : withoutGridRunPrefix(model);
   }
@@ -86,20 +100,42 @@ sealed class ModelPickerItem {
 
 /// A provider's name, over the models it serves.
 class ModelPickerHeader extends ModelPickerItem {
-  const ModelPickerHeader(this.title);
+  const ModelPickerHeader(this.title, {this.count});
 
   final String title;
+
+  /// How many pickable rows this header stands over.
+  ///
+  /// Printed at the header's far end, past the rule, so a reader can tell a
+  /// provider serving four models from one serving forty WITHOUT scrolling to
+  /// the end of it — the list caps at a fixed height, so the tail of a long
+  /// group is off-screen and its size is otherwise unknowable.
+  ///
+  /// Null where a count would be noise rather than news: a group of one.
+  final int? count;
 }
 
 /// A row that can be picked.
 class ModelPickerRow extends ModelPickerItem {
-  const ModelPickerRow({required this.choice, this.note});
+  const ModelPickerRow({required this.choice, this.note, this.detail});
 
   final ModelChoice choice;
 
   /// A quiet aside at the row's end — the provider's name under `Recent`,
   /// where the group header no longer says which one it is.
   final String? note;
+
+  /// A second line UNDER the label, for the row whose label alone does not say
+  /// what picking it does — see [kNoGridTargetDetail].
+  ///
+  /// Distinct from [note], which sits beside the label and qualifies the same
+  /// noun. A sentence does not fit there: it would arrive clipped to its first
+  /// few words.
+  ///
+  /// ⚠️ A row with one is TALLER — [AppMenuRowMetrics.detailExtent] rather than
+  /// `extent` — and the picker sizes its list from those heights, so anything
+  /// measuring rows has to ask which kind it is looking at.
+  final String? detail;
 
   String get label => choice.label;
 }
@@ -135,23 +171,32 @@ List<ModelPickerItem> modelPickerItems({
   // First and unconditionally, the way the old menu had it: it is the one row
   // that needs no network call, so it must not be a choice that appears once a
   // fetch lands.
-  if (_matches(kNoGridTargetLabel, needle)) {
+  if (_matches(thisComputerLabel, needle)) {
     items.add(
       const ModelPickerRow(
         choice: ModelChoice.none,
-        // Same words the rail's picker puts beside this row: the label names
-        // a kind of account, so the note says whose. "The engine's own login"
-        // made a reader work out which engine and whose login.
-        note: 'on this computer',
+        // A SECOND LINE, not the note beside the label this used to be. The
+        // label now says WHERE the credential lives and this says WHICH KINDS
+        // it can be — a sentence split in two rather than one word doing half
+        // the job. See [kNoGridTargetDetail].
+        detail: kNoGridTargetDetail,
       ),
     );
   }
 
-  if (needle.isEmpty) {
+  // ⚠️ `Recent` is OFF, and deliberately so — see [kRecentGroupEnabled]. The
+  // rows it would add are still computed the same way, so turning it back on is
+  // one constant rather than a rebuild.
+  if (kRecentGroupEnabled && needle.isEmpty) {
     final rows = _recentRows(recents, providers);
     if (rows.isNotEmpty) {
       items
-        ..add(const ModelPickerHeader('Recent'))
+        ..add(
+          ModelPickerHeader(
+            'Recent',
+            count: rows.length > 1 ? rows.length : null,
+          ),
+        )
         ..addAll(rows);
     }
   }
@@ -166,7 +211,18 @@ List<ModelPickerItem> modelPickerItems({
 
     if (section.isEmpty) continue;
     items
-      ..add(ModelPickerHeader(provider.displayName))
+      // [_providerItems] returns only pickable rows — a provider still loading
+      // or failed is dropped whole — so its length IS the count, with no notes
+      // to subtract.
+      //
+      // A group of one says nothing worth a number: the row under it is already
+      // the whole answer.
+      ..add(
+        ModelPickerHeader(
+          provider.displayName,
+          count: section.length > 1 ? section.length : null,
+        ),
+      )
       ..addAll(section);
   }
   return items;

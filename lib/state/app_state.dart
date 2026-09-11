@@ -17,7 +17,9 @@ import '../core/engine_availability.dart';
 import '../core/models.dart';
 import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
+import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
+import '../share/node_identity.dart';
 import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
@@ -33,9 +35,12 @@ import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
 import 'pane_preset.dart';
 import 'pending_question.dart';
+import '../usage/remote_usage.dart';
+import '../usage/usage_accounts.dart';
 
 enum AppStatus {
   bootstrapping,
+  checkingEnvironment,
   preparingEnvironment,
   unauthenticated,
   authenticated,
@@ -239,10 +244,6 @@ class AppNotifier extends ChangeNotifier {
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
   String? _skippedDesktopUpdateVersion;
-  // Set from the store on every `bootstrap()` (see `_prepareEnvironment`), never mutated except
-  // there or on the first successful environment check — a machine already on the current
-  // `kEnvironmentSetupVersion` skips re-probing CLI/tmux/Grid presence on every later launch.
-  int? _environmentSetupVersion;
   UpdateInfo? availableUpdate;
   bool isCheckingForUpdate = false;
   bool isInstallingUpdate = false;
@@ -559,8 +560,9 @@ class AppNotifier extends ChangeNotifier {
   /// registry and the recap mirror it reads are all on this computer.
   MachineState? get localMachineState {
     for (final state in machineStates.values) {
-      if (state.isLocalMachine)
+      if (state.isLocalMachine) {
         return state; // the flag is the STATE's, not the machine row's
+      }
     }
     return null;
   }
@@ -735,7 +737,6 @@ class AppNotifier extends ChangeNotifier {
         _autonomousEnv = 'prod';
         api = ApiClient(config: config, session: session);
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
-        _environmentSetupVersion = _store.environmentSetupVersion;
       }
       _startUpdateChecking();
       final environmentReady = await _prepareEnvironment();
@@ -777,34 +778,19 @@ class AppNotifier extends ChangeNotifier {
   /// first-run phase instead.
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
-    if (_environmentSetupVersion != null &&
-        _environmentSetupVersion! >= kEnvironmentSetupVersion) {
-      // CLI, tmux and Grid were all found ready on this machine before, and none of the three
-      // uninstall themselves — skip the three subprocess probes (and the screen they'd otherwise
-      // flash onto) on every later launch rather than re-verifying something already proven.
-      environmentReadiness = EnvironmentReadiness(
-        steps: {
-          for (final step in EnvironmentStep.values)
-            step: EnvironmentStepStatus.ready,
-        },
-      );
-      return true;
-    }
     _environmentSetupInFlight = true;
-    status = AppStatus.preparingEnvironment;
+    status = AppStatus.checkingEnvironment;
     environmentReadiness = EnvironmentReadiness.initial();
     notifyListeners();
     try {
-      final result = await _runProvisioner();
+      // Always read-only here. Installation starts only after explicit confirmation in the wizard.
+      final result = await _runProvisioner(install: false);
       if (!result.isReady) {
         status = AppStatus.preparingEnvironment;
-        _scheduleEnvironmentRecheck();
         notifyListeners();
         return false;
       }
       _cancelEnvironmentRecheckTimer();
-      _environmentSetupVersion = kEnvironmentSetupVersion;
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -815,20 +801,49 @@ class AppNotifier extends ChangeNotifier {
   /// [environmentReadiness] as it streams progress, and reports the outcome.
   Future<EnvironmentReadiness> _runProvisioner({
     EnvironmentReadiness? resumeFrom,
+    bool install = false,
+    EnvironmentSetupMode? mode,
+    bool quiet = false,
   }) async {
     final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
     final result = await provisioner.ensureReady(
       onProgress: (value) {
-        environmentReadiness = value;
+        if (quiet &&
+            value.phase != EnvironmentSetupPhase.ready &&
+            value.phase != EnvironmentSetupPhase.failed) {
+          // A 5-second Terminal poll must not repaint the wizard through
+          // preflight -> review -> waiting. Keep the stable handoff surface
+          // and only stream its diagnostics until there is a real terminal
+          // outcome or installation can continue.
+          environmentReadiness = environmentReadiness.copyWith(
+            output: value.output,
+            terminalLogPath: value.terminalLogPath,
+            terminalResultPath: value.terminalResultPath,
+            terminalSetup: value.terminalSetup,
+            systemReady: value.systemReady,
+          );
+        } else {
+          environmentReadiness = value;
+        }
+        // A successful probe belongs to the quiet pre-flight surface, never
+        // the installation wizard. This also prevents the setup screen from
+        // flashing its own ready phase for one frame after an install/recheck.
+        if (value.isReady) status = AppStatus.checkingEnvironment;
         notifyListeners();
       },
       resumeFrom: resumeFrom,
+      install: install,
+      mode: mode,
     );
     environmentReadiness = result;
-    analytics.environmentPrepared(
-      ready: result.isReady,
-      grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
-    );
+    if (!quiet ||
+        result.isReady ||
+        result.phase == EnvironmentSetupPhase.failed) {
+      analytics.environmentPrepared(
+        ready: result.isReady,
+        grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
+      );
+    }
     return result;
   }
 
@@ -836,23 +851,101 @@ class AppNotifier extends ChangeNotifier {
   /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
   /// load and update-check startup, which already ran on the launch that got stuck here.
   Future<void> _continueAfterEnvironmentReady() async {
+    _cancelEnvironmentRecheckTimer();
+    status = AppStatus.checkingEnvironment;
+    notifyListeners();
     // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
     // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
     // asks the CLI whether this computer is currently signed in.
-    final authStatus = await cliLogin.checkStatus();
-    if (!authStatus.loggedIn) {
+    try {
+      final authStatus = await cliLogin.checkStatus();
+      if (!authStatus.loggedIn) {
+        currentUser = null;
+        status = AppStatus.unauthenticated;
+        notifyListeners();
+        return;
+      }
+      status = AppStatus.bootstrapping;
+      notifyListeners();
+      await _finishBootstrapSignedIn();
+    } catch (error, stack) {
+      debugPrint(
+        'continueAfterEnvironmentReady: fallback to login after error: '
+        '$error\n$stack',
+      );
       currentUser = null;
       status = AppStatus.unauthenticated;
       notifyListeners();
-      return;
     }
-    await _finishBootstrapSignedIn();
   }
 
-  /// Full reset: re-runs first-run provisioning end to end, same as a relaunch. Kept as an escape
-  /// hatch alongside the per-step [recheckEnvironmentStep] — Node and Harness checks are idempotent,
-  /// so this is safe even when only one step is actually stuck.
-  Future<void> retryEnvironmentSetup() => bootstrap();
+  void showEnvironmentReview() {
+    environmentReadiness = environmentReadiness.copyWith(
+      phase: EnvironmentSetupPhase.review,
+    );
+    notifyListeners();
+  }
+
+  void showEnvironmentMethodChoice() {
+    environmentReadiness = environmentReadiness.copyWith(
+      phase: EnvironmentSetupPhase.chooseMethod,
+    );
+    notifyListeners();
+  }
+
+  void selectEnvironmentSetupMode(EnvironmentSetupMode mode) {
+    environmentReadiness = environmentReadiness.copyWith(mode: mode);
+    notifyListeners();
+  }
+
+  Future<void> startEnvironmentSetup() async {
+    if (_environmentSetupInFlight) return;
+    _cancelEnvironmentRecheckTimer();
+    final mode = environmentReadiness.mode ?? EnvironmentSetupMode.automatic;
+    if (mode == EnvironmentSetupMode.manual) {
+      notifyListeners();
+      return;
+    }
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(
+        resumeFrom: environmentReadiness,
+        install: true,
+        mode: mode,
+      );
+      if (!result.isReady) {
+        _scheduleEnvironmentRecheck();
+        return;
+      }
+      await _continueAfterEnvironmentReady();
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> continueAfterEnvironmentSetup() async {
+    if (!environmentReadiness.isReady) return;
+    await _continueAfterEnvironmentReady();
+  }
+
+  /// A manual repair always returns to a read-only probe.
+  Future<void> retryEnvironmentSetup() async {
+    if (_environmentSetupInFlight) return;
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(
+        install: false,
+        mode: environmentReadiness.mode,
+      );
+      if (result.isReady) await _continueAfterEnvironmentReady();
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+    }
+  }
 
   /// Rechecks a single stuck step (`failed`/`needsTerminal`) without re-running steps already
   /// `ready` — the user fixed it by hand (see `environment_step_guidance.dart`'s command) and this
@@ -866,13 +959,42 @@ class AppNotifier extends ChangeNotifier {
     _environmentSetupInFlight = true;
     notifyListeners();
     try {
-      final result = await _runProvisioner(resumeFrom: environmentReadiness);
+      final visibleBeforeProbe = environmentReadiness;
+      final mode = environmentReadiness.mode;
+      var result = await _runProvisioner(
+        resumeFrom: environmentReadiness,
+        install: false,
+        mode: mode,
+        quiet:
+            mode == EnvironmentSetupMode.automatic &&
+            environmentReadiness.phase ==
+                EnvironmentSetupPhase.waitingForTerminal,
+      );
+      if (!result.isReady &&
+          mode == EnvironmentSetupMode.automatic &&
+          result.phase != EnvironmentSetupPhase.waitingForTerminal &&
+          result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready) {
+        result = await _runProvisioner(
+          resumeFrom: result,
+          install: true,
+          mode: mode,
+        );
+      }
       if (!result.isReady) {
+        if (mode == EnvironmentSetupMode.automatic &&
+            result.phase != EnvironmentSetupPhase.failed) {
+          environmentReadiness = visibleBeforeProbe.copyWith(
+            phase: EnvironmentSetupPhase.waitingForTerminal,
+            output: result.output,
+            terminalLogPath: result.terminalLogPath,
+            terminalResultPath: result.terminalResultPath,
+            terminalSetup: result.terminalSetup,
+            systemReady: result.systemReady,
+          );
+        }
         _scheduleEnvironmentRecheck();
         return;
       }
-      _environmentSetupVersion = kEnvironmentSetupVersion;
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint(
@@ -889,9 +1011,14 @@ class AppNotifier extends ChangeNotifier {
 
   /// Polls the currently-stuck required step every 5s (see `_environmentRecheckTimer`'s doc) so
   /// fixing it in another window and forgetting to click Recheck still moves the app forward.
-  /// A no-op once nothing required is stuck (grid failures never qualify — see `EnvironmentStep.isRequired`).
+  /// A no-op unless automatic setup is waiting on the real Terminal window.
   void _scheduleEnvironmentRecheck() {
     _environmentRecheckTimer?.cancel();
+    if (environmentReadiness.phase !=
+            EnvironmentSetupPhase.waitingForTerminal ||
+        environmentReadiness.mode != EnvironmentSetupMode.automatic) {
+      return;
+    }
     EnvironmentStep? stuck;
     for (final entry in environmentReadiness.steps.entries) {
       if (!entry.key.isRequired) continue;
@@ -901,8 +1028,11 @@ class AppNotifier extends ChangeNotifier {
         break;
       }
     }
-    if (stuck == null) return;
-    final step = stuck;
+    if (stuck == null && environmentReadiness.terminalSetup == null) return;
+    // System/clipboard setup has no EnvironmentStep row of its own. The
+    // callback argument is only a UI trigger; the provisioner rechecks the
+    // complete environment and uses terminalSetup to attribute any failure.
+    final step = stuck ?? EnvironmentStep.tmux;
     _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
       unawaited(recheckEnvironmentStep(step));
     });
@@ -1085,8 +1215,9 @@ class AppNotifier extends ChangeNotifier {
   /// fills is the app that was ALREADY authenticated when the session disappeared underneath it,
   /// where nothing re-checked and the daemon supervisor simply respawned `harness start` forever.
   void _signedOutAtRuntime(String message) {
-    if (status == AppStatus.unauthenticated)
+    if (status == AppStatus.unauthenticated) {
       return; // idempotent: several sources can race here
+    }
     _daemonSupervisionTimer?.cancel();
     _daemonSupervisionTimer = null;
     _cliEndpoint = null;
@@ -1445,6 +1576,12 @@ class AppNotifier extends ChangeNotifier {
         unawaited(_applyNodeStatus(state, reportedOnline));
       }
     }
+    // Now that the list has landed, the local machine has the name the sidebar
+    // prints — better than the OS hostname `loadPersistedSettings` seeded this
+    // with, because it is the name the user sees everywhere else. Ignored if it
+    // resolves to nothing, so a machine list without a local row leaves the
+    // seeded name standing rather than reverting to "This computer".
+    resolveThisComputerLabel(thisMachineName);
     _autoConnectAndLoadMachines();
     notifyListeners();
   }
@@ -2384,6 +2521,67 @@ class AppNotifier extends ChangeNotifier {
     if (machine == null) return;
     _connectMachine(machine);
     await _loadMachineData(machine, force: true);
+  }
+
+  /// What every connected REMOTE machine's agent accounts have spent, asked in
+  /// parallel and read there with that machine's own credentials (`usage_read`).
+  ///
+  /// This computer's own accounts are not asked here — the app reads those
+  /// directly, the Keychain included. A remote machine may be signed in to a
+  /// different subscription, and a rate limit belongs to an account rather than
+  /// a computer, so the only honest way to show that one is to ask the machine
+  /// that holds it.
+  ///
+  /// ⚠️ **A machine whose CLI predates `usage_read` does not refuse it — it goes
+  /// silent.** The frame reaches it as an E2EE envelope it does not know to
+  /// open, so the requestId inside is never read and nothing replies. That is a
+  /// timeout, not an `UNSUPPORTED`, which is why this asks with a short one and
+  /// treats every failure alike: a machine that cannot say has nothing to add,
+  /// and it must never hold up the figures of the ones that can.
+  Future<List<MachineUsage>> readRemoteUsage() async {
+    final remotes = [
+      for (final machine in machineStates.values)
+        if (!machine.isLocalMachine &&
+            machine.connectionStatus == ConnectionStatus.connected)
+          machine,
+    ];
+    final answers = await Future.wait([
+      for (final machine in remotes) _readMachineUsage(machine),
+    ]);
+    return [for (final answer in answers) ?answer];
+  }
+
+  /// What to call THIS computer wherever a usage figure has to say whose it is.
+  ///
+  /// The same `displayName` the sidebar prints and `_readMachineUsage` labels
+  /// every remote machine with, so a panel listing one local and one remote
+  /// account names them in one vocabulary rather than setting a hostname
+  /// beside the words "this computer".
+  ///
+  /// Falls back to the OS hostname when the local machine has not been fetched
+  /// yet — the rail can open before `refreshMachines` lands — and to null when
+  /// even that is empty, which the caller renders by dropping the caption
+  /// rather than printing a blank one.
+  String? get thisMachineName {
+    for (final state in machineStates.values) {
+      if (state.isLocalMachine) return state.machine.displayName;
+    }
+    return localHostnameOrNull();
+  }
+
+  Future<MachineUsage?> _readMachineUsage(MachineState machine) async {
+    try {
+      final reply = await _conn(machine.machine.machineId)
+          .request('usage_read', timeout: const Duration(seconds: 10));
+      final readings = parseUsageReadResult(reply);
+      if (readings.isEmpty) return null;
+      return MachineUsage(
+        machineName: machine.machine.displayName,
+        readings: readings,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// One-level directory listing on the remote machine, for the New Agent folder browser.

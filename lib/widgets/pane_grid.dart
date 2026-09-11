@@ -391,7 +391,10 @@ class _MinTile {
 /// A test carrying its own copy of this number is a second place the design
 /// lives, and the one that goes stale — which is exactly what happened when the
 /// grid stopped separating its tiles with a 1px line.
-const double kPaneGap = 9;
+/// Nudged 9 → 9.5 on the owner's call. Five percent of nine is under half a
+/// pixel, so it rounds to either no change at all or to ten; a half point is the
+/// honest reading of the ask and lands on a whole device pixel at 2x.
+const double kPaneGap = 9.5;
 
 /// What shows through the gaps.
 ///

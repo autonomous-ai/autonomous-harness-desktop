@@ -249,8 +249,8 @@ class _GridSectionState extends State<GridSection> {
                 ),
           subtitle:
               'Every provider this account can reach. Enabled providers are '
-              'available to your agents; the default is the one new agents '
-              'launch against. Agents already running stay where they are.',
+              'available to your agents; the default is this computer’s '
+              'fallback. A new agent starts on its engine’s own login.',
           child: switch (state) {
             // The headline does not wait on the network — the chosen grid's
             // NAME is on disk beside its id — so it is real from the first
@@ -382,8 +382,13 @@ class _GridSectionState extends State<GridSection> {
                 // are separate on purpose (see `share/share_target_store.dart`)
                 // — and this is the only screen where that expectation gets
                 // formed.
-                'A provider is where new agents get their credentials. '
-                'Each agent picks its own model from its header. '
+                // ⚠️ Kept to THREE LINES at this pane's width. The Column
+                // above it has an Expanded in it, so a fourth line does not
+                // push the pane taller — it overflows, and the test at
+                // `grid_status_rail_test.dart` is what catches it. Say less
+                // here before saying it on another line.
+                'A new agent starts on its engine’s own login; each picks its '
+                'provider and model from its own header. '
                 'Which grid this computer SHARES with is chosen separately, '
                 'under Share Intelligence.',
                 style: TextStyle(

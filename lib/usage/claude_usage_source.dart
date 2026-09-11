@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../logging/http_log.dart';
+import 'usage_account_key.dart';
 import 'usage_credentials.dart';
 import 'usage_source.dart';
 import 'usage_window.dart';
@@ -31,6 +32,7 @@ class ClaudeUsageSource implements UsageSource {
   Future<ProviderUsage> read() async {
     final token = await _credentials.claude();
     if (token == null) return signedOut(provider);
+    final accountId = await _credentials.claudeAccountId();
     // An expired token is spent as a sign-in rather than as a round trip: this
     // app does not refresh what the CLI owns, so the request could only fail.
     if (token.isExpired) {
@@ -51,17 +53,13 @@ class ClaudeUsageSource implements UsageSource {
           },
         ),
       );
-      final failure = usageFailureFor(provider, response.statusCode);
-      if (failure != null) return failure;
-      final data = response.data;
-      if (data is! Map) {
-        return ProviderUsage(
-          provider: provider,
-          status: UsageStatus.failed,
-          message: 'Claude answered in a shape this build cannot read',
-        );
-      }
-      return _mapWindows(data);
+      return claudeUsageFromAnswer(
+        statusCode: response.statusCode,
+        body: response.data,
+        account: accountId == null
+            ? null
+            : usageAccountKey(provider, accountId),
+      );
     } on DioException {
       return usageFailureFor(provider, null)!;
     }
@@ -72,7 +70,10 @@ class ClaudeUsageSource implements UsageSource {
   /// Fable's weekly allowance has been spelled three ways across releases, so
   /// all three are tried — an absent window is simply not drawn, which is why
   /// a build reading a newer server loses a row rather than the whole panel.
-  ProviderUsage _mapWindows(Map<Object?, Object?> data) {
+  static ProviderUsage _mapWindows(
+    Map<Object?, Object?> data, {
+    String? account,
+  }) {
     final windows = <UsageWindow>[
       ?_window('Session', data['five_hour']),
       ?_window(kWeeklyWindowLabel, data['seven_day']),
@@ -82,21 +83,22 @@ class ClaudeUsageSource implements UsageSource {
       ),
     ];
     if (windows.isEmpty) {
-      return ProviderUsage(
-        provider: provider,
+      return const ProviderUsage(
+        provider: UsageProvider.claude,
         status: UsageStatus.failed,
         message: 'Claude reported no limits',
       );
     }
     return ProviderUsage(
-      provider: provider,
+      provider: UsageProvider.claude,
       status: UsageStatus.ok,
       windows: windows,
       fetchedAt: DateTime.now(),
+      account: account,
     );
   }
 
-  UsageWindow? _window(String label, Object? raw) {
+  static UsageWindow? _window(String label, Object? raw) {
     if (raw is! Map) return null;
     final used = parseUsedPercent([raw['utilization'], raw['used_percentage']]);
     if (used == null) return null;
@@ -106,4 +108,28 @@ class ClaudeUsageSource implements UsageSource {
       resetsAt: parseResetTimestamp(raw['resets_at']),
     );
   }
+}
+
+/// What Claude's usage endpoint said, as the rail draws it.
+///
+/// Shared by the two places an answer comes from — this computer asking with
+/// its own token, and a REMOTE machine asking with its own and handing back
+/// exactly what the vendor sent (`usage_read`, see `remote_usage.dart`). One
+/// reading of the answer for both, so a window cannot be named one way here and
+/// another way for a machine across the relay.
+ProviderUsage claudeUsageFromAnswer({
+  required int? statusCode,
+  required Object? body,
+  String? account,
+}) {
+  final failure = usageFailureFor(UsageProvider.claude, statusCode);
+  if (failure != null) return failure;
+  if (body is! Map) {
+    return const ProviderUsage(
+      provider: UsageProvider.claude,
+      status: UsageStatus.failed,
+      message: 'Claude answered in a shape this build cannot read',
+    );
+  }
+  return ClaudeUsageSource._mapWindows(body, account: account);
 }

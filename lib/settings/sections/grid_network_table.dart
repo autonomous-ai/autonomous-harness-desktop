@@ -6,6 +6,7 @@ import '../../grid/grid_access.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/grid_selection_store.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/skeleton.dart';
 
 /// Every grid this account can reach, as one table you pick from.
@@ -163,10 +164,8 @@ class _Columns {
   final bool router;
   final bool status;
 
-  static _Columns forWidth(double width) => _Columns(
-    status: width >= 560,
-    router: width >= 700,
-  );
+  static _Columns forWidth(double width) =>
+      _Columns(status: width >= 560, router: width >= 700);
 
   /// Flex weights for the columns that stretch.
   ///
@@ -268,7 +267,7 @@ class _NoGridRow extends StatelessWidget {
     return _RowSurface(
       selected: selected,
       onTap: onTap,
-      semanticsLabel: kNoGridTargetLabel,
+      semanticsLabel: thisComputerLabel,
       child: Row(
         children: [
           SizedBox(
@@ -283,7 +282,7 @@ class _NoGridRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    kNoGridTargetLabel,
+                    thisComputerLabel,
                     style: TextStyle(
                       color: grid.AppPalette.textPrimary,
                       fontSize: 13,
@@ -349,7 +348,7 @@ class _NetworkRow extends StatelessWidget {
         _RowSurface(
           selected: selected,
           onTap: onUse,
-          semanticsLabel: 'Use ${network.displayName} for new agents',
+          semanticsLabel: 'Make ${network.displayName} the default provider',
           // The drawer under an open row carries the divider instead, so the
           // row and its details read as one block rather than two.
           divider: !expanded,
@@ -690,7 +689,6 @@ class _RouterCell extends StatelessWidget {
   }
 }
 
-
 /// The same dot the machine rail gives a reachable machine, so one colour keeps
 /// meaning one thing across the app.
 class _StatusCell extends StatelessWidget {
@@ -822,49 +820,47 @@ class _DetailDrawer extends StatelessWidget {
             spacing: 32,
             runSpacing: 14,
             children: [
-          if (description.isNotEmpty)
-            _Pair(label: 'Description', child: _PlainValue(description)),
-          _Pair(
-            label: 'Grid ID',
-            child: _CopyableValue(value: network.networkId),
-          ),
-          _Pair(
-            label: 'Signaling',
-            child: network.lanSignalingUrl == null
-                ? const _PlainValue('—')
-                : _CopyableValue(value: network.lanSignalingUrl!),
-          ),
-          _Pair(
-            label: 'Owner',
-            child: _PlainValue(owned ? 'You' : network.ownerEmail),
-          ),
-          _Pair(
-            label: 'Router advisors',
-            child: network.routerAdvisors.isEmpty
-                ? _PlainValue(
-                    network.routerEnabled
-                        ? 'On, with no advisors listed'
-                        : 'Off — requests go straight to this grid’s providers',
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (final advisor in network.routerAdvisors)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(
-                            advisor,
-                            style: TextStyle(
-                              color: grid.AppPalette.textSecondary,
-                              fontSize: 11.5,
-                              fontFamily: grid.AppFont.mono,
-                              fontFamilyFallback: grid.AppFont.monoFallback,
+              if (description.isNotEmpty)
+                _Pair(label: 'Description', child: _PlainValue(description)),
+              _Pair(
+                label: 'Grid ID',
+                child: _CopyableValue(value: network.networkId),
+              ),
+              _Pair(
+                label: 'Signaling',
+                child: network.lanSignalingUrl == null
+                    ? const _PlainValue('—')
+                    : _CopyableValue(value: network.lanSignalingUrl!),
+              ),
+              _Pair(
+                label: 'Owner',
+                child: _PlainValue(owned ? 'You' : network.ownerEmail),
+              ),
+              _Pair(
+                label: 'Router advisors',
+                child: network.routerAdvisors.isEmpty
+                    ? _PlainValue(
+                        network.routerEnabled ? 'On, with no advisors listed' : 'Off — requests go straight to this grid’s providers',
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final advisor in network.routerAdvisors)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                advisor,
+                                style: TextStyle(
+                                  color: grid.AppPalette.textSecondary,
+                                  fontSize: 11.5,
+                                  fontFamily: grid.AppFont.mono,
+                                  fontFamilyFallback: grid.AppFont.monoFallback,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                    ],
-                  ),
+                        ],
+                      ),
               ),
             ],
           ),
@@ -976,7 +972,7 @@ class _DeleteGridButton extends StatelessWidget {
   /// Names what is lost rather than asking "are you sure?" — the question adds
   /// nothing the reader did not already know, and trains people to dismiss it.
   Future<void> _confirm(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete this grid?'),
@@ -1182,7 +1178,6 @@ class _EmptyRows extends StatelessWidget {
     );
   }
 }
-
 
 /// The table while the grids are still on their way.
 ///

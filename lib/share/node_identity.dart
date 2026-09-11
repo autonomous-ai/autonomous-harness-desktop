@@ -27,6 +27,26 @@ const String fallbackNodeName = 'harness-node';
 /// This computer's name, ready to show in the field.
 String get thisComputerName => deriveNodeName(Platform.localHostname);
 
+/// The machine's name exactly as the OS gives it, or null when it has none.
+///
+/// ⚠️ Deliberately NOT [deriveNodeName]'s output. That one strips `.local` and
+/// rewrites anything a filesystem would object to, because it becomes an engine
+/// id the CLI names run records after. This is for READING: the sidebar prints
+/// the raw hostname, so a label derived differently would give the same machine
+/// two names on one screen.
+///
+/// Guarded because `localHostname` throws where the OS refuses to answer, and
+/// its callers run at startup and inside builds — neither is a place to take an
+/// exception over a label.
+String? localHostnameOrNull() {
+  try {
+    final host = Platform.localHostname.trim();
+    return host.isEmpty ? null : host;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Asks the OS for an unused loopback port by binding port 0 — the kernel hands
 /// back a free ephemeral one — then releasing it.
 ///

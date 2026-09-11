@@ -836,9 +836,11 @@ class _TerminalHeader extends StatelessWidget {
                         : 'Codex profile: $profile\nDouble-click to rename',
                     waitDuration: const Duration(milliseconds: 700),
                     child: Text(
-                      profile == null
-                          ? session.agentName
-                          : '${session.agentName} · ${profile.split('/').last}',
+                      // The profile path's basename used to trail the name here, but for the
+                      // default profile that basename is literally the hidden `.codex` folder —
+                      // meaningless clutter on every ordinary codex agent. The tooltip above still
+                      // carries the full path for whoever actually needs it.
+                      session.agentName,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppColors.text,

@@ -10,6 +10,7 @@ import '../core/models.dart';
 import '../shared/layouts/widgets/sidebar_item.dart';
 import '../shared/layouts/widgets/sidebar_timeline.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_icon_button.dart';
 import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/skeleton.dart';
@@ -346,7 +347,7 @@ class _MachineNodeState extends State<_MachineNode> {
   Future<void> _showRenameDialog() async {
     final controller = TextEditingController(text: machine.displayName);
     String? error;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
@@ -416,7 +417,7 @@ class _MachineNodeState extends State<_MachineNode> {
   }
 
   Future<void> _confirmDeleteMachine() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete machine'),
@@ -583,6 +584,11 @@ class _MachineNodeState extends State<_MachineNode> {
                           ),
                         ),
                       ),
+                      // A computer that is not answering, said once, where the
+                      // computer is named. It replaces two lines of red further
+                      // down: a machine being off is a STATE, and red is for
+                      // something that went wrong.
+                      if (state.nodeOnline == false) const _OfflineWord(),
                       // How many agents are inside something you have closed.
                       // Only when closed: with the list open you can count
                       // them, and a number beside a list you can see is noise.
@@ -742,17 +748,28 @@ class _AgentTree extends StatelessWidget {
                 : 'connecting…',
           );
         case AgentLoadStatus.needsLink:
-          return _AgentStatusRow(
-            icon: Icons.link,
-            label: 'link required',
-            onTap: () =>
-                notifier.selectMachineForSetup(state.machine.machineId),
-          );
+          // OFFLINE WINS. Linking is a PAKE handshake with the daemon on the
+          // other computer, and a daemon that is not running cannot shake
+          // hands — so a machine that is both unlinked and offline gets the
+          // offline note, not an invitation to do the impossible. The retry
+          // poll that already runs for an unlinked machine turns this into the
+          // link row by itself once the computer comes back.
+          if (state.nodeOnline == false) {
+            return _MachineOfflineNote(state: state, linkPending: true);
+          }
+          return _LinkMachineRow(notifier: notifier, state: state);
         case AgentLoadStatus.loading:
           // Rows, not a sentence: "loading agents…" is one line tall, so
           // everything under the machine dropped when the real rows arrived.
           return const _AgentRowsSkeleton(key: ValueKey('agents-loading'));
         case AgentLoadStatus.error:
+          // A machine with no agents AND no connection fails HERE, not on the
+          // branch below — that one only runs once some agents are known. This
+          // is the path the rail actually took for an offline computer, and the
+          // reason the red block outlived the first attempt to replace it.
+          if (state.nodeOnline == false) {
+            return _MachineOfflineNote(state: state);
+          }
           return _AgentLoadError(notifier: notifier, state: state);
         case AgentLoadStatus.loaded:
           return _EmptyAgents(notifier: notifier, state: state);
@@ -797,14 +814,21 @@ class _AgentTree extends StatelessWidget {
             below: i < rows.length - 1,
             child: rows[i],
           ),
-        if (state.agentLoadStatus == AgentLoadStatus.needsLink)
-          _AgentStatusRow(
-            icon: Icons.link,
-            label: 'link required',
-            onTap: () =>
-                notifier.selectMachineForSetup(state.machine.machineId),
-          ),
-        if (state.agentsLoadError != null)
+        // Only while the machine can answer — see the empty-tree branch. An
+        // offline machine already shows its note below.
+        if (state.agentLoadStatus == AgentLoadStatus.needsLink &&
+            state.nodeOnline != false)
+          _LinkMachineRow(notifier: notifier, state: state),
+        // OFFLINE IS NOT AN ERROR, so it does not get the error's treatment.
+        //
+        // The red row told an app user to "run harness start on that machine" —
+        // an instruction for a terminal, given to somebody who opened a window,
+        // about a computer they may not be sitting at. The chip on the row above
+        // already says the machine is off; this says why its agents are missing,
+        // in the rail's ordinary grey, once.
+        if (state.nodeOnline == false)
+          _MachineOfflineNote(state: state)
+        else if (state.agentsLoadError != null)
           _AgentLoadError(notifier: notifier, state: state),
         if (state.terminalCapabilityLoaded &&
             !state.terminalCapabilityAvailable)
@@ -890,7 +914,7 @@ class _AgentRowState extends State<_AgentRow> {
   );
 
   Future<void> _confirmDelete() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete agent'),
@@ -1362,49 +1386,102 @@ class _SidebarRowSkeleton extends StatelessWidget {
 }
 
 class _AgentStatusRow extends StatelessWidget {
-  final VoidCallback? onTap;
   final IconData icon;
   final String label;
 
-  const _AgentStatusRow({required this.icon, required this.label, this.onTap});
+  /// A quiet line of fact under a machine — "connecting…", "preparing agent
+  /// list…". Never a control: the one tappable thing that used to share this
+  /// shape ("link required") is a row of its own now, see [_LinkMachineRow].
+  const _AgentStatusRow({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return InkWell(
-      key: onTap == null ? null : const ValueKey('link-required'),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(38, 3, 12, 9),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 12,
-              color: onTap == null
-                  ? grid.AppPalette.textFaint
-                  : grid.AppPalette.accentOnSurface,
-            ),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: onTap == null
-                      ? grid.AppPalette.textFaint
-                      : grid.AppPalette.textSecondary,
-                  fontFamily: grid.AppFont.sans,
-                  fontSize: 11.2,
-                ),
-              ),
-            ),
-            if (onTap != null)
-              Icon(
-                Icons.arrow_forward_ios,
-                size: 10,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(38, 3, 12, 9),
+      child: Row(
+        children: [
+          Icon(icon, size: 12, color: grid.AppPalette.textFaint),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
                 color: grid.AppPalette.textFaint,
+                fontFamily: grid.AppFont.sans,
+                fontSize: 11.2,
               ),
-          ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The word for a machine that is not answering, on the machine's own row.
+///
+/// A word, not a chip. It was a filled pill, and it was the only filled thing
+/// in a column that says everything else in plain text — so it read as a
+/// control, on the one row where there is nothing to press. The grey mark
+/// beside the name already carries the fact; this just names it.
+class _OfflineWord extends StatelessWidget {
+  const _OfflineWord();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Text(
+        'offline',
+        style: TextStyle(
+          color: grid.AppPalette.textFaint,
+          fontFamily: grid.AppFont.sans,
+          fontSize: 10,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// Why an offline machine has no agents under it.
+///
+/// One sentence, in the colour every other quiet line in the rail uses. No icon,
+/// because the chip beside the machine name is already the marker; no command,
+/// because the person reading it opened an application.
+class _MachineOfflineNote extends StatelessWidget {
+  const _MachineOfflineNote({required this.state, this.linkPending = false});
+
+  final MachineState state;
+
+  /// True when the machine also has no link yet — then the note says what
+  /// comes next, so the person is not left wondering why the link row they
+  /// saw on another machine is missing on this one.
+  final bool linkPending;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    // "it", not the machine's name: the name is the caption directly above
+    // this line, and repeating it doubled the note to two lines on every host
+    // with a hostname-shaped name. The local computer keeps "this computer",
+    // because "it" for the machine you are sitting at reads as somewhere else.
+    final where = state.isLocalMachine ? 'this computer' : 'it';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
+      child: Text(
+        linkPending
+            ? "Harness isn't running on $where · link when it's back"
+            : "Harness isn't running on $where.",
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: grid.AppPalette.textFaint,
+          fontFamily: grid.AppFont.sans,
+          fontSize: 11.2,
+          height: 1.4,
         ),
       ),
     );
@@ -1514,6 +1591,55 @@ class _NewAgentRow extends StatelessWidget {
               LucideIcons.plus300,
               size: 13,
               color: grid.AppPalette.textFaint,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Link this machine…", drawn as the row the link would unlock.
+///
+/// The same shape as [_NewAgentRow], on purpose: linking is the step BEFORE
+/// adding an agent to this machine, and a row that looks like the one it leads
+/// to says so without a sentence. It replaces a status line — "link required",
+/// grey text with an accent icon and a chevron — that was a fact dressed as a
+/// command: it named a condition and then behaved like a button, and its three
+/// tones (accent icon, secondary text, faint chevron) agreed on nothing.
+///
+/// Only ever built for a machine that is ONLINE — the callers check, because
+/// the handshake behind this needs the other daemon awake.
+class _LinkMachineRow extends StatelessWidget {
+  const _LinkMachineRow({required this.notifier, required this.state});
+
+  final AppNotifier notifier;
+  final MachineState state;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return SidebarTimeline(
+      role: SidebarTimelineRole.branch,
+      below: false,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 28),
+        child: SidebarItem(
+          label: 'Link this machine…',
+          dimmed: true,
+          tooltip:
+              'Link ${state.machine.displayName} so its agents show up here',
+          onTap: () => notifier.selectMachineForSetup(state.machine.machineId),
+          leading: CustomPaint(
+            painter: _DashedWellPainter(color: grid.AppPalette.textFaint),
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: Icon(
+                LucideIcons.link2300,
+                size: 13,
+                color: grid.AppPalette.textFaint,
+              ),
             ),
           ),
         ),
