@@ -66,6 +66,10 @@ enum ShortcutAction {
   /// Jump to any agent by name, on any machine.
   switchAgent,
 
+  /// ⌘1…⌘9. Not a bound row of its own — see [agentDigitActivators] — but it
+  /// needs a name to be counted under.
+  selectPaneByIndex,
+
   closePane,
   newAgent,
   routeTask,
@@ -546,19 +550,65 @@ const List<TerminalKey> kTerminalOwnedKeys = [
 /// A missing handler is left unbound rather than bound to nothing: a key that
 /// silently does nothing is worse than a key that was never taken, because the
 /// terminal underneath could have had it.
+/// Which SPELLING of a chord was pressed — the `source` a usage event carries.
+///
+/// Derived from the activator rather than passed in, so it cannot drift from
+/// what is actually bound. `hjkl` and `arrow` are separated because every
+/// direction is deliberately bound both ways: the split is the only way to
+/// answer whether that was worth doing, and a combined count would say nothing.
+String shortcutSource(SingleActivator activator) {
+  final vim = {
+    LogicalKeyboardKey.keyH,
+    LogicalKeyboardKey.keyJ,
+    LogicalKeyboardKey.keyK,
+    LogicalKeyboardKey.keyL,
+  };
+  final arrows = {
+    LogicalKeyboardKey.arrowLeft,
+    LogicalKeyboardKey.arrowRight,
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+  };
+  if (vim.contains(activator.trigger)) return 'hjkl';
+  if (arrows.contains(activator.trigger)) return 'arrow';
+  return 'shortcut';
+}
+
 Map<ShortcutActivator, VoidCallback> buildShortcutBindings({
   required Map<ShortcutAction, VoidCallback> handlers,
   void Function(int index)? onSelectPaneIndex,
+
+  /// Called just before each handler runs. Reporting from HERE — the one place
+  /// every shortcut is wired — is what makes a key added later report itself
+  /// the day it is bound, instead of the day somebody remembers to add an event
+  /// for it.
+  void Function(ShortcutAction action, String source)? onUsed,
 }) {
   final bindings = <ShortcutActivator, VoidCallback>{};
   for (final shortcut in appShortcuts()) {
     final handler = handlers[shortcut.action];
-    if (handler != null) bindings[shortcut.activator] = handler;
+    if (handler == null) continue;
+    if (onUsed == null) {
+      bindings[shortcut.activator] = handler;
+      continue;
+    }
+    final source = shortcutSource(shortcut.activator);
+    bindings[shortcut.activator] = () {
+      onUsed(shortcut.action, source);
+      handler();
+    };
   }
   if (onSelectPaneIndex != null) {
     final digits = agentDigitActivators();
     for (var i = 0; i < digits.length; i++) {
-      bindings[digits[i]] = () => onSelectPaneIndex(i);
+      final at = i;
+      bindings[digits[at]] = () {
+        // The digits are not in `appShortcuts()` — nine near-identical rows
+        // would bury the sheet — so they report under their own name rather
+        // than going unmeasured for that reason alone.
+        onUsed?.call(ShortcutAction.selectPaneByIndex, 'digit');
+        onSelectPaneIndex(at);
+      };
     }
   }
   return bindings;

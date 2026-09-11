@@ -36,10 +36,39 @@ class _AnalyticsLifecycleState extends State<AnalyticsLifecycle>
   /// Guards against a quit that somehow asks twice.
   bool _closed = false;
 
+  /// Time this window has actually been in front of somebody.
+  ///
+  /// Accumulated across resumes rather than measured once, because the thing
+  /// being counted is interrupted by definition: a person switches to a browser
+  /// and back a dozen times an hour, and only the sum of the front-most spells
+  /// is "how long they used it".
+  Duration _focused = Duration.zero;
+  DateTime? _frontSince;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // The app is in front when it launches. Without this the first spell — very
+    // often the longest — would not be counted at all.
+    _frontSince = DateTime.now();
+  }
+
+  /// macOS sends `inactive` when the window loses key, `resumed` when it gets it
+  /// back. `hidden` and `paused` arrive on the way out of sight; all three are
+  /// the same fact for this purpose — not in front any more.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _frontSince ??= DateTime.now();
+      return;
+    }
+    final since = _frontSince;
+    if (since != null) {
+      _focused += DateTime.now().difference(since);
+      _frontSince = null;
+    }
   }
 
   @override
@@ -52,7 +81,17 @@ class _AnalyticsLifecycleState extends State<AnalyticsLifecycle>
   Future<AppExitResponse> didRequestAppExit() async {
     if (!_closed) {
       _closed = true;
-      analytics.appClosed(open: DateTime.now().difference(_openedAt));
+      final now = DateTime.now();
+      final since = _frontSince;
+      if (since != null) _focused += now.difference(since);
+      analytics.appClosed(open: now.difference(_openedAt));
+      // Beside it, not instead of it: `app_closed` says how long the window was
+      // there, this says how much of that a person was actually looking at, and
+      // the pair is the only honest reading for an app people leave open.
+      analytics.appFocusTime(
+        open: now.difference(_openedAt),
+        focused: _focused,
+      );
       // Before the drain below, and awaited: this is a local file write that
       // finishes in milliseconds, and it is the ONLY place a turn still running
       // at quit gets its time counted — the debounce timer is cancelled by the

@@ -22,10 +22,18 @@ class TerminalComposer extends StatefulWidget {
     super.key,
     required this.session,
     required this.focusNode,
+    this.onSend,
   });
 
   final TerminalSession session;
   final FocusNode focusNode;
+
+  /// Called the instant a send is committed, before the text goes anywhere.
+  ///
+  /// A callback rather than an import: this widget holds a session and a focus
+  /// node and has no business knowing about analytics or about the app's state.
+  /// The panel above it has both.
+  final VoidCallback? onSend;
 
   @override
   State<TerminalComposer> createState() => _TerminalComposerState();
@@ -95,6 +103,7 @@ class _TerminalComposerState extends State<TerminalComposer> {
     if (text.isEmpty) return;
     _sending = true;
     try {
+      widget.onSend?.call();
       if (!await widget.session.sendComposerText(text)) return;
       _controller.clear();
     } finally {
