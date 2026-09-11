@@ -166,13 +166,18 @@ class MainFlutterWindow: NSWindow {
     // Dart-side binding does not even fire while a pane has focus. As a native
     // key equivalent it is handled by the responder chain first, so it works
     // wherever the focus happens to be.
+    //
+    // ⌘S, matching the Dart binding. It was still "l" here after that binding moved, and this side is
+    // the one that wins: AppKit takes the key equivalent before Flutter ever sees the event, so ⌘L went
+    // on opening the layout palette and ⌘S did nothing inside a terminal — the exact silent conflict
+    // the shortcut table's own comment warns about.
     viewMenu.insertItem(
       menuItem(
         title: "Layout…",
         action: #selector(showLayout(_:)),
         symbol: "square.grid.2x2",
         tag: layoutMenuItemTag,
-        keyEquivalent: "l"
+        keyEquivalent: "s"
       ),
       at: at
     )

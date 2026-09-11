@@ -396,6 +396,93 @@ void main() {
     },
   );
 
+  group('macOS picks its build by CPU', () {
+    /// Serves a manifest holding exactly [versions] (key → version). Every entry points at an archive
+    /// named after its key, because which KEY was chosen is the whole question here.
+    Future<String> serveMacManifest(Map<String, String> versions) async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final base = 'http://127.0.0.1:${server!.port}';
+      server!.listen((request) async {
+        if (request.uri.path == '/metadata.json') {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              for (final entry in versions.entries)
+                entry.key: {
+                  'version': entry.value,
+                  'url': '$base/${entry.key}.zip',
+                  'sha256': zipSha,
+                  'size': zipBytes.length,
+                },
+            }),
+          );
+        } else {
+          request.response.statusCode = HttpStatus.notFound;
+        }
+        await request.response.close();
+      });
+      return '$base/metadata.json';
+    }
+
+    Future<UpdateInfo?> checkAs(
+      String architecture,
+      Map<String, String> versions,
+    ) async {
+      final updater = DesktopUpdater(
+        dio: Dio(),
+        metadataUrl: await serveMacManifest(versions),
+        releaseMode: true,
+        isLinux: false,
+        architecture: architecture,
+      );
+      return updater.checkOnce(currentVersion: '1.0.0');
+    }
+
+    test(
+      'Apple Silicon takes its Impeller build when both are published',
+      () async {
+        final info = await checkAs('arm64', {
+          'desktop-macos': '1.2.0',
+          'desktop-macos-arm64': '1.2.0',
+        });
+        expect(info!.url, endsWith('/desktop-macos-arm64.zip'));
+      },
+    );
+
+    test(
+      'an Intel Mac never takes the Apple Silicon build, however new',
+      () async {
+        final info = await checkAs('x64', {
+          'desktop-macos': '1.2.0',
+          'desktop-macos-arm64': '1.3.0',
+        });
+        expect(info!.version, '1.2.0');
+        expect(info.url, endsWith('/desktop-macos.zip'));
+      },
+    );
+
+    test('an Intel Mac has nothing to install when only the Apple Silicon build moved', () async {
+      expect(await checkAs('x64', {'desktop-macos-arm64': '1.3.0'}), isNull);
+    });
+
+    test('Apple Silicon falls back to desktop-macos on a manifest from before the split', () async {
+      final info = await checkAs('arm64', {'desktop-macos': '1.2.0'});
+      expect(info!.url, endsWith('/desktop-macos.zip'));
+    });
+
+    test(
+      'Apple Silicon follows a newer desktop-macos over an older arm64 entry',
+      () async {
+        final info = await checkAs('arm64', {
+          'desktop-macos': '1.3.0',
+          'desktop-macos-arm64': '1.2.0',
+        });
+        expect(info!.version, '1.3.0');
+        expect(info.url, endsWith('/desktop-macos.zip'));
+      },
+    );
+  });
+
   group('Linux architecture packaging', () {
     late List<int> appImageBytes;
     late String appImageSha;
@@ -446,7 +533,7 @@ void main() {
         metadataUrl: url,
         releaseMode: true,
         isLinux: true,
-        linuxArchitecture: 'x64',
+        architecture: 'x64',
       );
       final info = await updater.checkOnce(currentVersion: '1.0.0');
       expect(info, isNotNull);
@@ -464,7 +551,7 @@ void main() {
         metadataUrl: url,
         releaseMode: true,
         isLinux: true,
-        linuxArchitecture: 'arm64',
+        architecture: 'arm64',
       );
       final info = await updater.checkOnce(currentVersion: '1.0.0');
       expect(info, isNotNull);
@@ -479,7 +566,7 @@ void main() {
         final updater = DesktopUpdater(
           dio: Dio(),
           isLinux: true,
-          linuxArchitecture: 'x64',
+          architecture: 'x64',
         );
         final info = UpdateInfo(
           version: newVersion,
@@ -505,7 +592,7 @@ void main() {
         final updater = DesktopUpdater(
           dio: Dio(),
           isLinux: true,
-          linuxArchitecture: 'x64',
+          architecture: 'x64',
         );
         final badInfo = UpdateInfo(
           version: newVersion,
@@ -524,7 +611,7 @@ void main() {
         final calls = <String>[];
         final updater = DesktopUpdater(
           isLinux: true,
-          linuxArchitecture: 'x64',
+          architecture: 'x64',
           launchDetached: (command) async => calls.add(command),
         );
         final staged = StagedUpdate(

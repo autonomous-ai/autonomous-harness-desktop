@@ -7,11 +7,15 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../analytics/analytics.dart';
 import '../core/engine_availability.dart';
 import '../core/codex_profiles.dart';
-import '../grid/grid_agent_override.dart';
-import '../grid/grid_api_client.dart';
-import '../grid/grid_selection_store.dart';
+// Two strings, and nothing else from the grid layer: this screen names the
+// engine's own login with the SAME words the sidebar's provider pill and the
+// agent's model menu use for it. It no longer reads the store those constants
+// live beside — see `_submit`.
+import '../grid/grid_selection_store.dart'
+    show kNoGridTargetDetail, kNoGridTargetLabel;
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_checkbox.dart';
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_select_field.dart';
 import '../shared/widgets/labeled_field.dart';
 import '../state/app_state.dart';
@@ -41,39 +45,27 @@ Future<void> showNewAgentDialog(
   AppNotifier notifier,
   String machineId, {
   required String source,
-  // Injectable only so a test can drive a real Create click without a network call — the same seam
-  // GridNetworksController/GridModelsController already expose. Production never passes one, so
-  // _submit's resolveGridAgentOverride falls back to its own default (real) client.
-  @visibleForTesting GridApiClient? gridApiClient,
-  @visibleForTesting LocalCodexProfiles? codexProfiles,
+  // ⚠️ There is no `gridApiClient` seam here any more, and there is nothing for
+  // one to fake: this dialog makes no network call of its own. It used to mint
+  // a relay key on every Create, which is the call a test had to stub — see
+  // [_NewAgentDialogState._submit] for why that call is gone.
 }) {
   // Reported here rather than at each call site: the doors are four and
   // growing, and one that forgets to track is a hole in the funnel that only
   // shows up as a number quietly being too small.
   analytics.newAgentOpened(source: source);
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
-    builder: (context) => _NewAgentDialog(
-      notifier: notifier,
-      machineId: machineId,
-      gridApiClient: gridApiClient,
-      codexProfiles: codexProfiles,
-    ),
+    builder: (context) =>
+        _NewAgentDialog(notifier: notifier, machineId: machineId),
   );
 }
 
 class _NewAgentDialog extends StatefulWidget {
   final AppNotifier notifier;
   final String machineId;
-  final GridApiClient? gridApiClient;
-  final LocalCodexProfiles? codexProfiles;
 
-  const _NewAgentDialog({
-    required this.notifier,
-    required this.machineId,
-    this.gridApiClient,
-    this.codexProfiles,
-  });
+  const _NewAgentDialog({required this.notifier, required this.machineId});
 
   @override
   State<_NewAgentDialog> createState() => _NewAgentDialogState();
@@ -144,22 +136,14 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   /// to learn it. One note per row, so the row stays a name with a caveat
   /// rather than a sentence.
   ///
-  /// The grid note wins when it applies, because an engine that cannot be
-  /// pointed at a grid is refused outright: saying "will install" there would
-  /// promise a launch that is still going to be refused. But it applies ONLY
-  /// with a grid actually chosen — with none, every engine runs on its own
-  /// account and its grid-capability decides nothing, so printing a caveat
-  /// about grids down half the list is a warning about a feature the reader
-  /// has not opted into.
-  ///
-  /// It says "grid not supported", never "no grid": those two words are what
-  /// the picker calls the deliberate choice to use none, and the same words for
-  /// "this engine cannot" and "you asked for none" is how one is read as the
-  /// other.
-  String? _engineNote(String engine, bool gridChosen) {
-    if (gridChosen && !kGridCapableEngines.contains(engine)) {
-      return 'grid not supported';
-    }
+  /// ⚠️ **Nothing here is about grids any more.** This used to print
+  /// `grid not supported` beside an engine the CLI would refuse to point at the
+  /// chosen grid. A new agent now always launches on the engine's own login
+  /// (see [_submit]), so every engine's grid-capability decides nothing at this
+  /// screen and the caveat would be a warning about a road this dialog no
+  /// longer takes. Moving an agent onto a grid is the agent view's own header
+  /// menu, and `AgentModelMenu` is where that refusal is stated instead.
+  String? _engineNote(String engine) {
     return _engineInstallNote(engine) ??
         (kEngineBypassPermissionFlag.containsKey(engine)
             ? null
@@ -216,10 +200,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool get _machineIsThisComputer =>
       widget.notifier.stateOf(widget.machineId)?.isLocalMachine ?? false;
 
+  /// Codex is always on its own login here (see [_submit]), so the profile
+  /// field is always live — it used to stand down whenever a grid was chosen,
+  /// and there is no such state left to stand down for.
   bool get _waitingForCodexProfile =>
       _engine == 'codex' &&
-      _machineIsThisComputer &&
-      !gridSelectionStore.value.hasGrid &&
       _availability('codex')?.supportsCodexHome == true &&
       _codexProfilesBusy;
 
@@ -276,57 +261,40 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     if (folder == null || _submitting || _waitingForCodexProfile) return;
     final engine = _engine;
     final profile = _codexProfile;
-    final selection = gridSelectionStore.value;
     final bypassPermission =
         _bypassPermission && kEngineBypassPermissionFlag.containsKey(engine);
     setState(() {
       _submitting = true;
       _error = null;
     });
-    // A relay key is minted per launch, so it is fetched here rather than held
-    // in the store. Null when no grid is picked, which leaves the frame exactly
-    // as it was before this feature existed.
+    // ⚠️ **A new agent always starts on the engine's own login**, whatever
+    // Settings ▸ Providers has as its default. `grid: null` is the frame this
+    // app sent before grids existed, and it is the frame every create sends
+    // now.
     //
-    // No model is passed: a new agent always launches on Auto — the grid picks
-    // the model, and nothing goes on the wire. Changing it afterwards is the
-    // agent view's own header menu (see AgentModelMenu).
-    final GridAgentOverride? gridOverride;
-    try {
-      gridOverride = await resolveGridAgentOverride(
-        client: widget.gridApiClient,
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _submitting = false;
-        // Named rather than swallowed: falling back to the engine's own
-        // account would silently run the agent somewhere the user did not
-        // choose.
-        _error =
-            'Could not get a key for '
-            '${gridSelectionStore.value.label}: $error';
-      });
-      return;
-    }
-    if (!mounted) return;
-    if (gridSelectionStore.value != selection) {
-      setState(() {
-        _submitting = false;
-        _error = 'The provider changed. Review the account and try again.';
-      });
-      return;
-    }
+    // This used to read `gridSelectionStore` and mint a relay key for whatever
+    // it found. One value was answering two questions — "which provider is my
+    // default" and "what should a new agent start on" — so the only way to
+    // launch an agent on the subscription already signed in on this computer
+    // was to change the default for the whole app. The two questions are now
+    // separate by being answered in separate places: this screen always says
+    // the engine's own login, and moving an agent onto a grid is a deliberate
+    // act in the agent view's own header menu (see `AgentModelMenu`), where the
+    // grid AND the model are picked together for the one agent they apply to.
+    //
+    // What that buys, besides the obvious: no credentials round trip before the
+    // create, so no failure mode between the click and the launch — and every
+    // engine can be launched here, including the ones the CLI refuses to point
+    // at a grid at all (Cursor, Amp, Devin).
     final error = await widget.notifier.createAgent(
       widget.machineId,
       engine: engine,
       folder: folder,
       bypassPermission: bypassPermission,
-      grid: gridOverride,
+      grid: null,
       // Keep the explicit choice even if machine discovery changes mid-submit.
       // The notifier must reject a now-remote target, never use its default login.
-      codexHome: engine == 'codex' && gridOverride == null
-          ? profile?.path
-          : null,
+      codexHome: engine == 'codex' ? profile?.path : null,
     );
     if (!mounted) return;
     if (error != null) {
@@ -336,15 +304,15 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       });
       return;
     }
-    // Tracked here, not in `createAgent`: this is the only place that can tell
-    // Auto from the engine's own login. Both reach the notifier as a null
-    // override, and `onGrid` is what separates them downstream.
+    // `onGrid: false` is now a constant here rather than a question, and it is
+    // still sent: the event's readers count grid launches against all launches,
+    // and a create that stopped reporting itself would read as a drop in agents
+    // rather than a move off the grid. The grid launches it is compared with
+    // arrive from `AgentModelMenu` instead.
     analytics.agentCreated(
       engine: engine,
-      onGrid: gridOverride != null,
+      onGrid: false,
       bypassPermission: bypassPermission,
-      model: gridOverride?.model,
-      networkId: gridOverride?.networkId,
     );
     Navigator.of(context).pop();
   }
@@ -361,131 +329,105 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     );
   }
 
+  /// ⚠️ **This no longer watches `gridSelectionStore`.** It used to sit inside a
+  /// `ValueListenableBuilder` on it, because every launch went wherever that
+  /// store pointed. A create is now always the engine's own login (see
+  /// [_submit]), so there is nothing on this screen for that store to change —
+  /// and a listener that changes nothing is a listener the next reader has to
+  /// prove is dead.
   Widget _buildDialog(BuildContext context) {
     final bypassFlag = kEngineBypassPermissionFlag[_engine];
+    final canCreate =
+        _folder != null && !_submitting && !_waitingForCodexProfile;
 
-    return ValueListenableBuilder<GridSelection>(
-      valueListenable: gridSelectionStore,
-      builder: (context, chosen, _) {
-        // The CLI refuses an engine it cannot point at a grid rather than
-        // quietly running it on its own account, so the dialog already knows this
-        // launch will fail. Gating the button here is what stops a round trip
-        // that only ever ends in an error the user was already warned about.
-        //
-        // The escape hatch is the sidebar's grid picker set to "No grid", which
-        // sends `gridOverride: null` — the same frame the CLI accepts for ANY
-        // engine — and which the summary's refusal note names.
-        final refused =
-            chosen.hasGrid && !kGridCapableEngines.contains(_engine);
-        final canCreate =
-            _folder != null &&
-            !refused &&
-            !_submitting &&
-            !_waitingForCodexProfile;
-
-        return AlertDialog(
-          title: Text('New agent on $_machineName'),
-          titleTextStyle: Theme.of(context).textTheme.titleMedium,
-          // Scrollable because the content grows: the summary's refusal note,
-          // the permissions block and an error line can all be present at once,
-          // and a short window would otherwise clip the actions.
-          content: SizedBox(
-            width: _dialogWidth,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final choices = AbsorbPointer(
-                        absorbing: _submitting,
-                        child: _choices(bypassFlag, chosen.hasGrid),
-                      );
-                      final summary = _NewAgentSummary(
-                        engine: _engine,
-                        folder: _folder,
-                        machineName: _machineName,
-                        machineIsThisComputer: _machineIsThisComputer,
-                        bypassFlag: _bypassPermission ? bypassFlag : null,
-                        selection: chosen,
-                        refused: refused,
-                        installCommand: _willInstall
-                            ? _availability(_engine)?.installCommand
-                            : null,
-                        missingWithoutRecipe: _missingAndUnfixable,
-                        checkFailed: _engineCheckFailed,
-                        codexProfile:
-                            _engine == 'codex' &&
-                                !chosen.hasGrid &&
-                                _machineIsThisComputer
-                            ? _codexProfile
-                            : null,
-                      );
-                      // Below this the two columns would each be too narrow to
-                      // hold a path, so the summary goes back on top of the
-                      // choices instead of beside them.
-                      if (constraints.maxWidth < _stackBelow) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            summary,
-                            const SizedBox(height: _gapField),
-                            choices,
-                          ],
-                        );
-                      }
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: choices),
-                          const SizedBox(width: _gapColumns),
-                          SizedBox(width: _summaryWidth, child: summary),
-                        ],
-                      );
-                    },
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: _gapBlock),
-                    Text(
-                      _error!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-                ],
+    return AlertDialog(
+      title: Text('New agent on $_machineName'),
+      titleTextStyle: Theme.of(context).textTheme.titleMedium,
+      // Scrollable because the content grows: the preflight note, the
+      // permissions block and an error line can all be present at once, and a
+      // short window would otherwise clip the actions.
+      content: SizedBox(
+        width: _dialogWidth,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final choices = AbsorbPointer(
+                    absorbing: _submitting,
+                    child: _choices(bypassFlag),
+                  );
+                  final summary = _NewAgentSummary(
+                    engine: _engine,
+                    folder: _folder,
+                    machineName: _machineName,
+                    machineIsThisComputer: _machineIsThisComputer,
+                    bypassFlag: _bypassPermission ? bypassFlag : null,
+                    installCommand: _willInstall
+                        ? _availability(_engine)?.installCommand
+                        : null,
+                    missingWithoutRecipe: _missingAndUnfixable,
+                    checkFailed: _engineCheckFailed,
+                    codexProfile: _engine == 'codex' ? _codexProfile : null,
+                  );
+                  // Below this the two columns would each be too narrow to hold
+                  // a path, so the summary goes back on top of the choices
+                  // instead of beside them.
+                  if (constraints.maxWidth < _stackBelow) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        summary,
+                        const SizedBox(height: _gapField),
+                        choices,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: choices),
+                      const SizedBox(width: _gapColumns),
+                      SizedBox(width: _summaryWidth, child: summary),
+                    ],
+                  );
+                },
               ),
-            ),
+              if (_error != null) ...[
+                const SizedBox(height: _gapBlock),
+                Text(
+                  _error!,
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: canCreate ? _submit : null,
-              child: _submitting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Create agent'),
-            ),
-          ],
-        );
-      },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: canCreate ? _submit : null,
+          child: _submitting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Create agent'),
+        ),
+      ],
     );
   }
 
   /// The left column: what the user actually decides.
-  ///
-  /// [gridChosen] only gates the grid note — see [_engineNote]. It is passed in
-  /// rather than read off the store here because `build` is already inside the
-  /// [ValueListenableBuilder] that watches it, and a second listener would be a
-  /// second answer to the same question.
-  Widget _choices(String? bypassFlag, bool gridChosen) {
+  Widget _choices(String? bypassFlag) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -506,7 +448,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
               SelectOption(
                 value: identity.id,
                 label: identity.label,
-                note: _engineNote(identity.id, gridChosen),
+                note: _engineNote(identity.id),
                 leading: () => EngineMark(engine: identity.id, size: 14),
                 // "will install" said in words repeated down a third of the
                 // list, and a column of the same two words is a column the eye
@@ -527,12 +469,16 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
             }
           }),
         ),
-        if (_engine == 'codex' && _machineIsThisComputer && !gridChosen) ...[
+        // Unconditional now: Codex here is always on its own login, so the
+        // profile it runs under is always a live question.
+        if (_engine == 'codex') ...[
           const SizedBox(height: _gapField),
           if (_availability('codex')?.supportsCodexHome == true)
             CodexProfileField(
+              notifier: widget.notifier,
+              machineId: widget.machineId,
+              machineIsThisComputer: _machineIsThisComputer,
               value: _codexProfile,
-              profiles: widget.codexProfiles,
               observedPaths: {
                 for (final agent
                     in widget.notifier.stateOf(widget.machineId)!.agents)
@@ -924,12 +870,17 @@ class _BypassCheck extends StatelessWidget {
 
 /// What this launch actually is, stated before it happens.
 ///
-/// The dialog's four inputs each answer a different question, and the one they
-/// add up to — *what will be running, where, on whose account* — was the one
-/// thing the old dialog never said. It matters most for the two settings that
-/// reach outside this window: a bypass flag turns off an engine's own guardrails
-/// on a machine that may not be this one, and a grid sends every token somewhere
-/// other than the engine's own account.
+/// The dialog's inputs each answer a different question, and the one they add
+/// up to — *what will be running, where, on whose account* — was the one thing
+/// the old dialog never said. It matters most for the setting that reaches
+/// outside this window: a bypass flag turns off an engine's own guardrails on a
+/// machine that may not be this one.
+///
+/// Its `Inference` line is now a CONSTANT rather than a readout — every create
+/// is the engine's own login (see `_submit`) — and it is still printed, because
+/// "on whose account" is the question it was added to answer and a reader who
+/// has a grid as their default provider is exactly the one who needs telling
+/// that this launch is not using it.
 ///
 /// Read-only on purpose, and shaped so: it takes the recessed inset fill, never
 /// a field's, so nothing here invites a click.
@@ -940,8 +891,6 @@ class _NewAgentSummary extends StatelessWidget {
     required this.machineName,
     required this.machineIsThisComputer,
     required this.bypassFlag,
-    required this.selection,
-    required this.refused,
     this.installCommand,
     this.missingWithoutRecipe = false,
     this.checkFailed = false,
@@ -957,8 +906,6 @@ class _NewAgentSummary extends StatelessWidget {
   /// Non-null only when the box is actually ticked — this states what WILL run,
   /// not what could.
   final String? bypassFlag;
-  final GridSelection selection;
-  final bool refused;
 
   /// The line this machine will run before the engine, when the engine is not
   /// there yet. Named in full rather than summarised: installing software on a
@@ -983,18 +930,15 @@ class _NewAgentSummary extends StatelessWidget {
     final theme = Theme.of(context);
     final warn = grid.AppPalette.warn;
     final flag = bypassFlag;
-    final install = refused ? null : installCommand;
-    final ready = folder != null && !refused;
+    final install = installCommand;
+    final ready = folder != null;
 
     final Color dot;
     final String heading;
-    if (refused) {
-      dot = warn;
-      heading = 'Will be refused';
-    } else if (missingWithoutRecipe && ready) {
-      // Not "refused": the app is not the thing saying no. The create will
-      // reach the machine and fail there, and the only useful thing to say is
-      // which half is missing.
+    if (missingWithoutRecipe && ready) {
+      // The app is not the thing saying no. The create will reach the machine
+      // and fail there, and the only useful thing to say is which half is
+      // missing.
       dot = warn;
       heading = 'Not installed on this machine';
     } else if (install != null && ready) {
@@ -1020,11 +964,7 @@ class _NewAgentSummary extends StatelessWidget {
       curve: grid.AppMotion.curve,
       padding: const EdgeInsets.all(_summaryPad),
       decoration: BoxDecoration(
-        // §1: depth comes from fill, and the one rim this app allows belongs to
-        // the menu panel — so the refused state is a WASH, not a border. It has
-        // to carry on its own in both themes, which a hairline at 45% opacity
-        // never did: in light it read as a box someone forgot to finish.
-        color: refused ? warn.withValues(alpha: 0.10) : grid.AppSurface.recess,
+        color: grid.AppSurface.recess,
         borderRadius: BorderRadius.circular(grid.AppControl.radius),
       ),
       child: Column(
@@ -1118,32 +1058,19 @@ class _NewAgentSummary extends StatelessWidget {
           _fact(
             context,
             'Inference',
-            // Always Auto: a new agent pins no model, so the grid picks one.
-            refused || !selection.hasGrid
-                ? codexProfile?.label ??
-                      "${engineIdentity(engine).label}'s own account"
-                : '${selection.label} · Auto',
-            note: codexProfile?.path,
+            // [kNoGridTargetLabel], not a sentence of this screen's own: it is
+            // the same state the sidebar's provider pill and the agent's model
+            // menu call `This computer`, and a third wording for it is how a
+            // reader stops recognising it as one thing. A chosen Codex profile
+            // is more specific and wins — it names WHICH login on this
+            // computer.
+            codexProfile?.label ?? kNoGridTargetLabel,
+            // Same trade as the label: the profile's path when there is one,
+            // otherwise the line that says which kinds of credential
+            // `This computer` can mean.
+            note: codexProfile?.path ?? kNoGridTargetDetail,
           ),
-          if (refused) ...[
-            const SizedBox(height: _gapBlock),
-            Container(
-              padding: const EdgeInsets.only(top: _gapBlock),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: warn.withValues(alpha: 0.28)),
-                ),
-              ),
-              child: Text(
-                '${engineIdentity(engine).label} cannot be pointed at a grid — '
-                'it offers no way to change where it sends inference. Choose '
-                "another engine, or set the sidebar's grid picker to "
-                '\u201cNo grid\u201d.',
-                style: theme.textTheme.bodySmall?.copyWith(color: warn),
-              ),
-            ),
-          ],
-          if (!refused && missingWithoutRecipe) ...[
+          if (missingWithoutRecipe) ...[
             const SizedBox(height: _gapBlock),
             Container(
               padding: const EdgeInsets.only(top: _gapBlock),
@@ -1160,7 +1087,7 @@ class _NewAgentSummary extends StatelessWidget {
               ),
             ),
           ],
-          if (!refused && checkFailed) ...[
+          if (checkFailed) ...[
             const SizedBox(height: _gapBlock),
             Container(
               padding: const EdgeInsets.only(top: _gapBlock),

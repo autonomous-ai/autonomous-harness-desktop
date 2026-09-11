@@ -54,6 +54,29 @@ class PaneGrid extends StatelessWidget {
             child: _EmptyGrid(notifier: notifier),
           );
         }
+        // ZOOM SHORT-CIRCUITS THE SHAPE, it does not add one.
+        //
+        // tmux's `prefix z` is not a layout — it is the same pane list with one
+        // of them taking the room. Building it as a seventh arrangement would
+        // have meant every shape below learning about it; returning early means
+        // none of them do, and the grid comes back exactly as it was because it
+        // was never rearranged.
+        //
+        // The cell keeps its `cellKey`, so the terminal inside is the SAME
+        // widget — no detach, no reflow of the pty, no scrollback lost. A
+        // zoomed pane is one that moved, not one that was rebuilt.
+        final zoomed = notifier.zoomedPaneId;
+        if (zoomed != null && panes.length > 1) {
+          for (final pane in panes) {
+            if (pane.id != zoomed) continue;
+            return _PaneCell(
+              key: pane.cellKey,
+              notifier: notifier,
+              pane: pane,
+              dragging: dragging,
+            );
+          }
+        }
         final cells = <Widget>[
           for (final pane in panes)
             _PaneCell(
@@ -391,7 +414,10 @@ class _MinTile {
 /// A test carrying its own copy of this number is a second place the design
 /// lives, and the one that goes stale — which is exactly what happened when the
 /// grid stopped separating its tiles with a 1px line.
-const double kPaneGap = 9;
+/// Nudged 9 → 9.5 on the owner's call. Five percent of nine is under half a
+/// pixel, so it rounds to either no change at all or to ten; a half point is the
+/// honest reading of the ask and lands on a whole device pixel at 2x.
+const double kPaneGap = 9.5;
 
 /// What shows through the gaps.
 ///

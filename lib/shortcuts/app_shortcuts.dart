@@ -49,12 +49,23 @@ enum ShortcutAction {
   toggleRail,
   nextAgent,
   previousAgent,
-  focusPreviousPane,
-  focusNextPane,
+  focusPaneLeft,
+  focusPaneRight,
   focusPaneAbove,
   focusPaneBelow,
-  movePaneBackward,
-  movePaneForward,
+  movePaneLeft,
+  movePaneRight,
+  movePaneUp,
+  movePaneDown,
+
+  /// The agent this window was on before the current one — tmux's `prefix ;`.
+  lastPane,
+
+  /// One pane filling the grid, and back. tmux's `prefix z`.
+  zoomPane,
+
+  /// Jump to any agent by name, on any machine.
+  switchAgent,
 
   closePane,
   newAgent,
@@ -93,23 +104,265 @@ class AppShortcut {
 
 const List<AppShortcut> kAppShortcuts = [
   // --- navigate -------------------------------------------------------------
+  //
+  // ONE MOTION, TWO SPELLINGS. Every direction is bound as both `⌘`+arrow and
+  // `⌘`+hjkl, live at the same time and with no mode to switch between them —
+  // which is what zellij does with Alt, and for the same reason: a person who
+  // reaches for hjkl and a person who reaches for the arrows are not two
+  // populations to be asked about, they are two hands on the same keyboard.
+  //
+  // ⌘, NOT Ctrl, and that is forced. `vim-tmux-navigator` — the thing vim users
+  // actually have in their fingers — binds Ctrl+hjkl, and it works there because
+  // tmux ASKS whether the focused pane is running vim and forwards the key only
+  // then. Nothing here can ask: the pane is always a terminal running a TUI, and
+  // Ctrl-h/j/k/l are backspace, newline, kill-line and clear — keys the agent
+  // needs. Taking them would break the terminal for everyone to please one half
+  // of the room. See this file's header for why ⌥ is out too.
+  //
+  // ⌘H WAS MACOS'S. `MainMenu.xib` carried `keyEquivalent="h"` on Hide, matched
+  // in `performKeyEquivalent:` before Flutter ever sees the key — the same trap
+  // the header describes for ⌘C/⌘V/⌘A, and answered the same way: the
+  // keyEquivalent is stripped, the menu item stays and still works when clicked.
+  // ⌘J (Jump to Selection) and ⌘; (Check Document Now) went with it; this app
+  // has no Find and no spell-checked field. The cost is real and worth saying:
+  // Hide is no longer a keystroke in this app.
   AppShortcut(
-    action: ShortcutAction.nextAgent,
-    // The macOS convention for "next tab" (Safari, Chrome, Finder). NOT
-    // Ctrl+Tab, which tmux and the shell can both see.
+    action: ShortcutAction.focusPaneLeft,
+    activator: SingleActivator(LogicalKeyboardKey.keyH, meta: true),
+    label: 'Focus the pane to the left',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneBelow,
+    activator: SingleActivator(LogicalKeyboardKey.keyJ, meta: true),
+    label: 'Focus the pane below',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneAbove,
+    activator: SingleActivator(LogicalKeyboardKey.keyK, meta: true),
+    label: 'Focus the pane above',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneRight,
+    activator: SingleActivator(LogicalKeyboardKey.keyL, meta: true),
+    label: 'Focus the pane to the right',
+    group: ShortcutGroup.navigate,
+  ),
+  // The same four, for the hand that never left the arrow cluster. Safe despite
+  // the bare-arrow rule this file's tests enforce: that rule is about UNMODIFIED
+  // arrows, which the terminal owns for the cursor and for shell history. A ⌘
+  // chord is the app's — terminal_panel._onTerminalKey passes everything but ⌘V
+  // straight through.
+  AppShortcut(
+    action: ShortcutAction.focusPaneLeft,
+    activator: SingleActivator(LogicalKeyboardKey.arrowLeft, meta: true),
+    label: 'Focus the pane to the left',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneBelow,
+    activator: SingleActivator(LogicalKeyboardKey.arrowDown, meta: true),
+    label: 'Focus the pane below',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneAbove,
+    activator: SingleActivator(LogicalKeyboardKey.arrowUp, meta: true),
+    label: 'Focus the pane above',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.focusPaneRight,
+    activator: SingleActivator(LogicalKeyboardKey.arrowRight, meta: true),
+    label: 'Focus the pane to the right',
+    group: ShortcutGroup.navigate,
+  ),
+
+  // --- panes ----------------------------------------------------------------
+  //
+  // SHIFT MOVES WHAT THE PLAIN KEY WALKS TO, and that is not a convention
+  // invented here: vim has used `Ctrl-w H/J/K/L` — the capitals — to move a
+  // window to an edge for as long as it has had splits. A vim user does not
+  // have to be taught this row; they have to be told it is not missing.
+  AppShortcut(
+    action: ShortcutAction.movePaneLeft,
     activator: SingleActivator(
-      LogicalKeyboardKey.bracketRight,
+      LogicalKeyboardKey.keyH,
       meta: true,
       shift: true,
     ),
+    label: 'Move this pane left',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneDown,
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyJ,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane down',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneUp,
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyK,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane up',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneRight,
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyL,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane right',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneLeft,
+    activator: SingleActivator(
+      LogicalKeyboardKey.arrowLeft,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane left',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneDown,
+    activator: SingleActivator(
+      LogicalKeyboardKey.arrowDown,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane down',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneUp,
+    activator: SingleActivator(
+      LogicalKeyboardKey.arrowUp,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane up',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.movePaneRight,
+    activator: SingleActivator(
+      LogicalKeyboardKey.arrowRight,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Move this pane right',
+    group: ShortcutGroup.panes,
+  ),
+
+  // ⌘⏎ — tmux's `prefix z`, one of the most-pressed keys that multiplexer has.
+  // Enter because it reads as "make THIS the thing", and because it is the one
+  // chord on this list nobody has to look up twice.
+  AppShortcut(
+    action: ShortcutAction.zoomPane,
+    activator: SingleActivator(LogicalKeyboardKey.enter, meta: true),
+    label: 'Zoom this pane, or put it back',
+    group: ShortcutGroup.panes,
+  ),
+  // ⌘; — tmux's `prefix ;`, spelled the same. Two agents at a time is the shape
+  // most work actually has, and walking a list to get back to the other one is
+  // the wrong motion for it.
+  AppShortcut(
+    action: ShortcutAction.lastPane,
+    activator: SingleActivator(LogicalKeyboardKey.semicolon, meta: true),
+    label: 'Back to the pane you were just on',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.closePane,
+    activator: SingleActivator(LogicalKeyboardKey.keyW, meta: true),
+    label: 'Close the focused pane',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.pinPane,
+    // ⇧⌘P: plain ⌘P is the switcher now, which is the key people reach for far
+    // more often. Same letter, so the pair stays learnable.
+    activator: SingleActivator(
+      LogicalKeyboardKey.keyP,
+      meta: true,
+      shift: true,
+    ),
+    label: 'Hold this pane in its slot',
+    group: ShortcutGroup.panes,
+  ),
+  AppShortcut(
+    action: ShortcutAction.showLayout,
+    activator: SingleActivator(LogicalKeyboardKey.keyS, meta: true),
+    label: 'Choose the grid layout',
+    group: ShortcutGroup.panes,
+  ),
+
+  // --- agents ---------------------------------------------------------------
+  //
+  // THE BRACKETS MEAN ONE THING NOW. They used to carry three: ⌘[ ] walked
+  // panes, ⇧⌘[ ] walked agents and ⌥⌘[ ] moved panes — three verbs told apart
+  // only by which modifiers were down. Panes moved to hjkl and arrows, so the
+  // brackets keep the one job they are good at: stepping along a list.
+  AppShortcut(
+    action: ShortcutAction.previousAgent,
+    activator: SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true),
+    label: 'Previous agent',
+    group: ShortcutGroup.navigate,
+  ),
+  AppShortcut(
+    action: ShortcutAction.nextAgent,
+    activator: SingleActivator(LogicalKeyboardKey.bracketRight, meta: true),
+    label: 'Next agent',
+    group: ShortcutGroup.navigate,
+  ),
+  // ⌘P — "go to", the way VS Code's quick-open spells it, because that is what
+  // this is: type part of a name, land on the agent.
+  //
+  // It answers the one thing a keyboard-only session could not do at all. ⌘1…⌘9
+  // address TILES, so they only reach agents already on the grid; ⌘B sends a
+  // task and lets a model choose. Neither opens the eleventh agent by name, and
+  // until this key existed the only way was the mouse.
+  //
+  // ⌘K stays unbound and is now spoken for by the navigation row above — see
+  // the header's note about what the file used to hold it in reserve for.
+  AppShortcut(
+    action: ShortcutAction.switchAgent,
+    activator: SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+    label: 'Go to an agent by name',
+    group: ShortcutGroup.navigate,
+  ),
+  // ⌃⇥ / ⌃⇧⇥ — the one Ctrl pair this app is allowed, and the terminal is made
+  // to let it past on purpose (terminal_view.dart) because no shell or tmux
+  // binding wants it.
+  //
+  // It walks AGENTS now, not panes. It used to be a third spelling of "next
+  // pane", which put it in list order beside hjkl's geometry — the same split
+  // brain the brackets had. Tab between agents is what every tabbed app has
+  // trained the hand to expect anyway.
+  AppShortcut(
+    action: ShortcutAction.nextAgent,
+    activator: SingleActivator(LogicalKeyboardKey.tab, control: true),
     label: 'Next agent',
     group: ShortcutGroup.navigate,
   ),
   AppShortcut(
     action: ShortcutAction.previousAgent,
     activator: SingleActivator(
-      LogicalKeyboardKey.bracketLeft,
-      meta: true,
+      LogicalKeyboardKey.tab,
+      control: true,
       shift: true,
     ),
     label: 'Previous agent',
@@ -122,117 +375,6 @@ const List<AppShortcut> kAppShortcuts = [
     group: ShortcutGroup.navigate,
   ),
 
-  // --- panes ----------------------------------------------------------------
-  // Brackets, not arrows. Measured: xterm turns every arrow into a terminal
-  // key and answers `handled`, so `⌘←`/`⌘⌥→` never reach a binding — they go
-  // to the agent as cursor movement. `⌘⇧→` happens to survive today, but only
-  // because of how xterm treats shift, which is not a promise to build on.
-  //
-  // The pairing is deliberate: the same bracket moves you between PANES, and
-  // with shift between AGENTS — one key, shift widens the scope.
-  AppShortcut(
-    action: ShortcutAction.focusPreviousPane,
-    activator: SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true),
-    label: 'Focus the previous pane',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.focusNextPane,
-    activator: SingleActivator(LogicalKeyboardKey.bracketRight, meta: true),
-    label: 'Focus the next pane',
-    group: ShortcutGroup.panes,
-  ),
-  // ⌘← / ⌘→ — the grid is laid out left to right, so the keys that mean left
-  // and right should walk it. Safe despite the arrow rule this file's tests
-  // enforce: that rule is about BARE arrows, which the terminal owns for the
-  // cursor and for shell history. A ⌘ chord is the app's — the terminal passes
-  // everything but ⌘V straight through (terminal_panel._onTerminalKey).
-  AppShortcut(
-    action: ShortcutAction.focusPreviousPane,
-    activator: SingleActivator(LogicalKeyboardKey.arrowLeft, meta: true),
-    label: 'Focus the previous pane',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.focusNextPane,
-    activator: SingleActivator(LogicalKeyboardKey.arrowRight, meta: true),
-    label: 'Focus the next pane',
-    group: ShortcutGroup.panes,
-  ),
-  // Up and down are SPATIAL, unlike left and right, which walk the tiles in
-  // order. Down from the top-left of a 2×2 is the tile under it — the arrow is
-  // pointing at it — and there is no order in which that tile is "next".
-  AppShortcut(
-    action: ShortcutAction.focusPaneAbove,
-    activator: SingleActivator(LogicalKeyboardKey.arrowUp, meta: true),
-    label: 'Focus the pane above',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.focusPaneBelow,
-    activator: SingleActivator(LogicalKeyboardKey.arrowDown, meta: true),
-    label: 'Focus the pane below',
-    group: ShortcutGroup.panes,
-  ),
-  // ⌃⇥ / ⇧⌃⇥ — the same pair every tabbed app uses, and the one people reach
-  // for without being told, which is why it is here despite the note at the
-  // top of this file warning that Ctrl belongs to the terminal.
-  //
-  // It is safe now because the terminal is made to let exactly this chord go
-  // past it (see terminal_view.dart): Ctrl+Tab is not a sequence any shell or
-  // tmux binding uses, so nothing downstream loses a key by us taking it.
-  // ⌘[ / ⌘] stay as the macOS-native way to the same two actions.
-  AppShortcut(
-    action: ShortcutAction.focusNextPane,
-    activator: SingleActivator(LogicalKeyboardKey.tab, control: true),
-    label: 'Focus the next pane',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.focusPreviousPane,
-    activator: SingleActivator(
-      LogicalKeyboardKey.tab,
-      control: true,
-      shift: true,
-    ),
-    label: 'Focus the previous pane',
-    group: ShortcutGroup.panes,
-  ),
-
-  AppShortcut(
-    action: ShortcutAction.movePaneBackward,
-    // The keyboard twin of dragging a pane's header. ⌘[ / ⌘] already focus a
-    // pane and ⇧⌘[ / ⇧⌘] already change agent, so this is the third member of
-    // the same family — and ⌘⌥ is the one modifier pair still free (see the
-    // note at the top of this file about why ⌥ alone is not).
-    activator: SingleActivator(
-      LogicalKeyboardKey.bracketLeft,
-      meta: true,
-      alt: true,
-    ),
-    label: 'Move pane earlier',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.movePaneForward,
-    activator: SingleActivator(
-      LogicalKeyboardKey.bracketRight,
-      meta: true,
-      alt: true,
-    ),
-    label: 'Move pane later',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.closePane,
-
-    // Close the pane, and — when the last one is gone — the window, which is
-    // what ⌘W means everywhere else on this OS.
-    activator: SingleActivator(LogicalKeyboardKey.keyW, meta: true),
-    label: 'Close the focused pane',
-    group: ShortcutGroup.panes,
-  ),
-
   // --- actions --------------------------------------------------------------
   AppShortcut(
     action: ShortcutAction.newAgent,
@@ -242,10 +384,6 @@ const List<AppShortcut> kAppShortcuts = [
   ),
   AppShortcut(
     action: ShortcutAction.routeTask,
-    // ⌘B, the owner's pick. ⌘K is the chord this gesture wears in most apps, and it is deliberately
-    // NOT taken here — leaving it free keeps it available for the search-shaped thing people reach for
-    // it with. B is unclaimed on both sides: nothing in this list uses it, and neither does the macOS
-    // menu bar (which would win silently if it did).
     activator: SingleActivator(LogicalKeyboardKey.keyB, meta: true),
     label: 'Describe a task, and let it pick the agent',
     group: ShortcutGroup.actions,
@@ -257,22 +395,6 @@ const List<AppShortcut> kAppShortcuts = [
     group: ShortcutGroup.actions,
   ),
   AppShortcut(
-    action: ShortcutAction.pinPane,
-    activator: SingleActivator(LogicalKeyboardKey.keyP, meta: true),
-    label: 'Hold this pane in its slot',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
-    action: ShortcutAction.showLayout,
-    // ⌘S, the owner's pick. It is Save nearly everywhere else, and free here for the reason that makes
-    // it safe: this window has no document to save — the layout, the panes and the dividers all persist
-    // themselves the moment they change. Nothing on this list or in the macOS menu bar claims it (the
-    // menu would win silently if it did).
-    activator: SingleActivator(LogicalKeyboardKey.keyS, meta: true),
-    label: 'Choose the grid layout',
-    group: ShortcutGroup.panes,
-  ),
-  AppShortcut(
     action: ShortcutAction.showShortcuts,
     activator: SingleActivator(LogicalKeyboardKey.slash, meta: true),
     label: 'Show keyboard shortcuts',
@@ -280,12 +402,6 @@ const List<AppShortcut> kAppShortcuts = [
   ),
 ];
 
-/// Open the model picker for the focused agent.
-///
-/// Kept out of [kAppShortcuts] for the reason [kDebugShortcut] is: a release
-/// build has no providers (see [kGridSurfaceEnabled]), and this key is the ONE
-/// door onto the whole picker that is not a control the build already hides.
-/// Bound there, ⇧⌘M opened a panel listing every provider on the account — and
 /// fetched them from the control plane to do it — in a build whose own answer
 /// is that Grid is not finished. A key that opens a feature the build does not
 /// have is worse than a key that was never taken.

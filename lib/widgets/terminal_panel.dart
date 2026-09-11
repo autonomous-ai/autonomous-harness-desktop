@@ -17,6 +17,8 @@ import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
 import '../terminal/terminal_binary.dart';
 import '../terminal/terminal_font_store.dart';
+import '../terminal/terminal_link_opener.dart';
+import '../terminal/terminal_links.dart';
 import '../terminal/terminal_session.dart';
 import '../terminal/terminal_theme.dart';
 import '../terminal/terminal_viewport.dart';
@@ -60,6 +62,9 @@ class TerminalPanel extends StatefulWidget {
   /// this is the only tile — see [_TerminalHeader.paneDrag].
   final PaneDragHandle? paneDrag;
 
+  /// Test seam for OS actions; normal panes use the platform launcher.
+  final TerminalLinkOpener? linkOpener;
+
   const TerminalPanel({
     super.key,
     required this.notifier,
@@ -73,6 +78,7 @@ class TerminalPanel extends StatefulWidget {
     this.onTogglePin,
     this.onRendererFocus,
     this.paneDrag,
+    this.linkOpener,
   });
 
   @override
@@ -97,12 +103,22 @@ class _TerminalPanelState extends State<TerminalPanel>
   bool _cursorBlinkVisible = true;
   double _alternateScrollRemainder = 0;
   int? _lastInertiaMicros;
+  late final TerminalLinkOpener _linkOpener;
+  Offset? _linkPointerPosition;
+  String? _hoveredLink;
+  String? _pressedLink;
+  bool _openingLink = false;
+  bool _linkRefreshPending = false;
 
   @override
   void initState() {
     super.initState();
     _viewTerminal = widget.session.terminal;
+    _viewTerminal.addListener(_scheduleLinkRefresh);
+    _scrollController.addListener(_scheduleLinkRefresh);
     _terminalViewKey = GlobalKey<TerminalViewState>();
+    _linkOpener = widget.linkOpener ?? TerminalLinkOpener();
+    HardwareKeyboard.instance.addHandler(_onLinkModifierChanged);
     _focusNode.addListener(_handleFocusChange);
     _composerFocus.addListener(_handleComposerFocusChange);
     _cursorBlinkTimer = Timer.periodic(
@@ -127,7 +143,11 @@ class _TerminalPanelState extends State<TerminalPanel>
       _composerFocusPending = false;
       _cancelDialInertia();
       _controller.clearSelection();
+      _viewTerminal.removeListener(_scheduleLinkRefresh);
       _viewTerminal = widget.session.terminal;
+      _viewTerminal.addListener(_scheduleLinkRefresh);
+      _pressedLink = null;
+      _hoveredLink = null;
       _terminalViewKey = GlobalKey<TerminalViewState>();
       _cursorBlinkVisible = true;
       widget.session.setCursorBlinkPhase(true);
@@ -145,6 +165,9 @@ class _TerminalPanelState extends State<TerminalPanel>
 
   @override
   void dispose() {
+    _viewTerminal.removeListener(_scheduleLinkRefresh);
+    _scrollController.removeListener(_scheduleLinkRefresh);
+    HardwareKeyboard.instance.removeHandler(_onLinkModifierChanged);
     widget.session.setCursorBlinkPhase(true);
     widget.session.removeListener(_onSessionChanged);
     widget.session.detachViewport(this);
@@ -214,7 +237,11 @@ class _TerminalPanelState extends State<TerminalPanel>
     // Selection anchors belong to a specific circular buffer. Detach them
     // before the TerminalView starts laying out the replacement terminal.
     _controller.clearSelection();
+    _viewTerminal.removeListener(_scheduleLinkRefresh);
     _viewTerminal = terminal;
+    _viewTerminal.addListener(_scheduleLinkRefresh);
+    _pressedLink = null;
+    _hoveredLink = null;
     _terminalViewKey = GlobalKey<TerminalViewState>();
     _cancelDialInertia();
     _alternateScrollRemainder = 0;
@@ -483,6 +510,99 @@ class _TerminalPanelState extends State<TerminalPanel>
     return KeyEventResult.handled;
   }
 
+  bool get _linkModifierPressed {
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isAltPressed || keyboard.isShiftPressed) return false;
+    return defaultTargetPlatform == TargetPlatform.macOS
+        ? keyboard.isMetaPressed && !keyboard.isControlPressed
+        : keyboard.isControlPressed && !keyboard.isMetaPressed;
+  }
+
+  bool _onLinkModifierChanged(KeyEvent event) {
+    const modifiers = [
+      LogicalKeyboardKey.metaLeft,
+      LogicalKeyboardKey.metaRight,
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.controlRight,
+      LogicalKeyboardKey.altLeft,
+      LogicalKeyboardKey.altRight,
+      LogicalKeyboardKey.shiftLeft,
+      LogicalKeyboardKey.shiftRight,
+    ];
+    if (_linkPointerPosition != null &&
+        mounted &&
+        modifiers.contains(event.logicalKey)) {
+      setState(() {}); // Refresh the cursor even when the mouse has not moved.
+    }
+    return false; // Modifier observation never consumes a terminal key.
+  }
+
+  void _scheduleLinkRefresh() {
+    if (_linkPointerPosition == null || _linkRefreshPending) return;
+    _linkRefreshPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _linkRefreshPending = false;
+      if (mounted) _hoverLink(_linkPointerPosition);
+    });
+  }
+
+  String? _linkAtPointer(Offset globalPosition) {
+    final view = _laidOutTerminalView();
+    if (view == null) return null;
+    final render = view.renderTerminal;
+    final local = render.globalToLocal(globalPosition);
+    if (!(Offset.zero & render.size).contains(local)) return null;
+    return terminalLinkAt(_viewTerminal, render.getCellOffset(local));
+  }
+
+  void _hoverLink(Offset? globalPosition) {
+    _linkPointerPosition = globalPosition;
+    final target = globalPosition == null
+        ? null
+        : _linkAtPointer(globalPosition);
+    if (target != _hoveredLink) setState(() => _hoveredLink = target);
+  }
+
+  bool _onLinkTapDown(TapDownDetails details, CellOffset cell) {
+    _pressedLink = _linkModifierPressed
+        ? _linkAtPointer(details.globalPosition)
+        : null;
+    return _pressedLink != null;
+  }
+
+  void _onLinkTapUp(TapUpDetails details, CellOffset cell) {
+    final target = _pressedLink;
+    _pressedLink = null;
+    // Read the current buffer again: streamed output may have replaced the
+    // text between press and release, or this pane may now show another agent.
+    if (target == null ||
+        !_linkModifierPressed ||
+        target != _linkAtPointer(details.globalPosition)) {
+      return;
+    }
+    unawaited(_openLink(target));
+  }
+
+  Future<void> _openLink(String target) async {
+    if (_openingLink) return;
+    _openingLink = true;
+    final session = widget.session;
+    try {
+      final message = await _linkOpener.open(
+        target,
+        isLocalMachine:
+            widget.notifier.stateOf(session.machineId)?.isLocalMachine == true,
+      );
+      if (!mounted || !identical(session, widget.session) || message == null) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      _openingLink = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
@@ -509,40 +629,56 @@ class _TerminalPanelState extends State<TerminalPanel>
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: TerminalView(
-                    session.terminal,
-                    key: _terminalViewKey,
-                    controller: _controller,
-                    scrollController: _scrollController,
-                    focusNode: _focusNode,
-                    autofocus: widget.focused && !showComposer,
-                    readOnly: widget.readOnly || !session.acceptsInput,
-                    theme: darkTerminalTheme,
-                    padding: const EdgeInsets.all(10),
-                    textStyle: terminalFontStore.value,
-                    // ⚠️ The terminal is NOT app chrome, and the user said so:
-                    // it carries its own font settings (Settings ▸ Terminal,
-                    // [terminalFontStore]) precisely because its type is a grid
-                    // a remote program is drawing into, not a label.
-                    //
-                    // Without this, `TerminalView` falls back to
-                    // `MediaQuery.textScalerOf(context)` (xterm's
-                    // terminal_view.dart:257), so the app-wide UI size would
-                    // change the cell size — and a changed cell size is not
-                    // cosmetic here: it re-derives `rows`, which fires
-                    // `Terminal.resize` → `session.resize` → a `terminal_resize`
-                    // frame on the wire and a real SIGWINCH at the far end.
-                    //
-                    // Read in `createRenderObject`, not only on update, so this
-                    // holds from the very first frame — no scaled first paint
-                    // and no startup resize.
-                    textScaler: TextScaler.noScaling,
-                    onKeyEvent: _onTerminalKey,
-                    onSecondaryTapDown: (_, _) => _copyOrPaste(),
+                  child: MouseRegion(
+                    onEnter: (event) => _hoverLink(event.position),
+                    onHover: (event) => _hoverLink(event.position),
+                    onExit: (_) => _hoverLink(null),
+                    child: Tooltip(
+                      message: _hoveredLink == null
+                          ? ''
+                          : '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl'}-click to open\n$_hoveredLink',
+                      child: TerminalView(
+                        session.terminal,
+                        key: _terminalViewKey,
+                        controller: _controller,
+                        scrollController: _scrollController,
+                        focusNode: _focusNode,
+                        autofocus: widget.focused && !showComposer,
+                        readOnly: widget.readOnly || !session.acceptsInput,
+                        theme: darkTerminalTheme,
+                        padding: const EdgeInsets.all(10),
+                        textStyle: terminalFontStore.value,
+                        // ⚠️ The terminal is NOT app chrome, and the user said so:
+                        // it carries its own font settings (Settings ▸ Terminal,
+                        // [terminalFontStore]) precisely because its type is a grid
+                        // a remote program is drawing into, not a label.
+                        //
+                        // Without this, `TerminalView` falls back to
+                        // `MediaQuery.textScalerOf(context)` (xterm's
+                        // terminal_view.dart:257), so the app-wide UI size would
+                        // change the cell size — and a changed cell size is not
+                        // cosmetic here: it re-derives `rows`, which fires
+                        // `Terminal.resize` → `session.resize` → a `terminal_resize`
+                        // frame on the wire and a real SIGWINCH at the far end.
+                        //
+                        // Read in `createRenderObject`, not only on update, so this
+                        // holds from the very first frame — no scaled first paint
+                        // and no startup resize.
+                        textScaler: TextScaler.noScaling,
+                        onKeyEvent: _onTerminalKey,
+                        onTapDown: _onLinkTapDown,
+                        onTapUp: _onLinkTapUp,
+                        mouseCursor:
+                            _hoveredLink != null && _linkModifierPressed
+                            ? SystemMouseCursors.click
+                            : SystemMouseCursors.text,
+                        onSecondaryTapDown: (_, _) => _copyOrPaste(),
 
-                    onAltBufferScroll: session.scrollViaTmuxCopyMode
-                        ? (up) => session.sendScrollCommand(up, 1)
-                        : null,
+                        onAltBufferScroll: session.scrollViaTmuxCopyMode
+                            ? (up) => session.sendScrollCommand(up, 1)
+                            : null,
+                      ),
+                    ),
                   ),
                 ),
                 if (session.status == TerminalSessionStatus.opening ||
@@ -700,9 +836,11 @@ class _TerminalHeader extends StatelessWidget {
                         : 'Codex profile: $profile\nDouble-click to rename',
                     waitDuration: const Duration(milliseconds: 700),
                     child: Text(
-                      profile == null
-                          ? session.agentName
-                          : '${session.agentName} · ${profile.split('/').last}',
+                      // The profile path's basename used to trail the name here, but for the
+                      // default profile that basename is literally the hidden `.codex` folder —
+                      // meaningless clutter on every ordinary codex agent. The tooltip above still
+                      // carries the full path for whoever actually needs it.
+                      session.agentName,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppColors.text,

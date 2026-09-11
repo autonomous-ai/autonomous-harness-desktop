@@ -62,7 +62,7 @@ List<GridTargetOption> gridTargetMenuOptions(
   GridNetworksState state, {
   bool Function(String)? isEnabled,
 }) => [
-  const GridTargetOption(label: kNoGridTargetLabel),
+  GridTargetOption(label: thisComputerLabel),
   ...switch (state) {
     GridNetworksReady(:final me) => _readyOptions(me.networks, isEnabled),
     // Loading, signed out, failed — one disabled row saying which, in the words
@@ -106,11 +106,11 @@ List<GridTargetOption> _readyOptions(
   ];
   if (offered.isEmpty) {
     // ⚠️ Deliberately says nothing. This used to read "Every provider is off —
-    // turn one on in Settings", printed under a ticked `Subscription` row, and
-    // it was wrong on two counts. It read as an ERROR for a setup that works:
-    // switching every provider off is supported, agents keep launching, and
-    // they bill the subscriptions on this computer — which the ticked row
-    // above already names. And it gave an ORDER for a state the person had
+    // turn one on in Settings", printed under the ticked `This computer` row,
+    // and it was wrong on two counts. It read as an ERROR for a setup that
+    // works: switching every provider off is supported, agents keep launching,
+    // and they bill whatever is signed in on this computer — which the ticked
+    // row above already names. And it gave an ORDER for a state the person had
     // just chosen on purpose, as though the choice needed undoing.
     //
     // The account that owns no providers at all still gets a line, above:
@@ -213,8 +213,13 @@ class _GridTargetPillState extends State<GridTargetPill> {
   static const double _panelMaxWidth = 304;
 
   List<Widget> _rows(GridSelection chosen) => [
+    // ⚠️ Was "New agents only", which is no longer what this decides — see the
+    // same note in `status_rail/rail_provider_pill.dart`, and `_submit` in
+    // `new_agent_dialog.dart` for why.
     const AppMenuNote(
-      'New agents only. Agents already running keep the provider they started on.',
+      'A new agent starts on its engine’s own login whatever is picked here — '
+      'move one onto a provider from that agent’s model menu. This chooses '
+      'what Share Intelligence offers first, and what the usage figures count.',
       // The same 304 handed to [AppMenu.style] below. A sentence this long has
       // to be told the panel's width or it is clipped rather than wrapped.
       panelWidth: _panelMaxWidth,
@@ -303,9 +308,7 @@ class _PillState extends State<_Pill> {
     final on = widget.chosen.hasGrid;
     final lit = _hovered || widget.open;
     return Tooltip(
-      message: on
-          ? 'New agents run on ${widget.chosen.label}'
-          : 'New agents run on each engine’s own account, not on a provider',
+      message: on ? 'This computer’s provider is ${widget.chosen.label}' : 'This computer is on no provider — each engine uses its own account',
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),

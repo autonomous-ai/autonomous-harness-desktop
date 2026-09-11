@@ -570,10 +570,11 @@ class ProviderUsageRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            _detail(),
-            style: TextStyle(fontSize: 11.5, color: AppPalette.textSecondary),
-          ),
+          if (_detail() case final detail?)
+            Text(
+              detail,
+              style: TextStyle(fontSize: 11.5, color: AppPalette.textSecondary),
+            ),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -627,18 +628,20 @@ class ProviderUsageRow extends StatelessWidget {
   /// The message from an [LedgerStatus.unavailable] or [LedgerStatus.failed]
   /// scan is printed verbatim: the scanner already said why in a sentence, and
   /// re-wording it here would be a second place for that explanation to drift.
-  String _detail() {
-    if (!state.enabled) return 'Off — nothing on this machine is read.';
+  ///
+  /// Returns null when there is nothing worth saying — the status pill already
+  /// carries "Off" / "Scanning", so repeating it here is noise.
+  String? _detail() {
+    if (!state.enabled) return null;
     return switch (state.status) {
-      LedgerStatus.scanning => 'Reading local logs…',
+      LedgerStatus.scanning => null,
       LedgerStatus.unavailable ||
       LedgerStatus.failed => state.message ?? 'No figures.',
-      LedgerStatus.disabled => 'Off — nothing on this machine is read.',
+      LedgerStatus.disabled => null,
       LedgerStatus.ok =>
         ledger.hasData
             ? '${ledger.sessionCount} '
                   '${ledger.sessionCount == 1 ? 'session' : 'sessions'}'
-                  '${ledger.hasUnpricedModel ? ' · some models are unpriced' : ''}'
             : 'Nothing spent here yet.',
     };
   }

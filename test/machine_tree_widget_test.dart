@@ -741,6 +741,34 @@ void main() {
     notifier.dispose();
   });
 
+  testWidgets('an unlinked machine that is offline is not offered a link', (
+    tester,
+  ) async {
+    // Linking is a handshake with the daemon on the other computer. A daemon
+    // that is not running cannot shake hands, so the row that starts it must
+    // not exist while the machine is off — it would be a button for the
+    // impossible. What shows instead names the state and what comes next.
+    final notifier = notifierWithLoadState(AgentLoadStatus.needsLink);
+    notifier.machineStates[machine.machineId]!.nodeOnline = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 320, child: MachineRail(notifier: notifier)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Link this machine…'), findsNothing);
+    expect(
+      find.text("Harness isn't running on it · link when it's back"),
+      findsOneWidget,
+    );
+    // …and the offline mark is a word on the caption, not a chip.
+    expect(find.text('offline'), findsOneWidget);
+    notifier.dispose();
+  });
+
   testWidgets(
     'shows link-required, loading, and retryable agent error states',
     (tester) async {
@@ -752,7 +780,11 @@ void main() {
           ),
         ),
       );
-      expect(find.text('link required'), findsOneWidget);
+      // A row, not a status line: the link is the step before this machine's
+      // first agent, and it wears that row's shape. The old "link required" was
+      // a condition dressed as a command.
+      expect(find.text('Link this machine…'), findsOneWidget);
+      expect(find.text('link required'), findsNothing);
       notifier.adoptSessionForTest(
         TerminalSession(
           machineId: 'other-machine',
@@ -763,7 +795,7 @@ void main() {
           sendBinary: (_) async => true,
         ),
       );
-      await tester.tap(find.byKey(const ValueKey('link-required')));
+      await tester.tap(find.text('Link this machine…'));
       await tester.pump();
       expect(notifier.selectedMachineId, machine.machineId);
       expect(notifier.activeTerminal, isNull);

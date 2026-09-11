@@ -121,8 +121,8 @@ class _DebugPathsCardState extends State<DebugPathsCard> {
                     value:
                         environment.gridExecutable ??
                         'Not installed on this computer',
-                    // Not an error: `grid` is the one optional step of first-run
-                    // provisioning, and Share Intelligence explains its absence.
+                    // This can still happen if Grid is removed after startup;
+                    // the next pre-flight check will gate on it again.
                     muted: environment.gridExecutable == null,
                   ),
                   _PathRow(label: 'logs', value: environment.logsDirectory),

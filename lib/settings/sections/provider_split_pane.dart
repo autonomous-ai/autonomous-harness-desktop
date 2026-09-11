@@ -9,6 +9,7 @@ import '../../grid/grid_models_controller.dart';
 import '../../grid/grid_network.dart';
 import '../../grid/node_display.dart' show kAutoModelId, modelKey;
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/skeleton.dart';
 
 /// Settings ▸ Providers, as a list beside the provider it names.
@@ -274,7 +275,10 @@ class _ProviderSplitPaneState extends State<ProviderSplitPane> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: _railWidth, child: _Framed(child: rail)),
+            SizedBox(
+              width: _railWidth,
+              child: _Framed(child: rail),
+            ),
             const SizedBox(width: 12),
             // The panel owns its own scrolling now — see [_ProviderDetail],
             // which keeps the actions on the floor of the card while the facts
@@ -432,9 +436,7 @@ class _ProviderRowState extends State<_ProviderRow> {
                   : (_hovered ? grid.AppSurface.hoverFill : null),
               border: widget.last
                   ? null
-                  : Border(
-                      bottom: BorderSide(color: grid.AppPalette.divider),
-                    ),
+                  : Border(bottom: BorderSide(color: grid.AppPalette.divider)),
             ),
             child: Row(
               children: [
@@ -655,10 +657,7 @@ class _ProviderDetail extends StatelessWidget {
         Divider(height: 1, color: grid.AppPalette.divider),
         const SizedBox(height: 4),
         if (description.isNotEmpty)
-          _DetailRow(
-            label: 'Description',
-            child: _PlainText(description),
-          ),
+          _DetailRow(label: 'Description', child: _PlainText(description)),
         _DetailRow(
           label: 'Status',
           child: _StatusValue(status: network.status),
@@ -759,8 +758,18 @@ class _ProviderDetail extends StatelessWidget {
   /// `Mar 4, 2026` — a date a person reads, not an ISO stamp they parse.
   static String _date(DateTime value) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final local = value.toLocal();
     return '${months[local.month - 1]} ${local.day}, ${local.year}';
@@ -1159,8 +1168,7 @@ class _ProviderModels extends StatelessWidget {
 
   /// Whether this provider has nothing to answer with — the state `Add model`
   /// exists for, and the one it is drawn loudly in.
-  bool get _bare =>
-      models is GridModelsReady && servedModels(models).isEmpty;
+  bool get _bare => models is GridModelsReady && servedModels(models).isEmpty;
 
   Widget _body() => switch (models) {
     // Idle and Loading render the same on purpose: from the reader's side
@@ -1243,11 +1251,7 @@ class _ModelChip extends StatelessWidget {
 /// bordered button beside a failure message competes with the panel's real
 /// actions at the bottom of the pane.
 class _LinkButton extends StatelessWidget {
-  const _LinkButton({
-    super.key,
-    required this.label,
-    required this.onPressed,
-  });
+  const _LinkButton({super.key, required this.label, required this.onPressed});
 
   final String label;
   final VoidCallback onPressed;
@@ -1631,7 +1635,7 @@ class _DeleteProviderButton extends StatelessWidget {
   /// Names what is lost rather than asking "are you sure?" — the question adds
   /// nothing the reader did not already know, and trains people to dismiss it.
   Future<void> _confirm(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete this provider?'),
@@ -1707,11 +1711,7 @@ class ProviderAllOffBanner extends StatelessWidget {
           // launch and still bill the subscriptions on this computer. The
           // amber triangle told somebody who had just made that choice on
           // purpose that they had broken something.
-          Icon(
-            LucideIcons.info300,
-            size: 15,
-            color: grid.AppPalette.textFaint,
-          ),
+          Icon(LucideIcons.info300, size: 15, color: grid.AppPalette.textFaint),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1868,4 +1868,3 @@ class ProviderSplitPaneSkeleton extends StatelessWidget {
     );
   }
 }
-

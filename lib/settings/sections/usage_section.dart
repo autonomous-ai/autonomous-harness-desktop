@@ -216,11 +216,6 @@ class _UsageSectionState extends State<UsageSection> {
         label: 'Est. cost',
         value: formatCost(overview.costUsd),
         icon: LucideIcons.coins300,
-        // Named as a floor rather than a total whenever a model went unpriced,
-        // because the alternative is a confident figure that is quietly short.
-        footnote: overview.hasUnpricedModel
-            ? 'at least — some models unpriced'
-            : null,
       ),
       UsageStatCard(
         label: 'Active days',
@@ -431,11 +426,9 @@ class _OverviewHeader extends StatelessWidget {
 
   String _updatedLine() {
     if (overview.enabledCount == 0) return 'Nothing is being read yet.';
-    if (isScanning) return 'Reading local logs…';
     final at = overview.lastScanAt;
     if (at == null) return 'Not scanned yet.';
-    return '${range.label} · updated ${_stamp(at)}'
-        '${overview.hasUnpricedModel ? ' — some model prices are unavailable' : ''}';
+    return '${range.label} · updated ${_stamp(at)}';
   }
 
   /// `9/8/2026, 5:32 PM` — the date as well as the clock, because a snapshot

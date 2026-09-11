@@ -40,7 +40,7 @@
                                 <menu key="submenu" title="Services" systemMenu="services" id="hz9-B4-Xy5"/>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="4je-JR-u6R"/>
-                            <menuItem title="Hide APP_NAME" keyEquivalent="h" id="Olw-nP-bQN">
+                            <menuItem title="Hide APP_NAME" id="Olw-nP-bQN">
                                 <connections>
                                     <action selector="hide:" target="-1" id="PnN-Uc-m68"/>
                                 </connections>
@@ -144,7 +144,7 @@
                                                 <action selector="performFindPanelAction:" target="-1" id="U76-nv-p5D"/>
                                             </connections>
                                         </menuItem>
-                                        <menuItem title="Jump to Selection" keyEquivalent="j" id="S0p-oC-mLd">
+                                        <menuItem title="Jump to Selection" id="S0p-oC-mLd">
                                             <connections>
                                                 <action selector="centerSelectionInVisibleArea:" target="-1" id="IOG-6D-g5B"/>
                                             </connections>
@@ -161,7 +161,7 @@
                                                 <action selector="showGuessPanel:" target="-1" id="vFj-Ks-hy3"/>
                                             </connections>
                                         </menuItem>
-                                        <menuItem title="Check Document Now" keyEquivalent=";" id="hz2-CU-CR7">
+                                        <menuItem title="Check Document Now" id="hz2-CU-CR7">
                                             <connections>
                                                 <action selector="checkSpelling:" target="-1" id="fz7-VC-reM"/>
                                             </connections>

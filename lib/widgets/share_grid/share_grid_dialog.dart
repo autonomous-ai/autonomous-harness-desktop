@@ -7,6 +7,7 @@ import '../../grid/grid_networks_controller.dart';
 import '../../grid/invite_email.dart';
 import '../../grid/managed_network_member.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/labeled_field.dart';
 import 'grid_role_menu.dart';
 import 'share_grid_people.dart';
@@ -39,7 +40,7 @@ Future<void> showShareGridDialog(
   GridNetworksController? networks,
   GridMembersController? members,
   VoidCallback? onChanged,
-}) => showDialog<void>(
+}) => showAppDialog<void>(
   context: context,
   builder: (_) => ShareGridDialog(
     networkId: networkId,
@@ -330,8 +331,7 @@ class _ShareGridDialogState extends State<ShareGridDialog> {
                 canRemove: _canRemove(network),
                 grantable: _grantable,
                 viewerEmail: _viewerEmail,
-                onFailure: (message) =>
-                    setState(() => _serverError = message),
+                onFailure: (message) => setState(() => _serverError = message),
               ),
               // A sentence under this heading is read as a promise about who
               // is already in, so an unrecognised rule prints nothing rather
@@ -407,10 +407,7 @@ class _InviteField extends StatelessWidget {
   /// and the colour has to come from the theme, which a context-free helper
   /// cannot reach.
   InputDecoration _decoration(BuildContext context) {
-    final base = labeledFieldDecoration(
-      'Email address',
-      fill: AppCard.inset,
-    );
+    final base = labeledFieldDecoration('Email address', fill: AppCard.inset);
     if (!hasError) return base;
     final rim = OutlineInputBorder(
       borderRadius: BorderRadius.circular(AppControl.radius),
@@ -421,11 +418,7 @@ class _InviteField extends StatelessWidget {
     );
     // Focused too: a field the user has to go back and fix must stay findable
     // once they have clicked into it.
-    return base.copyWith(
-      border: rim,
-      enabledBorder: rim,
-      focusedBorder: rim,
-    );
+    return base.copyWith(border: rim, enabledBorder: rim, focusedBorder: rim);
   }
 }
 

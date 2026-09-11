@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../shared/theme/share_page_theme.dart';
+import '../../shared/widgets/app_dialog.dart';
 import '../catalog_models.dart';
 import '../grid_cli.dart';
 import '../local_models.dart';
@@ -24,7 +25,7 @@ Future<void> showModelManager(
   required ModelPullController pull,
   required VoidCallback onChanged,
   GridCli? cli,
-}) => showDialog<void>(
+}) => showAppDialog<void>(
   context: context,
   barrierDismissible: false,
   builder: (_) =>

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../state/app_state.dart';
 
 /// The one "Edit name" dialog, opened from every place a name is shown.
@@ -18,7 +19,7 @@ Future<void> showAgentRenameDialog(
   String machineId,
   String agentId,
   String currentName,
-) => showDialog<void>(
+) => showAppDialog<void>(
   context: context,
   builder: (_) => _RenameAgentDialog(
     notifier: notifier,

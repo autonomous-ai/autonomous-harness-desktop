@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shortcuts/shortcuts_list.dart';
 
 /// The ⌘/ sheet — [ShortcutsList] in a dialog.
@@ -8,7 +9,7 @@ import '../shortcuts/shortcuts_list.dart';
 /// The list itself is shared with Settings ▸ Keyboard shortcuts, so the two can
 /// never disagree about what a key does.
 Future<void> showShortcutsSheet(BuildContext context) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) => const _ShortcutsSheet(),
   );

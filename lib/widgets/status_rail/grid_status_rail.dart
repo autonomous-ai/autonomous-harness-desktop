@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../analytics/analytics.dart';
 import '../../grid/grid_overview_controller.dart';
@@ -16,6 +15,7 @@ import '../../state/app_state.dart';
 import '../../grid/grid_overview.dart';
 import '../../grid/grid_power.dart';
 import '../../shared/widgets/skeleton.dart';
+import '../../usage/usage_accounts.dart';
 import '../../usage/usage_controller.dart';
 import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
@@ -26,6 +26,7 @@ import '../usage_offer_actions.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
+import 'key_hints.dart';
 import 'memory_ring.dart';
 import 'rail_figure.dart';
 import 'rail_provider_pill.dart';
@@ -116,55 +117,53 @@ class _GridStatusRailState extends State<GridStatusRail> {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        // The rail's own fill, matching the machine rail it runs under — both
-        // are window furniture, and a third tone here would read as a third
-        // pane.
-        color: grid.AppGlass.sidebarFill,
-        border: Border(top: BorderSide(color: grid.AppPalette.divider)),
-      ),
-      child: SizedBox(
-        height: GridStatusRail.height,
-        child: Padding(
-          // Less on the right: the version mark carries its own hover inset, so
-          // 10 there lands on the same optical margin as 12 on the left.
-          padding: EdgeInsets.only(
-            left: kGridSurfaceEnabled ? 4 : 12,
-            right: 10,
-          ),
-          child: Row(
-            children: [
-              // The left of this strip answers whichever question this build
-              // can. With a grid chosen it is the grid's figures; with none —
-              // or in a build that hides Grid altogether — it is what the agent
-              // accounts on this machine have spent, which is true either way
-              // because a rate limit belongs to an account rather than a grid.
-              // It used to read "No grid chosen", a sentence that tells someone
-              // what they already know and hands a riddle to anyone who cannot
-              // pick one.
-              Expanded(
-                child: ListenableBuilder(
-                  // `_controller` is `late` and must stay untouched in a build
-                  // that hides Grid — see [dispose]. The `if` guards the read,
-                  // not just the listening.
-                  listenable: Listenable.merge([
-                    if (kGridSurfaceEnabled) _controller,
-                    _usage,
-                  ]),
-                  builder: (context, _) => _Readout(
-                    controller: kGridSurfaceEnabled ? _controller : null,
-                    usage: _usage,
-                    notifier: widget.notifier,
-                    selection: widget.selection,
-                    enablement: widget.enablement,
-                    onShareIntelligence: widget.onShareIntelligence,
-                  ),
+    // NO FILL, NO RULE — the strip is its text and nothing else.
+    //
+    // It used to paint AppGlass.sidebarFill with a hairline on top, matching the machine rail it ran
+    // under: both were window furniture and a third tone would have read as a third pane. That rail is
+    // a floating card on a gradient field now, so what this matched no longer exists, and a flat grey
+    // slab laid across the bottom of the window was the one surface that did not belong to anything.
+    return SizedBox(
+      height: GridStatusRail.height,
+      child: Padding(
+        // Even on both sides now. The right was 10 to offset the version mark's
+        // own hover inset, and that mark is gone — leaving 10 would be a
+        // two-pixel lean nothing accounts for any more.
+        padding: EdgeInsets.only(left: kGridSurfaceEnabled ? 4 : 12, right: 12),
+        child: Row(
+          children: [
+            // The left of this strip answers whichever question this build
+            // can. With a grid chosen it is the grid's figures; with none —
+            // or in a build that hides Grid altogether — it is what the agent
+            // accounts on this machine have spent, which is true either way
+            // because a rate limit belongs to an account rather than a grid.
+            // It used to read "No grid chosen", a sentence that tells someone
+            // what they already know and hands a riddle to anyone who cannot
+            // pick one.
+            Expanded(
+              child: ListenableBuilder(
+                // `_controller` is `late` and must stay untouched in a build
+                // that hides Grid — see [dispose]. The `if` guards the read,
+                // not just the listening.
+                listenable: Listenable.merge([
+                  if (kGridSurfaceEnabled) _controller,
+                  _usage,
+                ]),
+                builder: (context, _) => _Readout(
+                  controller: kGridSurfaceEnabled ? _controller : null,
+                  usage: _usage,
+                  notifier: widget.notifier,
+                  selection: widget.selection,
+                  enablement: widget.enablement,
+                  onShareIntelligence: widget.onShareIntelligence,
                 ),
               ),
-              const _VersionMark(),
-            ],
-          ),
+            ),
+            // The right half of the strip was empty, and the keys had nowhere
+            // to live that was not a modal. See [KeyHints] for why a strip beats
+            // a sheet for the ones nobody knows to go looking for.
+            KeyHints(notifier: widget.notifier),
+          ],
         ),
       ),
     );
@@ -286,7 +285,11 @@ class _ReadoutState extends State<_Readout> {
   /// grid, and otherwise the first account with figures to show.
   _PanelKind get _defaultKind {
     if (_grid != null) return _PanelKind.power;
-    final first = widget.usage.answered.firstOrNull;
+    // Any account with figures — a remote machine's included, since on a
+    // computer signed in to nothing it can be the only one there is.
+    final first = widget.usage.accounts
+        .where((account) => account.reading.hasFigures)
+        .firstOrNull;
     return first == null
         ? _PanelKind.power
         : _PanelKind.forProvider(first.provider);
@@ -527,9 +530,10 @@ class _ReadoutState extends State<_Readout> {
     // are the same figures either way — a rate limit is the account's, not the
     // grid's — so this is a substitution, not a fallback.
     if (controller == null) {
-      // No provider chosen — so the pill says `Subscription`, and the figures
-      // beside it are exactly what that subscription has spent. In a build with
-      // no provider surface at all there is nothing to pick and no pill.
+      // No provider chosen — so the pill says `This computer`, and the figures
+      // beside it are exactly what the account signed in here has spent. In a
+      // build with no provider surface at all there is nothing to pick and no
+      // pill.
       return Row(
         children: [
           if (kGridSurfaceEnabled) ...[
@@ -548,7 +552,7 @@ class _ReadoutState extends State<_Readout> {
           ],
           Expanded(
             child: UsageReadout<_PanelKind>(
-              readings: widget.usage.readings,
+              accounts: widget.usage.accounts,
               loading: widget.usage.loading,
               anchorFor: (provider) => _usageAnchors[provider]!,
               kindFor: _PanelKind.forProvider,
@@ -574,6 +578,11 @@ class _ReadoutState extends State<_Readout> {
     if (power != null && power.isEmpty) {
       return _emptyProviderRow(controller, railWidth);
     }
+    // Whether the grid has a work figure to print at all. Written once because
+    // the divider below keys on it too: a rule drawn for a figure that turned
+    // out not to render would part this machine's windows from nothing.
+    final hasWork =
+        power != null && answered != null && answered.freshInputTokens > 0;
     return Row(
       children: [
         // WHAT NEW AGENTS RUN ON — where the grid's name already stood.
@@ -639,45 +648,14 @@ class _ReadoutState extends State<_Readout> {
             onExit: _onExit,
           ),
         ),
-        if (pending)
-          // Measured against what lands here — `92.4M tokens / 24h`, not the
-          // bare `92.4M / 24h` this stood in for before the figure was given
-          // its noun. A placeholder narrower than its answer is the jump a
-          // skeleton exists to prevent.
-          const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 104),
-        // Hard against the cluster it follows, not adrift after it. The gap
-        // that opened here when the grid's name moved to the pill was the
-        // hover padding `_Figure` has always carried: harmless behind a long
-        // name, plainly a gap once the block ahead of it got short.
-        if (power != null && answered != null && answered.freshInputTokens > 0)
-          // Flexible, so the one figure on this strip that carries words gives
-          // them up before the row overflows. The rail is a plain Row over the
-          // window's full width: past the Spacer there is no slack left, and a
-          // narrow window is what turns the naming of this figure into a
-          // yellow-and-black bar along the bottom edge. `flex: 0` with a bound
-          // — see `_railBlock`.
-          // Tapers first and furthest, because it carries the words a reader
-          // can most afford to lose: ` tokens / 24h` still means something
-          // half-ellipsised, where a trimmed memory figure or a trimmed
-          // provider name is simply wrong.
-          _railBlock(
-            maxWidth: _railBudget(railWidth, 230, 120),
-            child: _Figure(
-              anchor: _tokenAnchor,
-              kind: _PanelKind.tokens,
-              value: formatCount(answered.freshInputTokens),
-              // Pluralised off the raw count, not off what `formatCount`
-              // printed: past a thousand that prints "1.2M" and the noun
-              // beside it is still plural, and only the count knows that.
-              noun: plural(answered.freshInputTokens, 'token'),
-              unit: answeredWindowLabel(answered.windowSeconds),
-              semantics: 'work answered',
-              onEnter: _onEnter,
-              onExit: _onExit,
-            ),
-          ),
-        const Spacer(),
         // WHAT THE GRID IS MADE OF — people, machines, models.
+        //
+        // These sit with the pill and the memory ring rather than across the
+        // strip from them: all of it describes the grid you picked, and the
+        // far end of the rail belongs to usage alone (see the `Spacer`
+        // below). Splitting them left the rail reading as two unrelated
+        // halves — a name at one edge, a count at the other, and the figure
+        // that ties them stranded in between.
         if (pending) ...const [
           _CountSkeleton(icon: LucideIcons.users300),
           _CountSkeleton(icon: LucideIcons.server300),
@@ -713,6 +691,102 @@ class _ReadoutState extends State<_Readout> {
             onEnter: _onEnter,
             onExit: _onExit,
           ),
+        // EVERYTHING PAST HERE IS SPEND, AND IT SITS AT THE RIGHT EDGE.
+        //
+        // One `Spacer` for the whole strip, placed once: what the grid *is*
+        // (pill, memory, members, nodes, models) is packed against the left,
+        // what it has *spent* against the right. The rail used to break the
+        // other way — the work figure pinned behind the memory ring and the
+        // counts alone at the edge — which read as though the tokens belonged
+        // to the grid's identity rather than to the same reckoning as the
+        // `% used` windows beside them now.
+        const Spacer(),
+        if (pending)
+          // Measured against what lands here — `92.4M tokens / 24h`, not the
+          // bare `92.4M / 24h` this stood in for before the figure was given
+          // its noun. A placeholder narrower than its answer is the jump a
+          // skeleton exists to prevent.
+          const _FigureSkeleton(key: Key('rail-work-skeleton'), width: 104),
+        // First of the two spend figures, so it sits immediately left of the
+        // `% used` windows rather than against the counts. Both are readings
+        // of what has been consumed against a limit — near neighbours, parted
+        // by the rule below because what they are readings OF could hardly be
+        // further apart.
+        if (hasWork)
+          // Flexible, so the one figure on this strip that carries words gives
+          // them up before the row overflows. The rail is a plain Row over the
+          // window's full width: past the Spacer there is no slack left, and a
+          // narrow window is what turns the naming of this figure into a
+          // yellow-and-black bar along the bottom edge. `flex: 0` with a bound
+          // — see `_railBlock`.
+          // Tapers first and furthest, because it carries the words a reader
+          // can most afford to lose: ` tokens / 24h` still means something
+          // half-ellipsised, where a trimmed memory figure or a trimmed
+          // provider name is simply wrong.
+          _railBlock(
+            maxWidth: _railBudget(railWidth, 230, 120),
+            child: _Figure(
+              anchor: _tokenAnchor,
+              kind: _PanelKind.tokens,
+              value: formatCount(answered.freshInputTokens),
+              // Pluralised off the raw count, not off what `formatCount`
+              // printed: past a thousand that prints "1.2M" and the noun
+              // beside it is still plural, and only the count knows that.
+              noun: plural(answered.freshInputTokens, 'token'),
+              unit: answeredWindowLabel(answered.windowSeconds),
+              semantics: 'work answered',
+              onEnter: _onEnter,
+              onExit: _onExit,
+            ),
+          ),
+        // WHERE THE GRID ENDS AND THIS MACHINE BEGINS.
+        //
+        // The two figures either side of this rule are both spend, which is
+        // why they sit together — and they are spend of two completely
+        // different things, which is why they need parting. Left of it is what
+        // the GRID answered, on whatever machines are on it. Right of it is
+        // what the accounts on THIS computer have burned of their own rate
+        // limit. Read as one run they invite the arithmetic nobody should do:
+        // that the tokens are what drove the percentage.
+        //
+        // The panels behind them each name their own scope now (`Grid · …`
+        // against `Computer · …`), but that is only visible on hover, and the
+        // strip has to be honest at a glance too.
+        if (hasWork) const _RailDivider(),
+        // The account windows, at the very end. `flex: 0` and content-sized
+        // like every other block here: the `Spacer` above is the only thing on
+        // this row claiming slack, and a second claimant would split it. The
+        // bound is a ceiling for a narrow window, not a width to fill — see
+        // `tight` below, which is what stops it being one.
+        //
+        // The same figures the no-grid branch shows, deliberately: a rate
+        // limit belongs to an account, not to a grid, so picking a grid must
+        // not make the reading you were watching disappear. It used to.
+        //
+        // No `if` guarding this. `UsageReadout` already collapses to nothing
+        // when no account has a figure to print, and it decides that on
+        // `reading.hasFigures` rather than on the account list being empty —
+        // a guard here would be a second, coarser copy of that rule, and the
+        // two would disagree the moment an account exists but has never been
+        // read.
+        _railBlock(
+          maxWidth: _railBudget(railWidth, 340, 200),
+          child: UsageReadout<_PanelKind>(
+            accounts: widget.usage.accounts,
+            loading: widget.usage.loading,
+            anchorFor: (provider) => _usageAnchors[provider]!,
+            kindFor: _PanelKind.forProvider,
+            onEnter: _onEnter,
+            onExit: _onExit,
+            // ⚠️ Tight, or the bound above becomes a band of empty rail
+            // between the token figure and these. `UsageReadout` fills what it
+            // is offered and aligns right, which is correct on the no-grid
+            // branch where it is handed the whole strip — here the `Spacer`
+            // has already pushed the group right, and filling 340px a second
+            // time only pushes the figures away from the rule beside them.
+            tight: true,
+          ),
+        ),
       ],
     );
   }
@@ -790,7 +864,15 @@ class _ReadoutState extends State<_Readout> {
       _PanelKind.tokens => _stat(
         kind,
         _tokenAnchor,
-        GridTokensList(answered: controller.power?.answered),
+        GridTokensList(
+          answered: controller.power?.answered,
+          // Named here rather than left to the panel, which has no controller
+          // to ask. See `GridTokensList.gridName` for why the panel says this
+          // at all: its figure now sits against the account usage at the right
+          // of the rail, where "tokens" reads as this machine's unless the
+          // panel says otherwise.
+          gridName: controller.gridName,
+        ),
         width: 255,
       ),
       _PanelKind.members => _stat(
@@ -842,10 +924,17 @@ class _ReadoutState extends State<_Readout> {
   /// figures, and the extra width would go to the bar alone — which is the one
   /// thing here that carries no reading of its own.
   Widget _usagePanel(_PanelKind kind, UsageProvider provider) {
+    // THIS computer's reading drives the offer below, whatever else the panel
+    // lists: a remote account running out is no reason to move this Mac's
+    // agents anywhere (see `UsageController.accounts`).
     final reading = widget.usage.readings.firstWhere(
       (r) => r.provider == provider,
       orElse: () => ProviderUsage.loading(provider),
     );
+    final accounts = [
+      for (final account in widget.usage.accounts)
+        if (account.provider == provider) account,
+    ];
     // The same offer the card above the rail makes, in the one place that is
     // always reachable: that card shows once per window and can be closed, and
     // somebody who closed it an hour ago still needs a door.
@@ -861,7 +950,10 @@ class _ReadoutState extends State<_Readout> {
       kind,
       _usageAnchors[provider]!,
       UsagePanelContent(
-        reading: reading,
+        accounts: accounts.isEmpty
+            ? [UsageAccount(reading: reading, isLocal: true)]
+            : accounts,
+        machineName: widget.notifier.thisMachineName,
         offer: offer,
         onAct: offer == null
             ? null
@@ -899,6 +991,32 @@ class _ReadoutState extends State<_Readout> {
 /// One cluster, because all three are facts about the grid itself rather than
 /// about what is running on it — and the chevron that says there is more sits
 /// with them rather than at the far end of the row.
+/// The hairline parting the grid's spend from this machine's.
+///
+/// Short and inset rather than full height: the strip is 26px and a rule
+/// running its whole depth would read as the edge of a panel rather than a
+/// seam between two figures.
+///
+/// ⚠️ The margins are NOT symmetric with the rail's usual rhythm, and that is
+/// deliberate. Every figure here already carries `RailHoverTarget.gap` of its
+/// own padding on each side, so a rule given the same gap again would sit in a
+/// trough four times wider than the space between any two figures. It takes
+/// half, which lands the seam on the same rhythm as everything else.
+class _RailDivider extends StatelessWidget {
+  const _RailDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Container(
+      width: 1,
+      height: 12,
+      margin: const EdgeInsets.symmetric(horizontal: RailHoverTarget.gap / 2),
+      color: grid.AppPalette.guide,
+    );
+  }
+}
+
 class _GridMark extends StatelessWidget {
   const _GridMark({
     required this.controller,
@@ -930,7 +1048,12 @@ class _GridMark extends StatelessWidget {
       kind: _PanelKind.power,
       anchor: anchor,
       enabled: power != null,
-      semantics: 'grid ${controller.gridName}',
+      // Staleness is said here as well as drawn, because the dot is the only
+      // thing that carries it visually and a reader who cannot see it would
+      // otherwise be given figures with no hint that they are a minute old.
+      semantics: controller.stale
+          ? 'grid ${controller.gridName}, figures may be out of date'
+          : 'grid ${controller.gridName}',
       onEnter: onEnter,
       onExit: onExit,
       // ⚠️ `min`, and the `ConstrainedBox` in `_railBlock` is what makes that
@@ -943,18 +1066,30 @@ class _GridMark extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              // Stale is its own state and gets its own colour: the figures on
-              // screen are real, they are just not from a moment ago.
-              color: controller.stale
-                  ? grid.AppPalette.warn
-                  : grid.AppPalette.online,
-              shape: BoxShape.circle,
+          // ⚠️ **Drawn ONLY when the reading is stale**, which is why there is
+          // no green here any more.
+          //
+          // This dot never meant "online" the way the sidebar's does — it
+          // answers one question, *are the figures beside me current*, and the
+          // rail keeps the last good answer on screen when a refresh fails
+          // (see `GridOverviewController`) precisely so it does not blank
+          // every minute. The dot is what admits that.
+          //
+          // But the honest state is the rare one. A dot that is green
+          // essentially always spends the rail's width saying "nothing is
+          // wrong", which a reader already assumes; all the information was in
+          // the amber. So the healthy case draws nothing and the amber arrives
+          // as a change rather than as a recolour — which is also the thing
+          // the eye actually catches down here.
+          if (controller.stale)
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: grid.AppPalette.warn,
+                shape: BoxShape.circle,
+              ),
             ),
-          ),
           // ⚠️ The grid's NAME used to follow this dot. The provider pill just
           // ahead of it carries it now — see the note at this row's head. What
           // stays is what the pill does not say: whether the reading is fresh,
@@ -963,7 +1098,14 @@ class _GridMark extends StatelessWidget {
           // The chevron that marks this block as openable moved up here with
           // it. It used to trail the whole cluster, which read as a caret on
           // the memory figure once the name it actually belonged to was gone —
-          // beside the live dot it marks the block, which is what it means.
+          // at the head of the block it marks the block, which is what it
+          // means.
+          //
+          // ⚠️ It owns the gap ahead of it rather than the stale dot owning
+          // one behind: the dot comes and goes, and a gap that left with it
+          // would leave the chevron hard against the pill on the common path.
+          // This way the block starts in the same place either way and the
+          // dot is inserted into the space that is already there.
           if (power != null) ...[
             const SizedBox(width: 5),
             Icon(
@@ -1243,55 +1385,6 @@ class _EmptyProviderActionState extends State<_EmptyProviderAction> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _VersionMark extends StatefulWidget {
-  const _VersionMark();
-
-  @override
-  State<_VersionMark> createState() => _VersionMarkState();
-}
-
-class _VersionMarkState extends State<_VersionMark> {
-  // Read once per mount, not once per rebuild: the rail rebuilds on every
-  // refresh, and a future built in `build` would put the placeholder back for
-  // a frame each time. Not a static either — a future outlives the zone it
-  // was made in, and its callbacks are delivered to that zone, which is a
-  // problem the moment two tests share a process.
-  late final Future<PackageInfo> _info = PackageInfo.fromPlatform();
-
-  @override
-  Widget build(BuildContext context) {
-    grid.AppTheme.watch(context);
-    const style = TextStyle(fontSize: 10.5);
-    return FutureBuilder<PackageInfo>(
-      future: _info,
-      builder: (context, snapshot) {
-        final version = snapshot.data?.version;
-        // Answered with nothing (a bundle with no version, a plugin that is
-        // not there): say nothing, as before. A skeleton is a promise that
-        // something is coming, and here nothing is.
-        if (version == null &&
-            snapshot.connectionState == ConnectionState.done) {
-          return const SizedBox.shrink();
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: version == null
-              // Blank at the width of a version string, so the figures to
-              // its left do not shift right when it lands.
-              ? const SkeletonText(style: style, width: 34)
-              : Text(
-                  'v$version',
-                  style: style.copyWith(
-                    // Quiet is spent on size and weight, not ink.
-                    color: grid.AppPalette.textFaint,
-                  ),
-                ),
-        );
-      },
     );
   }
 }

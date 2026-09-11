@@ -1,8 +1,9 @@
 # Releasing the desktop app
 
 Running apps self-update from a public GCS bucket (`lib/update/desktop_updater.dart`). Releasing is
-pushing a tag: `.github/workflows/release.yml` builds macOS and both Linux architectures, publishes
-them to that bucket, and cuts the GitHub Release. **The tag IS the version — CI never bumps.**
+pushing a tag: `.github/workflows/release.yml` builds both macOS builds (Intel on Skia, Apple Silicon
+on Impeller — see "Two macOS builds" below) and both Linux architectures, publishes them to that
+bucket, and cuts the GitHub Release. **The tag IS the version — CI never bumps.**
 
 ```bash
 make release                       # bump the patch, tag, push — CI does the rest
@@ -53,70 +54,143 @@ not a replacement for publishing the managed runtime channel before release.
 
 Homebrew and `apt` are still used for **tmux**, which is a separate step and unrelated to Node.
 
+## Two macOS builds — Intel on Skia, Apple Silicon on Impeller
+
+Every release ships the macOS app **twice**: the same universal (arm64 + x86_64) build of the same
+commit, differing in one Info.plist key, `FLTEnableImpeller` — which renderer Flutter draws with.
+
+| Build | Renderer | Manifest keys | Files | Installed by |
+|---|---|---|---|---|
+| Intel | Skia (`FLTEnableImpeller = false`) | `desktop-macos`, `desktop-macos-dmg` | `Harness-macos.{zip,dmg}` | Intel Macs, **every install from before the split on either CPU**, and the website download |
+| Apple Silicon | Impeller (the engine default) | `desktop-macos-arm64`, `desktop-macos-arm64-dmg` | `Harness-macos-arm64.{zip,dmg}` | Apple Silicon Macs whose updater knows the key |
+
+`scripts/publish-macos-variant.sh intel|apple-silicon <version>` builds and publishes one of them;
+`release.yml` runs both side by side.
+
+**Why.** Intel users report the app stuttering; Apple Silicon users do not. Flutter renders macOS with
+Impeller by default, and the one thing that differs between those two users running the same universal
+build is the GPU Impeller drives — so the Intel build opts out. A release build can only opt out through
+Info.plist: the engine compiles its command-line switches out of release (`GetSwitchesFromEnvironment`),
+and an Info.plist belongs to a bundle, so choosing by CPU means shipping two bundles. The x86_64 code an
+Intel Mac runs is identical in both — the split is about the renderer, not the CPU slices; a universal
+build was already native on Intel.
+
+**Why both stay universal.** The Intel build carries the key every older install polls, Apple Silicon
+ones included, so it has to launch on both. The Apple Silicon build stays universal so a Mac running it
+under Rosetta, or a DMG handed to the wrong person, still launches.
+
+**Why the Intel build kept the old key and file name.** `desktop-macos` is what every install before the
+split polls, and `desktop-macos-dmg` is what `harness.autonomous.ai/desktop/download-macos` serves. The
+Skia build there fixes every Intel Mac on its next update, with no new updater needed first, and hands a
+new visitor a build that works on whatever Mac they have — so the website needed no change. The cost is
+one release on Skia for an Apple Silicon Mac arriving from an old build or from the website: the build
+it lands on already asks for `desktop-macos-arm64`, and moves onto Impeller at the next release (not the
+same one — the updater only ever moves to a strictly newer version).
+
+**How the updater picks** (`DesktopUpdater._otaKeys`). An Intel Mac reads `desktop-macos` only — the
+arm64 build renders on exactly what it must not, however new. Apple Silicon reads both and takes the
+**newer**, `desktop-macos-arm64` winning a tie: a release that published both installs the Impeller
+build, and one that only moved `desktop-macos` (a hand publish that stopped halfway, say) still reaches
+it rather than hiding behind an older arm64 entry.
+
+**TODO(BE): this is a workaround, not a diagnosis, and it has a real cost.** Every machine this app is
+developed on is Apple Silicon, on Impeller, so Intel users now run a renderer nobody here looks at, and a
+Skia-only rendering bug reaches them unseen. Nothing here has measured that Skia cures the stutter
+either — confirm it with an Intel user on the first release that carries it, and if they still stutter
+on Skia, the renderer was not the cause and this split should go. The Grid app is the precedent both
+ways: it added this exact opt-out for Intel (`autonomous-grid-app` `87def3c6`) and removed it the same
+day (`58687e7f`), because its real cause turned out to be CI shipping a newer Flutter than the team ran,
+fixed by pinning. Harness's release already builds with the Flutter it is developed on (`FLUTTER_VERSION` in
+`release.yml`), so that cause
+does not apply here. **Re-check on every Flutter bump**: the engine reads `FLTEnableImpeller` in
+`FlutterDartProject.mm`, and the day that read goes away the Intel build silently goes back to Impeller.
+
 ## Publishing by hand
 
-`scripts/upload-desktop.sh` and `scripts/upload-desktop-linux.sh` are the publishing steps. CI invokes
-them with the version taken from the tag, and they are also reachable directly when CI cannot be:
+`scripts/publish-macos-variant.sh` (one macOS build per run) and `scripts/upload-desktop-linux.sh` are
+the publishing steps. The macOS one builds and pins the renderer, then hands the bundle to
+`scripts/upload-desktop.sh --no-build`, which does everything after the build exactly as it always has.
+CI runs them with the version taken from the tag, and they are also reachable directly when CI cannot be:
 
 ```bash
-make upload-desktop                     # auto-bump (1.2.3 -> 1.2.4; 1.2.99 -> 1.3.1)
-make upload-desktop ARGS="--force"      # bump the MINOR version, per the usual semver convention
-make upload-desktop ARGS="1.3.0"        # explicit version
-make upload-desktop ARGS="--no-bump"    # rebuild and re-upload the current version
-make upload-desktop-linux ARCH=arm64    # the same, per Linux architecture
+make upload-desktop VERSION=1.3.0                          # both macOS builds, Intel first
+make upload-desktop VERSION=1.3.0 ARGS="--no-notarize"     # the same, Developer ID signed only
+bash scripts/publish-macos-variant.sh intel 1.3.0          # one macOS build
+bash scripts/publish-macos-variant.sh apple-silicon 1.3.0
+bash scripts/publish-macos-variant.sh intel 1.3.0 --build-only   # build + pin the renderer, publish nothing
+make upload-desktop-linux ARCH=arm64                       # per Linux architecture
 ```
 
-**These create no git tag.** They bump from the remote manifest, so the repo stops reflecting what is
-published — one tag, `v1.0.52`, once sat nine releases behind a manifest already serving `1.0.61`.
-Prefer `make release`; if you do publish by hand, cut a `make release` afterwards to bring the tag
-back in line, and remember it only publishes the platform you ran it on.
+**macOS takes an explicit version.** Two runs have to publish one version, and `upload-desktop.sh`'s own
+auto-bump reads the manifest — the second run would see the first one's upload and bump again.
+`make release ARGS="--dry-run"` prints the next one. ⚠️ `upload-desktop.sh` run on its own still works,
+and is now wrong: it builds without the renderer pin and writes `desktop-macos`, which puts **Impeller**
+back on every Intel Mac. Go through `publish-macos-variant.sh`.
 
-1. Takes the version it was given (CI passes the tag's `X.Y.Z`) or bumps from the manifest when run
-   by hand.
+**These create no git tag**, so the repo stops reflecting what is published — one tag, `v1.0.52`, once
+sat nine releases behind a manifest already serving `1.0.61`. Prefer `make release`; if you do publish
+by hand, cut a `make release` afterwards to bring the tag back in line, and remember it only publishes
+the platform you ran it on.
+
+For one macOS build, `publish-macos-variant.sh`:
+
+1. Takes the build (`intel` / `apple-silicon`) and the version it was given (CI passes the tag's
+   `X.Y.Z`).
 2. Runs `flutter build macos --release --build-name=<version> --build-number=<n>` — the version is
    stamped into the bundle's `Info.plist` at build time, not read from any file.
-3. Asserts the built bundle's `CFBundleShortVersionString` really carries that version before
+3. Pins the renderer. **Intel:** writes `FLTEnableImpeller = false`, reads it back, and re-signs the
+   outer bundle — the edit broke Xcode's seal — keeping the identity, hardened runtime and entitlements
+   Xcode signed it with, and failing if the entitlements come out different. **Apple Silicon:** writes
+   nothing, and fails if the key is there, so an opt-out committed to `macos/Runner/Info.plist` cannot
+   quietly put it on Skia. Both then verify the signature and the hardened runtime.
+4. Hands the bundle to `upload-desktop.sh --no-build` with that build's keys and file names (`OTA_KEY`,
+   `DMG_KEY`, `GCS_PATH`, `DMG_GCS_PATH` — set per build, so two runs cannot write each other's), which:
+5. Asserts the built bundle's `CFBundleShortVersionString` really carries that version before
    publishing anything.
-4. Packages the `.app` with `ditto -c -k --sequesterRsrc --keepParent` (keeps the bundle structure and
+6. Packages the `.app` with `ditto -c -k --sequesterRsrc --keepParent` (keeps the bundle structure and
    extended attributes intact — a plain `zip` does not).
-5. Notarizes the zip, staples the ticket into the `.app`, re-zips from the stapled bundle, and
+7. Notarizes the zip, staples the ticket into the `.app`, re-zips from the stapled bundle, and
    asserts Gatekeeper accepts it (`spctl`).
-6. Packages a `.dmg` from that same stapled bundle — a staging folder holding `Harness.app` plus an
+8. Packages a `.dmg` from that same stapled bundle — a staging folder holding `Harness.app` plus an
    `/Applications` symlink, imaged with `hdiutil` — then signs, notarizes and staples the image too.
-7. Uploads **both** artifacts with `Cache-Control: no-cache`.
-8. Download-merge-reuploads `metadata.json` in a single write, touching only `desktop-macos` (zip) and
-   `desktop-macos-dmg` (dmg).
+9. Uploads **both** artifacts with a year-long immutable `Cache-Control` (see "GCS layout").
+10. Download-merge-reuploads `metadata.json` in a single write, touching only that build's two keys.
 
 A failed build stops the release; nothing is uploaded and no version is consumed.
 
-### One build, two artifacts, and why the dmg is separate
+### One build, two artifacts — per macOS build — and why the dmg is separate
 
-There is one `flutter build` and one signature per release. The dmg is cut from the bundle the zip was
+Each macOS build is one `flutter build` and one signature. Its dmg is cut from the bundle its zip was
 cut from, after stapling — an app stapled afterwards would leave the image carrying an unstapled copy
 that Gatekeeper can only clear by calling Apple on first launch.
 
 The two artifacts serve different jobs and must not be merged:
 
-- **zip / `desktop-macos`** — what `DesktopUpdater` consumes. It unpacks with `ditto -x -k` and then
-  `mv`s the running bundle in place. It has no code path for a disk image, and a mounted dmg volume is
-  read-only, so it could not host the app it is asked to replace.
-- **dmg / `desktop-macos-dmg`** — what a person downloads from the website and drags into Applications.
-  Nothing in the app ever reads this key.
+- **zip / `desktop-macos`, `desktop-macos-arm64`** — what `DesktopUpdater` consumes. It unpacks with
+  `ditto -x -k` and then `mv`s the running bundle in place. It has no code path for a disk image, and a
+  mounted dmg volume is read-only, so it could not host the app it is asked to replace.
+- **dmg / `desktop-macos-dmg`, `desktop-macos-arm64-dmg`** — what a person downloads and drags into
+  Applications. Nothing in the app ever reads these keys.
 
-Expect **two notarization submissions** per release. They cannot be collapsed: stapling only attaches a
-ticket to the exact artifact submitted, so the zip's ticket does not cover the image. The second pass is
-usually quick because Apple has already seen that app's cdhash.
+Expect **two notarization submissions per build — four per release**, the two builds in parallel on CI.
+They cannot be collapsed: stapling only attaches a ticket to the exact artifact submitted, so the zip's
+ticket does not cover the image. The second pass is usually quick because Apple has already seen that
+app's cdhash.
 
 Publishing also refreshes the public download link with no web deploy: `harness.autonomous.ai/desktop/download-macos`
-(in `autonomous-code`, `apps/web/src/app/desktop/download-macos/`) resolves `desktop-macos-dmg` from this same
-manifest on every request, so the new version is live the moment step 8 lands.
+(in `autonomous-code`, `apps/web/src/app/desktop/download-macos/`) resolves `desktop-macos-dmg` — the
+Intel build, which runs on any Mac — from this same manifest on every request, so the new version is
+live the moment step 10 lands. Offering the Apple Silicon dmg there is a change in that repo, not this
+one.
 
 ## GCS layout
 
 ```
 gs://s3-autonomous-upgrade-3/harness/desktop/metadata.json
-gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.zip
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.zip         (Intel build, Skia)
 gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos.dmg
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos-arm64.zip   (Apple Silicon build, Impeller)
+gs://s3-autonomous-upgrade-3/harness/desktop/<version>/Harness-macos-arm64.dmg
 ```
 
 The manifest is always read straight off the GCS origin (`CDN_ASSET_BASE_URL` in `upload-desktop.sh`/
@@ -137,6 +211,18 @@ purpose.
   "desktop-macos-dmg": {
     "version": "1.2.4",
     "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-macos.dmg",
+    "sha256": "<64 hex>",
+    "size": 47118336
+  },
+  "desktop-macos-arm64": {
+    "version": "1.2.4",
+    "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-macos-arm64.zip",
+    "sha256": "<64 hex>",
+    "size": 45231920
+  },
+  "desktop-macos-arm64-dmg": {
+    "version": "1.2.4",
+    "url": "https://cdn.autonomous.ai/harness/desktop/1.2.4/Harness-macos-arm64.dmg",
     "sha256": "<64 hex>",
     "size": 47118336
   }
@@ -181,7 +267,8 @@ which doesn't reliably pick up the quarantine flag in the first place).
 ## How a running app self-updates
 
 1. `DesktopUpdater` checks the manifest once on launch, then every minute
-   (`lib/update/desktop_updater.dart`).
+   (`lib/update/desktop_updater.dart`) — `desktop-macos` on an Intel Mac, the newer of
+   `desktop-macos-arm64` and `desktop-macos` on Apple Silicon (see "Two macOS builds").
 2. Compares against the running app's own version (`package_info_plus`) — strictly newer only, so
    republishing an old build cannot downgrade anyone.
 3. After the user chooses **Update now**, downloads the zip and verifies its sha256 **before** anything is unpacked. A mismatch is discarded.
@@ -210,6 +297,42 @@ gh workflow run release.yml -f version=1.3.0 -f metadata_path=harness/desktop/me
 flutter run -d macos --dart-define=DESKTOP_UPDATE_METADATA_URL=https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/metadata-test.json
 ```
 
+## Internal builds — an unlisted link, not a release
+
+`.github/workflows/internal-build.yml` builds any branch the way a release would — both macOS
+builds, Developer ID signed, notarized, stapled and checked by Gatekeeper — and uploads them where
+no running app and no public page will ever look:
+
+```bash
+git push origin HEAD:internal/<name>     # builds that commit: Grid on, Debug off
+gh workflow run internal-build.yml --ref <branch> -f grid_surface=true -f debug_surface=false
+```
+
+(`workflow_dispatch` only exists once the file is on `main`; the `internal/**` push works from any
+branch that carries it.) The run prints one `.dmg` link per build — as a notice at the top of the run
+page, and in its summary — named `Harness-macos[-arm64]-<next version>-<commit>.dmg`.
+
+- **Unlisted, not private — and this repository is public.** The files sit under
+  `harness/desktop-internal/<128 random bits>/` and the bucket refuses anonymous listing, so a build
+  cannot be found by guessing. The run page that prints its link is public, though, so anyone who
+  opens it can download the build. The team chose that on 2026-09-10 over a key-derived link that only
+  key holders could work out; if it stops being acceptable, that is the design to go back to.
+- Take a build back with `gsutil -m rm -r gs://s3-autonomous-upgrade-3/harness/desktop-internal/<token>`
+  (the summary prints it); the workflow strips the release's year-long cache headers from these files
+  so a deletion sticks.
+- **It never updates itself.** `DESKTOP_UPDATE_METADATA_URL` points at a manifest nothing writes,
+  so a tester stays on the build they were asked to test rather than being moved onto the next
+  public release. The next internal build is installed by its own link.
+- **Same code path as a release, flags aside.** `publish-macos-variant.sh --build-only` builds and
+  pins the renderer (its `--dart-define=` arguments go to `flutter build` and nowhere else), then
+  `upload-desktop.sh --no-build` packages, notarizes and uploads, moved onto the internal prefix by
+  its existing env overrides (`GCS_PATH`, `DMG_GCS_PATH`, `METADATA_PATH`). Its signing steps are the
+  release's own `.github/actions/macos-signing`, so an internal build also proves those before a
+  release depends on them.
+- **Why not by hand.** An Info.plist edited and re-signed on a laptop reached a tester as "The
+  application "Harness" can't be opened", and a laptop without the notarytool profile cannot
+  notarize at all — which is what makes a copy downloaded fresh on another Mac open cleanly.
+
 ## Rollback
 
 The relaunch-health check (step 6 above) only guards against a build that fails to start. To roll back
@@ -221,8 +344,8 @@ running app back.
 
 `scripts/upload-desktop-linux.sh` publishes architecture-specific Linux ARM64 and x64 releases to the
 **same** `metadata.json` as macOS. `release.yml` runs it on both a `ubuntu-24.04` and a
-`ubuntu-24.04-arm` runner, so one `make release` covers all three artifacts — which is also why the
-four `desktop-*` keys only stay on one version when the release goes through CI. Run by hand
+`ubuntu-24.04-arm` runner, so one `make release` covers every build — which is also why the six
+`desktop-*` keys only stay on one version when the release goes through CI. Run by hand
 (`make upload-desktop-linux ARCH=arm64`) it moves one key and leaves the others behind. `amd64` and
 `x86_64` are accepted aliases for `x64`; `aarch64` is accepted as an alias for `arm64`.
 

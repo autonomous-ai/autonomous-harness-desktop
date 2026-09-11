@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../logging/log_file.dart';
 import '../../logging/log_stream.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/app_dialog.dart';
 import 'debug_log_tile.dart';
 
 /// Everything the one-line row leaves out: the whole message, the error, a CLI
@@ -13,7 +14,7 @@ import 'debug_log_tile.dart';
 /// `command_detail_dialog` gives: the list has to stay scannable, and one line
 /// is exactly what cannot hold the two things a failure is usually about.
 Future<void> showDebugDetailDialog(BuildContext context, LogEntry entry) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) => _DebugDetailDialog(entry: entry),
   );
