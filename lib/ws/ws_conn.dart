@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../logging/app_log.dart';
 import '../logging/redact.dart';
 import '../core/models.dart';
+import 'relay_codec.dart';
 
 typedef AccessTokenProvider = Future<String> Function(
   bool forceRefresh,
@@ -68,8 +69,9 @@ class WsConn {
   final AccessTokenProvider accessTokenProvider;
   final void Function(String message) onAuthFailure;
 
-  /// The local CLI closed this connection with a specific, non-retryable reason (currently just
-  /// `NO_PEER_LINK`: the target machine has no `harness link import`ed trust yet) — surfaced instead
+  /// The connection stopped for a specific, non-retryable reason — currently always 4404 (see
+  /// [_refusePeer]): the target machine has no link from this device yet, or no longer trusts it.
+  /// The local CLI closes with it; a viewer's relay connection raises it itself. Surfaced instead
   /// of silently reconnecting forever against a failure the user has to act on to fix.
   final void Function(int code, String reason)? onLocalFailure;
   final WsTransportKind transportKind;
@@ -78,6 +80,11 @@ class WsConn {
   /// Retained only for fixture constructor compatibility. Local transport ignores it.
   final String? localApiKey;
   final int localProtocolVersion;
+
+  /// A viewer build's end-to-end session with the machine, minted fresh on every connect — the
+  /// role the harness CLI plays everywhere else (see [RelayCodec]). Null leaves the relay's frames
+  /// as they are, which is right for the local transport and the dev fixture.
+  final RelayCodecFactory? relayCodecs;
 
   Future<Map<String, dynamic>> Function(
     String type,
@@ -93,6 +100,7 @@ class WsConn {
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
+  RelayCodec? _codec;
   bool _closing = false;
   bool _connecting = false;
   bool _ready = false;
@@ -128,6 +136,7 @@ class WsConn {
     this.localWsUri,
     this.localApiKey,
     this.localProtocolVersion = 1,
+    this.relayCodecs,
   });
 
   Future<void> connect() async {
@@ -146,6 +155,16 @@ class WsConn {
       }
       if (_closing) return;
       _tokenUsed = token;
+      final codecs = isLocal ? null : relayCodecs;
+      if (codecs != null) {
+        final codec = await codecs(machineId);
+        if (_closing) return;
+        if (codec == null) {
+          _refusePeer('NO_PEER_LINK');
+          return;
+        }
+        _codec = codec;
+      }
       final Uri uri;
       if (isLocal) {
         final local = localWsUri;
@@ -195,10 +214,14 @@ class WsConn {
   }
 
   void _onRaw(dynamic raw) {
+    final codec = _codec;
     if (raw is List<int>) {
       final bytes = Uint8List.fromList(raw);
       _inboundTail = _inboundTail
-          .then((_) async => onBinaryFrame?.call(bytes))
+          .then((_) async {
+            final local = codec == null ? bytes : codec.decodeBinary(bytes);
+            if (local != null) await onBinaryFrame?.call(local);
+          })
           .catchError((_) {
             // Binary E2EE/session code owns recovery for bad frames.
           });
@@ -210,16 +233,19 @@ class WsConn {
     } catch (_) {
       return;
     }
+    if (codec != null) {
+      _inboundTail = _inboundTail
+          .then((_) => _onRelayFrame(codec, message))
+          .catchError((_) {
+            // Keep the FIFO alive: a frame that will not open is dropped, never dispatched.
+          });
+      return;
+    }
     final type = message['type'] as String? ?? '';
     final payload = (message['payload'] as Map<String, dynamic>?) ?? {};
 
     if (type == 'connected') {
-      if (payload['machineId'] == machineId) {
-        _ready = true;
-        _attempt = 0;
-        onStatus(ConnectionStatus.connected);
-        _flushQueue();
-      }
+      if (payload['machineId'] == machineId) _markReady();
       return;
     }
     final normalized = <String, dynamic>{...message, 'payload': payload};
@@ -237,6 +263,66 @@ class WsConn {
         .catchError((_) {
           // Keep the FIFO alive. E2EE/session code owns recovery for bad frames.
         });
+  }
+
+  void _markReady() {
+    _ready = true;
+    _attempt = 0;
+    onStatus(ConnectionStatus.connected);
+    _flushQueue();
+  }
+
+  /// A frame on a relay connection whose E2EE session this app holds: relayClient.ts's dial
+  /// handshake, then open-and-dispatch. Nothing is ready — and nothing queued goes out — until the
+  /// machine's welcome proves it holds the identity this device pinned for it.
+  Future<void> _onRelayFrame(
+    RelayCodec codec,
+    Map<String, dynamic> message,
+  ) async {
+    final payload = (message['payload'] as Map<String, dynamic>?) ?? {};
+    switch (message['type']) {
+      case 'connected':
+        // The socket's first `connected` answers the socket itself (it names the user, not a
+        // machine); only the select's own ack starts the handshake.
+        if (payload['machineId'] == machineId) {
+          _channel?.sink.add(jsonEncode(codec.helloFrame()));
+        }
+        return;
+      case 'e2e_welcome':
+        if (await codec.handleWelcome(payload)) {
+          _markReady();
+        } else {
+          _refusePeer('E2EE_WELCOME_INVALID');
+        }
+        return;
+      case 'e2e_denied':
+        _refusePeer('E2E_DENIED');
+        return;
+      case 'e2e_rekey':
+        codec.handleRekey(payload);
+        return;
+    }
+    final clear = codec.decodeFrame(message);
+    if (clear == null) return;
+    await _dispatch({
+      ...clear,
+      'payload': (clear['payload'] as Map<String, dynamic>?) ?? {},
+    });
+  }
+
+  /// The machine is reachable but this device may not talk to it: never linked, the link revoked
+  /// on its side, or a welcome that did not prove the pinned identity. No retry can fix any of the
+  /// three — only a link can — so this stops and says so the way the CLI's own relay does, with
+  /// 4404.
+  void _refusePeer(String reason) {
+    _closing = true;
+    _ready = false;
+    // needsLink first: AppNotifier's onStatus handler reads machine.needsLink to decide whether a
+    // disconnect should be treated as the node going offline — it has to see it flipped before
+    // onStatus runs, or the very first 4404 for this machine reads as offline for one retry cycle.
+    onLocalFailure?.call(4404, reason);
+    onStatus(ConnectionStatus.disconnected);
+    unawaited(_channel?.sink.close());
   }
 
   Future<void> _dispatch(Map<String, dynamic> message) async {
@@ -356,8 +442,15 @@ class WsConn {
             completer.complete(false);
             return;
           }
+          // Sealed here, inside the outbound FIFO, so frames take their counters in send order.
+          final codec = _codec;
+          final wire = codec == null ? bytes : codec.encodeBinary(bytes);
+          if (wire == null) {
+            completer.complete(false);
+            return;
+          }
           try {
-            channel.sink.add(bytes);
+            channel.sink.add(wire);
             completer.complete(true);
           } catch (_) {
             completer.complete(false);
@@ -427,7 +520,11 @@ class WsConn {
     if (onOutgoing != null) payload = await onOutgoing!(type, payload);
     final channel = _channel;
     if (channel == null) throw StateError('WS is not connected');
-    channel.sink.add(jsonEncode({'type': type, 'payload': payload}));
+    final out = <String, dynamic>{'type': type, 'payload': payload};
+    final codec = _codec;
+    final wire = codec == null ? out : codec.encodeFrame(out);
+    if (wire == null) throw StateError('E2EE session is not ready for $type');
+    channel.sink.add(jsonEncode(wire));
   }
 
   void _flushQueue() {
@@ -454,6 +551,7 @@ class WsConn {
     if (!identical(_channel, channel)) return;
     _channel = null;
     _sub = null;
+    _codec = null;
     _ready = false;
     _rejectPending('WS disconnected');
     if (_closing) {
@@ -463,13 +561,7 @@ class WsConn {
     final code = channel.closeCode;
     if (isLocal) {
       if (code == 4404) {
-        _closing = true;
-        // needsLink first: AppNotifier's onStatus handler reads machine.needsLink
-        // to decide whether a disconnect should be treated as the node going
-        // offline — it has to see it flipped before onStatus runs, or the very
-        // first 4404 for this machine reads as offline for one retry cycle.
-        onLocalFailure?.call(code!, channel.closeReason ?? 'NO_PEER_LINK');
-        onStatus(ConnectionStatus.disconnected);
+        _refusePeer(channel.closeReason ?? 'NO_PEER_LINK');
         return;
       }
       _scheduleReconnect();
@@ -524,6 +616,7 @@ class WsConn {
   Future<void> close() async {
     _closing = true;
     _ready = false;
+    _codec = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _rejectPending('WS closed');
@@ -542,12 +635,14 @@ class WsConn {
   /// close event ever fires for that, so nothing else would ever redial. Callers reach for this after
   /// observing a live RPC time out on an otherwise "connected" machine. Closes the local connection and
   /// immediately reconnects with a `forceReconnect` hint so the CLI daemon drops its cached relay entry
-  /// instead of reusing it.
+  /// instead of reusing it. A viewer's relay connection holds that session itself, so for it this is
+  /// simply a fresh dial — and with it a fresh session.
   Future<void> forceReconnect() async {
-    if (_closing || isLocal == false) return;
+    if (_closing || (!isLocal && relayCodecs == null)) return;
     _forceRelayReconnect = true;
     _reconnectTimer?.cancel();
     _ready = false;
+    _codec = null;
     _rejectPending('forcing relay reconnect');
     final sub = _sub;
     _sub = null;

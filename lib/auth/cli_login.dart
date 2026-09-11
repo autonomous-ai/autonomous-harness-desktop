@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../core/harness_cli_runner.dart';
+import 'sign_in_client.dart';
 
 class CliAuthStatus {
   final bool loggedIn;
@@ -39,12 +40,13 @@ class CliNotAvailableException implements Exception {
 /// signed-in session, and driving `harness login --json`'s NDJSON event stream when it does not. The
 /// CLI owns the SSO session end to end (`~/.harness/auth/session.json`) — this app never sees, stores,
 /// or refreshes an access token itself.
-class CliLogin {
+class CliLogin implements SignInClient {
   final HarnessCliRunner _runner;
   Process? _activeProcess;
 
   CliLogin({HarnessCliRunner? runner}) : _runner = runner ?? HarnessCliRunner();
 
+  @override
   Future<CliAuthStatus> checkStatus() async {
     final result = await _run(['auth', 'status', '--json']);
     final line = _lastNonEmptyLine(result.stdout as String);
@@ -64,6 +66,7 @@ class CliLogin {
   /// flow. Calls [onAuthorizeUrl] as soon as the CLI reports the SSO page to show, then resolves once
   /// the CLI's own loopback callback server completes the flow (or throws on failure/cancellation).
   /// The process is killed if [cancel] is called while this is in flight.
+  @override
   Future<void> login({
     required void Function(String url) onAuthorizeUrl,
   }) async {
@@ -118,10 +121,12 @@ class CliLogin {
   }
 
   /// Aborts an in-flight [login] — used by the embedded sign-in webview's close button.
+  @override
   void cancel() {
     _activeProcess?.kill();
   }
 
+  @override
   Future<void> logout() async {
     try {
       await _run(['logout']);

@@ -40,6 +40,7 @@ flutter test                                      # whole unit/widget suite (tes
 flutter test test/terminal_session_test.dart      # one file
 flutter test test/ws_conn_test.dart --plain-name "reconnects"   # one test by name substring
 flutter run -d macos                              # or: flutter run -d linux
+flutter run -d macos --no-enable-impeller         # Intel Mac: Impeller corrupts there (RELEASE.md, "Two macOS builds")
 flutter build macos --debug
 flutter build macos --release
 flutter build linux --release                     # Ubuntu build host only — no cross-compiling
@@ -98,9 +99,10 @@ holds an SSO token:
   `LocalCliDiscovery`, which runs `harness start` when needed). The CLI terminates E2EE for relayed
   machines; the app carries no crypto. Close code `4404`/`NO_PEER_LINK` means the machine needs
   `harness link import` — surfaced as `MachineState.needsLink` and polled via `_linkRetryTimers`.
-- The **only** direct-to-backend path is `LocalManualFixture` (`lib/main_local_manual.dart`), a
-  compile-time-gated dev entrypoint fed by `scripts/start-terminal-local-manual.sh`. It fails closed
-  unless every `--dart-define` is present.
+- The **only other** direct-to-backend paths are `LocalManualFixture` (`lib/main_local_manual.dart`), a
+  compile-time-gated dev entrypoint fed by `scripts/start-terminal-local-manual.sh` that fails closed
+  unless every `--dart-define` is present — and a **viewer build**, which has no CLI at all (next
+  section but one).
 
 `lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: prefer
 `~/.harness/runtime/current-node` + `~/.harness/cli/cli.js`, then `~/.local/bin/harness`, then PATH.
@@ -116,6 +118,57 @@ a terminal, instead of a second copy here that had to keep its own pinned checks
 **tmux** is the one dependency still taken from the OS package manager, and the only reason the setup
 screen ever opens a terminal: a fresh Homebrew or any `apt-get install` needs a password prompt on a
 real tty.
+
+### Viewer builds (iOS, Windows): the one build with no CLI
+
+`kViewerMode` (`lib/core/viewer_mode.dart`) is true on iOS and Windows — the CLI cannot run on either
+(tmux is mandatory to it) — and on macOS/Linux only with `--dart-define=HARNESS_VIEWER_MODE=true`,
+which is how the path is developed against real machines from a Mac. A viewer is a window onto the
+account's machines and nothing more: it never hosts an agent, provisions nothing, runs no updater, no
+Grid CLI and no dial, and treats **every** machine — the one it runs on included — as remote.
+Everything that stands in for the CLI is one object, `ViewerServices` (`lib/viewer/`), null on a
+desktop build; `AppNotifier` branches on `viewer == null` in a handful of places rather than growing a
+second path.
+
+- **Auth**: `DirectLogin` is cli.ts `loginCommand` in the app — loopback listener,
+  `/api/auth/authorize-native`, `/api/auth/exchange` — minus `resolve-computer`, which would register
+  the device as a machine. `DirectAuth` is authSession.ts's `AuthSessionManager`: 60s refresh skew,
+  one refresh at a time, and only a 401 or `REFRESH_TOKEN_INVALID` signs out (an outage answers with
+  the same 503 as a dead token, and deleting the refresh token on a blip cannot be undone). Tokens sit
+  in `AuthSession`. `SignInClient` is the seam: `AppNotifier.cliLogin` is `CliLogin` or `DirectLogin`.
+  On iOS the SSO page opens in-app (`viewer/sign_in_browser.dart`) — Safari would suspend the app and
+  its loopback listener with it. ⚠️ Whether the SSO page's Google popup works in that in-app view is
+  unverified on a device.
+- **REST**: `ApiClient(auth:)` goes straight to `apiBaseUrl` through `BearerAuthInterceptor` (bearer +
+  `x-autonomous-env`, one retry on a 401) and drops the CLI-only `x-adapter-local` header.
+- **WS**: `WsConn(relayCodecs:)` — on a relay connection the app plays relayClient.ts's client role:
+  `machine_select` → `e2e_hello` → `e2e_welcome`, and only then ready. `RelayCodec` (`E2eeRelayCodec`)
+  converts at the transport's edge — JSON payloads sealed per `encryptedDownTypes`, binary HTRL ⇄ HTRM
+  v3 — so `TerminalSession` and `AppNotifier` see exactly what the loopback transport hands them. A
+  type that must be sealed is REFUSED while the session is not up, never sent in the clear. No pin,
+  `e2e_denied`, or a welcome not signed by the pinned identity all end as 4404: the `needsLink` path
+  the CLI's relay already feeds, minus its poll — a viewer's links change only through its own form,
+  which reconnects when it lands.
+- **Linking**: `PeerLinkClient` is `CliLink` or `DirectLink`, which runs the remote-password PAKE
+  (`viewer/password_link.dart`, relayClient.ts `connectWithPassword`) and pins the machine in
+  `ViewerKeyStore` (identity seed, and rows shaped like `machinePeers.json`'s). Failures read as
+  `humanizeLinkError`'s sentences (`auth/link_errors.dart`, ported from cli.ts). TODO(security): the
+  identity seed lives in the state file, as the CLI's does; the platform keystore would be better.
+- **The crypto is a port, not a dependency.** `lib/e2ee/` mirrors core.ts, passwordPake.ts,
+  replayWindow.ts, `RelaySessionCrypto` and the HTRM framing 1:1, on the `cryptography` package's sync
+  APIs (Ed25519 has none, so signing is async — it never touches a nonce counter) and its own
+  word-based scrypt. `test/fixtures/e2ee_vectors.json` is generated FROM the CLI by
+  `scripts/e2ee_vectors/gen.mts` (`HARNESS_REPO_ROOT=… "$HARNESS_REPO_ROOT/cli/node_modules/.bin/tsx"
+  scripts/e2ee_vectors/gen.mts`), and `test/e2ee/session_vectors_test.dart` pins the sha256 of every CLI
+  source it was checked against: a changed core.ts fails the suite until the port is re-read.
+  Regenerate, port, then move the hash — never the other way round. `test/viewer/fake_relay_machine.dart`
+  plays the machine's half of both exchanges over a real socket for the end-to-end tests.
+- **State**: `HarnessFileStore` lives under `~/.harness/viewer-app` in a viewer (on a Mac the two builds
+  would otherwise share tokens, pane layout and theme), roots at `Library/Application Support` on iOS
+  (the container root is not writable), and skips `chmod` there (no `Process`; the sandbox is private).
+- Not built yet: P2P (a viewer's terminals ride the relay, which the machine falls back to on its
+  own), the phone-sized shell, and hiding the desktop-only surfaces (Share, Usage, Grid, flashing) in a
+  viewer.
 
 ### Boot and state
 

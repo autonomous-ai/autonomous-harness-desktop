@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../logging/cli_transcript.dart';
+import 'harness_file_store.dart';
 
 /// Runs the Harness CLI owned by this desktop app without depending on a
 /// terminal shell, its rc files, or Finder's inherited PATH.
@@ -47,31 +48,16 @@ class HarnessCliRunner {
     })?
     startProcess,
   }) : environment = environment ?? Platform.environment,
-       harnessHome = harnessHome ?? Directory(_defaultHarnessHome()),
+       harnessHome = harnessHome ?? _defaultHarnessHome(),
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start;
 
-  static String _defaultHarnessHome() {
-    // HOME, then USERPROFILE: Windows sets only the latter, so a launch from Explorer threw here
-    // before any UI existed to report it.
-    final home = Platform.environment['HOME'];
-    final profile = Platform.environment['USERPROFILE'];
-    var resolved = home != null && home.isNotEmpty ? home : profile;
-    // iOS and Android give an app a sandbox container, not a user home, so
-    // neither variable is set. Nothing here can actually run a CLI on a phone
-    // — the provisioner refuses that platform long before this — but the path
-    // is built while the app state is being constructed, and throwing there
-    // takes down the first frame instead of reaching the screen that explains
-    // the refusal.
-    if ((resolved == null || resolved.isEmpty) &&
-        (Platform.isIOS || Platform.isAndroid)) {
-      resolved = Directory.systemTemp.path;
-    }
-    if (resolved == null || resolved.isEmpty) {
-      throw StateError('Could not resolve the current user home directory');
-    }
-    return '$resolved${Platform.pathSeparator}.harness';
-  }
+  /// `~/.harness`, from the one resolver that knows every platform this runs on — the Windows
+  /// fallbacks, and the phones, where there is no HOME to read. Nothing can run a CLI on a phone,
+  /// but the app still builds a runner there (see `CliLink`) while its state is constructed, so a
+  /// copy of the lookup that threw on a phone was a crash before the first frame.
+  static Directory _defaultHarnessHome() =>
+      Directory(HarnessFileStore.defaultDirectoryPath()).parent;
 
   Directory get _runtimeDirectory =>
       Directory('${harnessHome.path}${Platform.pathSeparator}runtime');

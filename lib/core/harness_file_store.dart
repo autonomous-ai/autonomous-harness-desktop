@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'local_key_value_store.dart';
+import 'viewer_mode.dart';
 
 /// Versioned Harness desktop state stored under the user's Harness home.
 ///
@@ -11,9 +12,13 @@ import 'local_key_value_store.dart';
 /// POSIX platforms. Values are never logged.
 class HarnessFileStore implements LocalKeyValueStore {
   static const schemaVersion = 1;
-  // Keep this legacy namespace stable across the product rename so existing
-  // credentials and E2EE pairing state remain available after upgrading.
-  static const directoryName = 'desktop-app';
+
+  /// A desktop build keeps the legacy `desktop-app` namespace stable across the product rename, so
+  /// existing credentials and E2EE pairing state remain available after upgrading. A viewer build
+  /// is a different product holding a different session — its own SSO tokens and its own E2EE
+  /// identity — so it lives beside that one rather than in it: on a Mac, where the viewer path is
+  /// developed, the two would otherwise overwrite each other's state.
+  static final String directoryName = kViewerMode ? 'viewer-app' : 'desktop-app';
   static const fileName = 'state.json';
   static const lockFileName = 'state.lock';
 
@@ -40,24 +45,24 @@ class HarnessFileStore implements LocalKeyValueStore {
         if (drive != null && path != null) home = '$drive$path';
       }
     }
-    // iOS and Android hand an app a sandbox container rather than a user home:
-    // HOME is unset on a simulator and meaningless on a device, so the desktop
-    // lookup above resolves to nothing and every caller of this — the log files
-    // and the crash log among them, both of which run before the first frame —
-    // would throw before the app could report why. TMPDIR is the one container
-    // path a plain `dart:io` process can name without a plugin.
-    if ((home == null || home.isEmpty) && (Platform.isIOS || Platform.isAndroid)) {
-      // Not TMPDIR: the simulator hands a Dart isolate an environment with
-      // neither HOME nor TMPDIR in it. `systemTemp` asks the platform instead
-      // of the environment, which is the only question that has an answer here.
-      final temporary = env['TMPDIR'];
-      home = temporary != null && temporary.isNotEmpty
-          ? temporary
-          : Directory.systemTemp.path;
+    // iOS and Android hand an app a sandbox container rather than a user home,
+    // and Dart passes an iOS app no environment at all — `Platform.environment`
+    // is empty there even though the process was started with HOME — so every
+    // caller of this, the log files and the crash log among them (both run
+    // before the first frame), would throw before the app could say why.
+    // `systemTemp` asks the platform instead of the environment. Its PARENT is
+    // the container itself, not the temporary directory inside it, which the OS
+    // may purge: these files hold the session's tokens and the E2EE pins, and a
+    // wiped tmp would sign the user out and forget every linked machine.
+    if ((home == null || home.isEmpty) &&
+        (Platform.isIOS || Platform.isAndroid)) {
+      home = Directory.systemTemp.parent.path;
     }
     if (home == null || home.isEmpty) {
       throw StateError('Could not resolve the current user home directory');
     }
+    // An iOS app's HOME is its sandbox container, whose root it may not write to.
+    if (Platform.isIOS) home = _join(_join(home, 'Library'), 'Application Support');
     return _join(_join(home, '.harness'), name ?? directoryName);
   }
 
@@ -190,8 +195,10 @@ class HarnessFileStore implements LocalKeyValueStore {
 
   Future<void> _makePrivateFile(File file) => _chmod(file.path, '600');
 
+  /// Windows has no POSIX modes, and iOS neither needs one — the app's sandbox is already private
+  /// to it — nor can spawn `/bin/chmod` at all.
   Future<void> _chmod(String path, String mode) async {
-    if (Platform.isWindows) return;
+    if (Platform.isWindows || Platform.isIOS) return;
     final result = await Process.run('/bin/chmod', [mode, path]);
     if (result.exitCode != 0) {
       throw FileSystemException('Could not set mode $mode', path);

@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import '../core/apple_fonts.dart';
 
 /// The default terminal face, per platform.
 ///
@@ -69,10 +69,10 @@ const linuxTerminalFontFallback = <String>[
 /// constants above stay `const` so `TerminalFontChoice` can still name them
 /// from its const constructor.
 String get terminalFontFamily =>
-    Platform.isMacOS ? macTerminalFontFamily : linuxTerminalFontFamily;
+    hasAppleFonts ? macTerminalFontFamily : linuxTerminalFontFamily;
 
 List<String> get terminalFontFallback =>
-    Platform.isMacOS ? macTerminalFontFallback : linuxTerminalFontFallback;
+    hasAppleFonts ? macTerminalFontFallback : linuxTerminalFontFallback;
 
 /// The default terminal font size — the same on every platform.
 const terminalFontSize = 13.0;
