@@ -4,6 +4,7 @@ import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_name.dart';
 import '../../grid/grid_network.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/labeled_field.dart';
 
 /// Rename a grid you own.
@@ -22,10 +23,9 @@ Future<String?> showRenameGridDialog(
   // The controller outlives this dialog, so a failure from a previous attempt
   // would otherwise greet the user on reopen.
   controller.resetRename();
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
-    builder: (_) =>
-        _RenameGridDialog(controller: controller, network: network),
+    builder: (_) => _RenameGridDialog(controller: controller, network: network),
   );
 }
 

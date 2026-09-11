@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../state/app_state.dart';
 import '../state/pane_preset.dart';
 import '../theme/app_theme.dart';
@@ -25,9 +26,8 @@ bool _layoutPaletteOpen = false;
 Future<void> showLayoutPalette(BuildContext context, AppNotifier notifier) {
   if (_layoutPaletteOpen) return Future<void>.value();
   _layoutPaletteOpen = true;
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.3),
     builder: (context) => _LayoutPalette(notifier: notifier),
   ).whenComplete(() => _layoutPaletteOpen = false);
 }

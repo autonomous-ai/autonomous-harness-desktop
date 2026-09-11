@@ -6,11 +6,12 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../flash/flasher.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 
 /// Writes firmware to the plugged-in dial, and shows the flasher's own output
 /// while it happens.
 Future<void> showFlashFirmwareDialog(BuildContext context, {Flasher? flasher}) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     // A half-written image is a board that will not boot. The dialog refuses to
     // leave while the write is in flight; PopScope below does the same for the

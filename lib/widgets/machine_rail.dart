@@ -10,6 +10,7 @@ import '../core/models.dart';
 import '../shared/layouts/widgets/sidebar_item.dart';
 import '../shared/layouts/widgets/sidebar_timeline.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_icon_button.dart';
 import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/skeleton.dart';
@@ -346,7 +347,7 @@ class _MachineNodeState extends State<_MachineNode> {
   Future<void> _showRenameDialog() async {
     final controller = TextEditingController(text: machine.displayName);
     String? error;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
@@ -416,7 +417,7 @@ class _MachineNodeState extends State<_MachineNode> {
   }
 
   Future<void> _confirmDeleteMachine() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete machine'),
@@ -911,7 +912,7 @@ class _AgentRowState extends State<_AgentRow> {
   );
 
   Future<void> _confirmDelete() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete agent'),

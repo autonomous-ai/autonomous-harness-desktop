@@ -25,6 +25,7 @@ import '../grid/model_picker_options.dart';
 import '../grid/model_recents_store.dart';
 import '../grid/provider_enablement_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/empty_state.dart';
 import 'model_picker_chrome.dart';
@@ -39,7 +40,7 @@ import 'model_picker_chrome.dart';
 Future<ModelChoice?> showModelPickerDialog(
   BuildContext context, {
   required ModelChoice? current,
-}) => showDialog<ModelChoice>(
+}) => showAppDialog<ModelChoice>(
   context: context,
   builder: (_) => ModelPickerDialog(current: current),
 );

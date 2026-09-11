@@ -4,6 +4,7 @@ import '../../grid/grid_access_type.dart';
 import '../../grid/grid_mutations_controller.dart';
 import '../../grid/grid_name.dart';
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/app_select_field.dart';
 import '../../shared/widgets/labeled_field.dart';
 
@@ -25,7 +26,7 @@ Future<String?> showCreateGridDialog(
   String? gatedDomain,
 }) {
   controller.resetCreate();
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     builder: (_) =>
         _CreateGridDialog(controller: controller, gatedDomain: gatedDomain),
@@ -88,7 +89,9 @@ class _CreateGridDialogState extends State<_CreateGridDialog> {
         final types = accessTypesFor(
           canRestrictToDomain: widget.gatedDomain != null,
         );
-        final selected = types.contains(_type) ? _type : GridAccessType.fallback;
+        final selected = types.contains(_type)
+            ? _type
+            : GridAccessType.fallback;
 
         // Escape and a click on the barrier pop a dialog even when its Cancel
         // button is disabled — so without this, escaping a submit closed the
@@ -187,7 +190,9 @@ class _CreateGridDialogState extends State<_CreateGridDialog> {
             ),
             actions: [
               TextButton(
-                onPressed: submitting ? null : () => Navigator.of(context).pop(),
+                onPressed: submitting
+                    ? null
+                    : () => Navigator.of(context).pop(),
                 // Ink, not accent. Cancel is the way out, not a suggestion — two
                 // coloured words in one corner give the dialog two things that
                 // look like the answer.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../shared/widgets/app_dialog.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../shared/theme/app_theme.dart' as grid;
@@ -14,7 +15,7 @@ Future<String?> showRemoteFolderPicker(
   required String machineId,
   String? initialPath,
 }) {
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     builder: (context) => _RemoteFolderPickerDialog(
       notifier: notifier,
