@@ -452,10 +452,14 @@ void main() {
       );
 
       expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
-      expect(readiness.systemReady, isFalse);
+      expect(readiness.systemReady, isTrue);
       expect(
         readiness.steps[EnvironmentStep.tmux],
         EnvironmentStepStatus.ready,
+      );
+      expect(
+        readiness.steps[EnvironmentStep.clipboard],
+        EnvironmentStepStatus.needsTerminal,
       );
       expect(readiness.terminalSetup, EnvironmentTerminalSetup.linuxHost);
       expect(terminalScript, isNotNull);
@@ -499,6 +503,10 @@ void main() {
     );
 
     expect(readiness.isReady, isTrue);
+    expect(
+      readiness.steps[EnvironmentStep.clipboard],
+      EnvironmentStepStatus.ready,
+    );
     expect(terminalLaunches, 0);
     final install = calls.singleWhere(
       (line) => line.contains('apt-get install -y'),
@@ -597,6 +605,10 @@ void main() {
     );
 
     expect(readiness.isReady, isTrue);
+    expect(
+      readiness.steps[EnvironmentStep.clipboard],
+      EnvironmentStepStatus.ready,
+    );
     expect(calls.any((line) => line.contains('command -v wl-copy')), isTrue);
     expect(calls.any((line) => line.contains('command -v xclip')), isFalse);
   });
@@ -624,6 +636,10 @@ void main() {
     );
 
     expect(readiness.isReady, isTrue);
+    expect(
+      readiness.steps[EnvironmentStep.clipboard],
+      EnvironmentStepStatus.notApplicable,
+    );
     expect(calls.any((line) => line.contains('command -v xclip')), isFalse);
     expect(calls.any((line) => line.contains('command -v wl-copy')), isFalse);
   });
@@ -660,6 +676,88 @@ void main() {
     expect(polled.phase, EnvironmentSetupPhase.waitingForTerminal);
     expect(polled.terminalSetup, EnvironmentTerminalSetup.linuxHost);
   });
+
+  test('a completed host transaction that still misses clipboard fails without reopening Terminal', () async {
+    await createManagedHarness();
+    var launches = 0;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (_) async => launches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+      ),
+    );
+    final waiting = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+    await File(waiting.terminalResultPath!).writeAsString('0\n');
+
+    final rechecked = await provisioner.ensureReady(
+      onProgress: (_) {},
+      resumeFrom: waiting,
+      install: false,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(launches, 1);
+    expect(rechecked.phase, EnvironmentSetupPhase.failed);
+    expect(rechecked.failure?.title, contains('verification failed'));
+    expect(rechecked.failure?.detail, contains('xclip'));
+  });
+
+  test(
+    'missing tmux and X11 clipboard share one Terminal transaction',
+    () async {
+      await createManagedHarness();
+      var launches = 0;
+      String? terminalScript;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        platformEnvironment: const {'DISPLAY': ':0'},
+        openTerminal: (path) async {
+          launches++;
+          terminalScript = path;
+        },
+        run: runner(
+          tmuxPresent: () => false,
+          gridPresent: () => true,
+          xclipPresent: () => false,
+        ),
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(launches, 1);
+      expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(
+        readiness.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.needsTerminal,
+      );
+      expect(
+        readiness.steps[EnvironmentStep.clipboard],
+        EnvironmentStepStatus.needsTerminal,
+      );
+      final script = await File(terminalScript!).readAsString();
+      expect(script, contains('install_with_apt xclip tmux'));
+      expect(
+        (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
+        0,
+      );
+    },
+  );
 
   test('missing Linux base tools are installed before Harness', () async {
     var tmuxPresent = true;

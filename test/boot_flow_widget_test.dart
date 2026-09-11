@@ -621,6 +621,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Here is exactly what is required'), findsOneWidget);
+    expect(find.text('HOST DEPENDENCIES'), findsOneWidget);
+    expect(find.text('HARNESS COMPONENTS'), findsOneWidget);
     expect(find.text('Grid CLI'), findsWidgets);
     await tester.tap(find.text('Continue'));
     await tester.pump();

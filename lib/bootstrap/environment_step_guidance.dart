@@ -10,6 +10,12 @@ String? environmentStepGuidanceCommand(
   required bool isMacOS,
 }) {
   switch (step) {
+    case EnvironmentStep.clipboard:
+      if (status != EnvironmentStepStatus.failed &&
+          status != EnvironmentStepStatus.needsTerminal) {
+        return null;
+      }
+      return 'if [ -n "\${WAYLAND_DISPLAY:-}" ]; then sudo apt-get install -y wl-clipboard; else sudo apt-get install -y xclip; fi';
     case EnvironmentStep.harness:
       if (status != EnvironmentStepStatus.failed) return null;
       // Same URL _ensureHarness() itself curls — see environment_provisioner.dart.
@@ -40,6 +46,10 @@ String environmentStepGuidanceText(
   required bool isMacOS,
 }) {
   switch (step) {
+    case EnvironmentStep.clipboard:
+      return status == EnvironmentStepStatus.needsTerminal
+          ? 'The clipboard package is part of the single Host dependencies install. Finish the existing Terminal prompt; do not start a second installer.'
+          : 'Install the clipboard helper for the active Linux display, then click Recheck.';
     case EnvironmentStep.harness:
       return 'Run this in a terminal, then click Recheck.';
     case EnvironmentStep.tmux:

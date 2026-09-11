@@ -149,7 +149,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
         _heading(
           'Step 3 of 3 · Choose & install',
           'Choose how to prepare this computer',
-          'Both paths finish with the same verification: tmux, managed Node 20+, Harness CLI and Grid CLI must all answer.',
+          'Both paths finish with the same verification: host dependencies, managed Node 20+, Harness CLI and Grid CLI must all answer.',
         ),
         SegmentedButton<EnvironmentSetupMode>(
           segments: const [
@@ -173,7 +173,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
           _notice(
             Icons.terminal,
             'Admin prompts stay in Terminal',
-            'Harness opens the operating system Terminal for Homebrew or apt. Your sudo password is entered there and is never read or stored by this app.',
+            'Harness opens one operating system Terminal for all missing Homebrew or apt host dependencies. Your sudo password is entered there and is never read or stored by this app.',
             warning: true,
           ),
           const SizedBox(height: 16),
@@ -258,49 +258,74 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
     ],
   );
 
-  Widget _checkList(
-    EnvironmentReadiness state, {
-    bool checking = false,
-  }) => _Panel(
-    child: Column(
-      children: [
-        _CheckRow(
-          label: 'System tools & writable home',
-          detail: Platform.isMacOS
-              ? 'Shell, curl, tar, sed, awk, shasum · Xcode or Command Line Tools'
-              : 'Shell, curl, tar, sed, awk, sha256sum · apt/sudo if tmux is missing',
-          status: state.systemReady
-              ? EnvironmentStepStatus.ready
-              : state.phase == EnvironmentSetupPhase.preflight
-              ? null
-              : EnvironmentStepStatus.failed,
-          checking: checking && state.phase == EnvironmentSetupPhase.preflight,
+  Widget _checkList(EnvironmentReadiness state, {bool checking = false}) =>
+      _Panel(
+        child: Column(
+          children: [
+            const _CheckSectionLabel('Host dependencies'),
+            _CheckRow(
+              label: 'System tools & writable home',
+              detail: Platform.isMacOS
+                  ? 'Shell, curl, tar, sed, awk, shasum · Xcode or Command Line Tools'
+                  : 'Shell, curl, tar, sed, awk, sha256sum · writable home',
+              status: _systemStatus(state),
+              checking:
+                  checking && state.phase == EnvironmentSetupPhase.preflight,
+            ),
+            _CheckRow(
+              label: Platform.isMacOS
+                  ? 'Homebrew & tmux terminal backend'
+                  : 'tmux terminal backend',
+              detail: 'Required for every terminal session',
+              status: state.steps[EnvironmentStep.tmux],
+            ),
+            if (Platform.isLinux)
+              _CheckRow(
+                label: 'Native image clipboard',
+                detail: _linuxClipboardDetail,
+                status: state.steps[EnvironmentStep.clipboard],
+              ),
+            const _CheckSectionLabel('Harness components'),
+            _CheckRow(
+              label: 'Managed Node 20+ & Harness CLI',
+              detail: '~/.harness/runtime · harness version',
+              status: state.steps[EnvironmentStep.harness],
+            ),
+            _CheckRow(
+              label: 'Grid CLI',
+              detail: 'Required binary · account login comes later',
+              status: state.steps[EnvironmentStep.grid],
+            ),
+          ],
         ),
-        for (final step in [
-          EnvironmentStep.tmux,
-          EnvironmentStep.harness,
-          EnvironmentStep.grid,
-        ])
-          _CheckRow(
-            label: switch (step) {
-              EnvironmentStep.tmux =>
-                Platform.isMacOS
-                    ? 'Homebrew & tmux terminal backend'
-                    : 'tmux terminal backend',
-              EnvironmentStep.harness => 'Managed Node 20+ & Harness CLI',
-              EnvironmentStep.grid => 'Grid CLI',
-            },
-            detail: switch (step) {
-              EnvironmentStep.tmux => 'Required for every terminal session',
-              EnvironmentStep.harness => '~/.harness/runtime · harness version',
-              EnvironmentStep.grid =>
-                'Required binary · account login comes later',
-            },
-            status: state.steps[step],
-          ),
-      ],
-    ),
-  );
+      );
+
+  EnvironmentStepStatus? _systemStatus(EnvironmentReadiness state) {
+    if (state.systemReady) return EnvironmentStepStatus.ready;
+    if (state.phase == EnvironmentSetupPhase.preflight) return null;
+    if (state.phase == EnvironmentSetupPhase.waitingForTerminal &&
+        state.terminalSetup == EnvironmentTerminalSetup.linuxHost) {
+      return EnvironmentStepStatus.needsTerminal;
+    }
+    if (state.phase == EnvironmentSetupPhase.installing) {
+      return EnvironmentStepStatus.running;
+    }
+    return EnvironmentStepStatus.failed;
+  }
+
+  String? get _linuxClipboardPackage {
+    if ((Platform.environment['WAYLAND_DISPLAY'] ?? '').isNotEmpty) {
+      return 'wl-clipboard';
+    }
+    if ((Platform.environment['DISPLAY'] ?? '').isNotEmpty) return 'xclip';
+    return null;
+  }
+
+  String get _linuxClipboardDetail => switch (_linuxClipboardPackage) {
+    'wl-clipboard' => 'wl-copy · provided by wl-clipboard',
+    'xclip' => 'xclip · required for native image paste',
+    _ => 'Not applicable · image paste uses file-path fallback',
+  };
 
   Widget _planList() {
     final rows = Platform.isMacOS
@@ -313,8 +338,8 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
             ('Final verification', 'All commands'),
           ]
         : const [
-            ('System command check', 'Read-only'),
-            ('tmux', 'Required · apt/sudo if missing'),
+            ('Host dependency check', 'Read-only'),
+            ('Install missing host dependencies', 'One apt transaction'),
             ('Managed Node 20+ & Harness CLI', '~/.harness only'),
             ('Grid CLI', 'Required'),
             ('Final verification', 'All commands'),
@@ -369,18 +394,17 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
         ]
       : [
           (
-            '1 · System tools',
-            'sudo apt-get install -y bash curl tar sed gawk coreutils',
+            '1 · Host dependencies',
+            'sudo apt-get install -y bash curl tar sed gawk coreutils tmux${_linuxClipboardPackage == null ? '' : ' $_linuxClipboardPackage'}',
           ),
-          ('2 · tmux', 'sudo apt-get install -y tmux'),
-          ('3 · Harness CLI', kHarnessDesktopInstallCommand),
+          ('2 · Harness CLI', kHarnessDesktopInstallCommand),
           (
-            '4 · Grid CLI',
+            '3 · Grid CLI',
             'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
           ),
           (
-            '5 · Verify',
-            'tmux -V && ~/.local/bin/harness version && ~/.local/bin/grid --version',
+            '4 · Verify',
+            'tmux -V${_linuxClipboardPackage == null ? '' : ' && command -v ${_linuxClipboardPackage == 'wl-clipboard' ? 'wl-copy' : 'xclip'}'} && ~/.local/bin/harness version && ~/.local/bin/grid --version',
           ),
         ];
 
@@ -595,7 +619,10 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
               onPressed: busy
                   ? null
                   : () => widget.notifier.recheckEnvironmentStep(
-                      EnvironmentStep.tmux,
+                      state.steps[EnvironmentStep.clipboard] ==
+                              EnvironmentStepStatus.needsTerminal
+                          ? EnvironmentStep.clipboard
+                          : EnvironmentStep.tmux,
                     ),
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('Recheck now'),
@@ -735,12 +762,37 @@ class _Panel extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: padding,
+    clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
       color: AppColors.surface,
       border: Border.all(color: AppColors.border),
       borderRadius: BorderRadius.circular(11),
     ),
     child: child,
+  );
+}
+
+class _CheckSectionLabel extends StatelessWidget {
+  final String label;
+  const _CheckSectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(16, 11, 16, 8),
+    decoration: BoxDecoration(
+      color: AppColors.background.withValues(alpha: 0.28),
+      border: Border(bottom: BorderSide(color: AppColors.border)),
+    ),
+    child: Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        color: AppColors.textSoft,
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
+      ),
+    ),
   );
 }
 
@@ -763,6 +815,7 @@ class _CheckRow extends StatelessWidget {
       EnvironmentStepStatus.failed => AppColors.danger,
       EnvironmentStepStatus.needsTerminal => AppColors.warning,
       EnvironmentStepStatus.running => AppColors.accent,
+      EnvironmentStepStatus.notApplicable => AppColors.muted,
       _ => AppColors.muted,
     };
     return Container(
@@ -784,6 +837,8 @@ class _CheckRow extends StatelessWidget {
                   ? Icons.check_circle
                   : status == EnvironmentStepStatus.failed
                   ? Icons.cancel_outlined
+                  : status == EnvironmentStepStatus.notApplicable
+                  ? Icons.remove_circle_outline
                   : Icons.circle_outlined,
               size: 17,
               color: color,
@@ -813,6 +868,7 @@ class _CheckRow extends StatelessWidget {
             EnvironmentStepStatus.failed => 'Missing',
             EnvironmentStepStatus.needsTerminal => 'Terminal',
             EnvironmentStepStatus.running => 'Working',
+            EnvironmentStepStatus.notApplicable => 'Not applicable',
             _ => checking ? 'Checking' : 'Required',
           }, style: TextStyle(color: color, fontSize: 11)),
         ],

@@ -1141,7 +1141,11 @@ class AppNotifier extends ChangeNotifier {
       if (!result.isReady &&
           mode == EnvironmentSetupMode.automatic &&
           result.phase != EnvironmentSetupPhase.waitingForTerminal &&
-          result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready) {
+          result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready &&
+          (result.steps[EnvironmentStep.clipboard] ==
+                  EnvironmentStepStatus.ready ||
+              result.steps[EnvironmentStep.clipboard] ==
+                  EnvironmentStepStatus.notApplicable)) {
         result = await _runProvisioner(
           resumeFrom: result,
           install: true,
@@ -1197,9 +1201,9 @@ class AppNotifier extends ChangeNotifier {
       }
     }
     if (stuck == null && environmentReadiness.terminalSetup == null) return;
-    // System/clipboard setup has no EnvironmentStep row of its own. The
-    // callback argument is only a UI trigger; the provisioner rechecks the
-    // complete environment and uses terminalSetup to attribute any failure.
+    // Base system setup has no EnvironmentStep row of its own. The callback
+    // argument is only a UI trigger; the provisioner rechecks the complete
+    // environment and uses terminalSetup to attribute any failure.
     final step = stuck ?? EnvironmentStep.tmux;
     _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
       unawaited(recheckEnvironmentStep(step));

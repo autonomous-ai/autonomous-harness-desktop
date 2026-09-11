@@ -13,6 +13,7 @@ const String kHarnessDesktopInstallCommand =
     '/bin/sh -s -- --desktop';
 
 enum EnvironmentStep {
+  clipboard,
   harness,
   tmux,
   grid;
@@ -62,6 +63,10 @@ enum EnvironmentStepStatus {
   needsTerminal,
   failed,
 
+  /// This host has no native clipboard to prepare (for example, headless
+  /// Linux). Unlike [unavailable], this is a satisfied, non-blocking state.
+  notApplicable,
+
   /// The host does not support this dependency. All current steps are required,
   /// so this status remains blocking.
   unavailable,
@@ -101,7 +106,11 @@ class EnvironmentReadiness {
 
   bool get isReady =>
       systemReady &&
-      steps.values.every((status) => status == EnvironmentStepStatus.ready);
+      steps.values.every(
+        (status) =>
+            status == EnvironmentStepStatus.ready ||
+            status == EnvironmentStepStatus.notApplicable,
+      );
 
   bool get needsTerminal =>
       phase == EnvironmentSetupPhase.waitingForTerminal ||
@@ -310,6 +319,7 @@ class EnvironmentProvisioner {
     }
 
     final previousTerminalLog = state.terminalLogPath;
+    EnvironmentTerminalSetup? completedTerminalSetup;
     if (previousTerminalLog != null) {
       try {
         final text = await File(previousTerminalLog).readAsString();
@@ -337,13 +347,40 @@ class EnvironmentProvisioner {
         if (exitCode != null && exitCode != 0) {
           final linuxHost =
               state.terminalSetup == EnvironmentTerminalSetup.linuxHost;
+          final clipboardFailed =
+              linuxHost &&
+              state.steps[EnvironmentStep.clipboard] ==
+                  EnvironmentStepStatus.needsTerminal;
+          final tmuxFailed =
+              state.steps[EnvironmentStep.tmux] ==
+              EnvironmentStepStatus.needsTerminal;
+          if (clipboardFailed) {
+            emit(
+              step: EnvironmentStep.clipboard,
+              status: EnvironmentStepStatus.failed,
+            );
+          }
+          if (tmuxFailed) {
+            emit(
+              step: EnvironmentStep.tmux,
+              status: EnvironmentStepStatus.failed,
+            );
+          }
           emit(
             step: linuxHost ? null : EnvironmentStep.tmux,
             status: linuxHost ? null : EnvironmentStepStatus.failed,
             message: 'The Terminal setup exited with code $exitCode.',
             phase: EnvironmentSetupPhase.failed,
             failure: EnvironmentFailure(
-              step: linuxHost ? null : EnvironmentStep.tmux,
+              step: !linuxHost
+                  ? EnvironmentStep.tmux
+                  : !state.systemReady
+                  ? null
+                  : clipboardFailed
+                  ? EnvironmentStep.clipboard
+                  : tmuxFailed
+                  ? EnvironmentStep.tmux
+                  : null,
               title: 'System package installation failed',
               detail:
                   'Terminal exited with code $exitCode. Review the complete log below.',
@@ -352,10 +389,10 @@ class EnvironmentProvisioner {
                   : _manualCommandFor(EnvironmentStep.tmux),
               exitCode: exitCode,
             ),
-            systemReady: linuxHost ? false : null,
           );
           return state;
         }
+        if (exitCode == 0) completedTerminalSetup = state.terminalSetup;
       } on FileSystemException {
         // Still running: the result file is written by the terminal script's EXIT trap.
       }
@@ -377,7 +414,8 @@ class EnvironmentProvisioner {
     }
 
     try {
-      var linuxMissingPackages = <String>[];
+      var linuxMissingBasePackages = <String>[];
+      String? linuxMissingClipboardPackage;
       EnvironmentFailure? systemFailure;
       if (_isMacOS) {
         systemFailure = await _systemPreflightFailure();
@@ -388,7 +426,8 @@ class EnvironmentProvisioner {
             detail: 'Harness needs to write ~/.harness and ~/.local/bin.',
           );
         } else {
-          linuxMissingPackages = await _missingLinuxHostPackages();
+          linuxMissingBasePackages = await _missingLinuxBasePackages();
+          linuxMissingClipboardPackage = await _missingLinuxClipboardPackage();
         }
       }
       if (systemFailure != null) {
@@ -401,18 +440,40 @@ class EnvironmentProvisioner {
       }
       var systemReady = _isMacOS
           ? await _hasAppleDeveloperTools()
-          : linuxMissingPackages.isEmpty;
+          : linuxMissingBasePackages.isEmpty;
       emit(
         systemReady: systemReady,
         output: systemReady
-            ? _isLinux && _linuxClipboardCommand() == null
-                  ? '✓ required system tools · writable home · native clipboard N/A (headless)'
-                  : _linuxClipboardCommand() == null
-                  ? '✓ required system tools · writable home'
-                  : '✓ required system tools · writable home · ${_linuxClipboardCommand()}'
+            ? '✓ required system tools · writable home'
             : _isMacOS
             ? '✗ Apple developer tools · xcrun --find clang'
-            : '✗ missing Linux packages · ${linuxMissingPackages.join(', ')}',
+            : '✗ missing Linux base packages · ${linuxMissingBasePackages.join(', ')}',
+      );
+
+      final clipboardApplicable = _isLinux && _linuxClipboardCommand() != null;
+      var clipboardReady =
+          !clipboardApplicable || linuxMissingClipboardPackage == null;
+      emit(
+        step: EnvironmentStep.clipboard,
+        status: clipboardApplicable
+            ? clipboardReady
+                  ? EnvironmentStepStatus.ready
+                  : EnvironmentStepStatus.failed
+            : EnvironmentStepStatus.notApplicable,
+        message: clipboardApplicable
+            ? clipboardReady
+                  ? 'Native image clipboard is ready.'
+                  : '$linuxMissingClipboardPackage is required for native image paste.'
+            : _isLinux
+            ? 'Native image clipboard is not applicable on a headless Linux host.'
+            : null,
+        output: clipboardApplicable
+            ? clipboardReady
+                  ? '✓ native image clipboard · ${_linuxClipboardCommand()}'
+                  : '✗ native image clipboard · $linuxMissingClipboardPackage'
+            : _isLinux
+            ? '– native image clipboard N/A (headless)'
+            : null,
       );
 
       final homebrewReady = !_isMacOS || await _hasHomebrew();
@@ -473,8 +534,31 @@ class EnvironmentProvisioner {
       }
 
       if (!install) {
+        final linuxMissingPackages = <String>[
+          ...linuxMissingBasePackages,
+          ?linuxMissingClipboardPackage,
+        ];
+        if (completedTerminalSetup == EnvironmentTerminalSetup.linuxHost &&
+            (linuxMissingPackages.isNotEmpty || !tmuxBinaryReady)) {
+          emit(
+            message: 'The Linux host dependency install finished, but verification still found missing packages.',
+            phase: EnvironmentSetupPhase.failed,
+            failure: EnvironmentFailure(
+              step: !systemReady
+                  ? null
+                  : linuxMissingClipboardPackage != null
+                  ? EnvironmentStep.clipboard
+                  : EnvironmentStep.tmux,
+              title: 'Host dependency verification failed',
+              detail:
+                  'Still missing: ${[...linuxMissingPackages, if (!tmuxBinaryReady) 'tmux'].join(', ')}. Review the Terminal log, then retry when ready.',
+              command: await _linuxHostManualCommand(),
+            ),
+          );
+          return state;
+        }
         emit(
-          message: _isLinux && !systemReady
+          message: _isLinux && linuxMissingPackages.isNotEmpty
               ? 'Linux host packages required: ${linuxMissingPackages.join(', ')}.'
               : 'Review what Harness will install before continuing.',
           phase: EnvironmentSetupPhase.review,
@@ -482,10 +566,12 @@ class EnvironmentProvisioner {
         return state;
       }
 
-      // Strict dependency order: system tools -> tmux -> managed Node/Harness -> Grid.
-      if (_isLinux && (!systemReady || !tmuxBinaryReady)) {
+      // Strict dependency order: one host-package transaction (base tools,
+      // tmux and the active clipboard helper) -> managed Node/Harness -> Grid.
+      if (_isLinux && (!systemReady || !clipboardReady || !tmuxBinaryReady)) {
         var packages = <String>{
-          ...linuxMissingPackages,
+          ...linuxMissingBasePackages,
+          ?linuxMissingClipboardPackage,
           if (!tmuxBinaryReady) 'tmux',
         }.toList();
         if (!await _hasAptGet()) {
@@ -505,6 +591,12 @@ class EnvironmentProvisioner {
 
         ProcessResult? backgroundInstall;
         if (await _canInstallAptUnattended()) {
+          if (linuxMissingClipboardPackage != null) {
+            emit(
+              step: EnvironmentStep.clipboard,
+              status: EnvironmentStepStatus.running,
+            );
+          }
           emit(
             step: tmuxBinaryReady ? null : EnvironmentStep.tmux,
             status: tmuxBinaryReady ? null : EnvironmentStepStatus.running,
@@ -519,11 +611,22 @@ class EnvironmentProvisioner {
             emit(output: 'Background Linux package install failed: $error');
           }
 
-          linuxMissingPackages = await _missingLinuxHostPackages();
-          systemReady = linuxMissingPackages.isEmpty;
+          linuxMissingBasePackages = await _missingLinuxBasePackages();
+          linuxMissingClipboardPackage = await _missingLinuxClipboardPackage();
+          systemReady = linuxMissingBasePackages.isEmpty;
+          clipboardReady =
+              !clipboardApplicable || linuxMissingClipboardPackage == null;
           tmuxBinaryReady = await _hasTmux();
           tmuxReady = tmuxBinaryReady;
-          if (systemReady && tmuxReady) {
+          emit(
+            step: EnvironmentStep.clipboard,
+            status: clipboardApplicable
+                ? clipboardReady
+                      ? EnvironmentStepStatus.ready
+                      : EnvironmentStepStatus.failed
+                : EnvironmentStepStatus.notApplicable,
+          );
+          if (systemReady && clipboardReady && tmuxReady) {
             emit(
               step: EnvironmentStep.tmux,
               status: EnvironmentStepStatus.ready,
@@ -541,17 +644,28 @@ class EnvironmentProvisioner {
               );
             }
             packages = <String>{
-              ...linuxMissingPackages,
+              ...linuxMissingBasePackages,
+              ?linuxMissingClipboardPackage,
               if (!tmuxBinaryReady) 'tmux',
             }.toList();
           }
         }
 
-        if (!systemReady || !tmuxReady) {
-          final terminal = await _launchTmuxSetup(linuxPackages: packages);
+        if (!systemReady || !clipboardReady || !tmuxReady) {
+          final terminal = await _launchLinuxHostSetup(packages);
+          if (linuxMissingClipboardPackage != null) {
+            emit(
+              step: EnvironmentStep.clipboard,
+              status: EnvironmentStepStatus.needsTerminal,
+            );
+          }
+          if (!tmuxReady) {
+            emit(
+              step: EnvironmentStep.tmux,
+              status: EnvironmentStepStatus.needsTerminal,
+            );
+          }
           emit(
-            step: tmuxReady ? null : EnvironmentStep.tmux,
-            status: tmuxReady ? null : EnvironmentStepStatus.needsTerminal,
             message: 'Complete the visible Linux package prompts in Terminal. Harness never sees your password.',
             output: backgroundInstall == null
                 ? 'Terminal opened to install Linux host dependencies.'
@@ -671,18 +785,28 @@ class EnvironmentProvisioner {
         phase: EnvironmentSetupPhase.verifying,
       );
       if (_isLinux) {
-        final missing = await _missingLinuxHostPackages();
-        if (missing.isNotEmpty || !await _hasWritableHome()) {
+        final missingBase = await _missingLinuxBasePackages();
+        final missingClipboard = await _missingLinuxClipboardPackage();
+        final writableHome = await _hasWritableHome();
+        if (missingBase.isNotEmpty ||
+            missingClipboard != null ||
+            !writableHome) {
+          if (missingClipboard != null) {
+            emit(
+              step: EnvironmentStep.clipboard,
+              status: EnvironmentStepStatus.failed,
+            );
+          }
           emit(
             message:
                 'Linux system dependencies did not pass final verification.',
             phase: EnvironmentSetupPhase.failed,
-            systemReady: false,
+            systemReady: writableHome && missingBase.isEmpty,
             failure: EnvironmentFailure(
               title: 'Linux system verification failed',
-              detail: missing.isEmpty
+              detail: !writableHome
                   ? 'The home directory is not writable.'
-                  : 'Still missing packages: ${missing.join(', ')}',
+                  : 'Still missing packages: ${[...missingBase, ?missingClipboard].join(', ')}',
               command: await _linuxHostManualCommand(),
             ),
           );
@@ -738,6 +862,10 @@ class EnvironmentProvisioner {
   /// actually on it and names the command for whatever is missing. Windows packaging remains out
   /// of scope for this release.
   Future<void> _verifyWindows(EmitStep emit) async {
+    emit(
+      step: EnvironmentStep.clipboard,
+      status: EnvironmentStepStatus.notApplicable,
+    );
     emit(
       step: EnvironmentStep.harness,
       status: EnvironmentStepStatus.running,
@@ -847,11 +975,10 @@ class EnvironmentProvisioner {
     return writable.exitCode == 0;
   }
 
-  /// Packages the desktop needs before it can hand host setup to the CLI-only
-  /// installer. Clipboard selection intentionally matches osClipboard.ts:
-  /// Wayland wins when both display variables exist, X11 is the fallback, and
-  /// a headless machine has no native clipboard requirement to satisfy.
-  Future<List<String>> _missingLinuxHostPackages() async {
+  /// Base packages the desktop needs before it can hand host setup to the
+  /// CLI-only installer. Native clipboard support is reported separately so
+  /// the UI can explain it without creating a second install transaction.
+  Future<List<String>> _missingLinuxBasePackages() async {
     if (!_isLinux) return const [];
     const commandPackages = <String, String>{
       'sh': 'dash',
@@ -867,15 +994,30 @@ class EnvironmentProvisioner {
       final probe = await _shell('command -v ${entry.key} >/dev/null 2>&1');
       if (probe.exitCode != 0) missing.add(entry.value);
     }
+    return missing.toSet().toList();
+  }
+
+  /// Clipboard selection intentionally matches osClipboard.ts: Wayland wins
+  /// when both display variables exist, X11 is the fallback, and a headless
+  /// machine has no native clipboard requirement to satisfy.
+  Future<String?> _missingLinuxClipboardPackage() async {
+    if (!_isLinux) return null;
     final clipboardCommand = _linuxClipboardCommand();
     final clipboardPackage = _linuxClipboardPackage();
     if (clipboardCommand != null && clipboardPackage != null) {
       final probe = await _shell(
         'command -v $clipboardCommand >/dev/null 2>&1',
       );
-      if (probe.exitCode != 0) missing.add(clipboardPackage);
+      if (probe.exitCode != 0) return clipboardPackage;
     }
-    return missing.toSet().toList();
+    return null;
+  }
+
+  Future<List<String>> _missingLinuxHostPackages() async {
+    final packages = <String>{...await _missingLinuxBasePackages()};
+    final clipboard = await _missingLinuxClipboardPackage();
+    if (clipboard != null) packages.add(clipboard);
+    return packages.toList();
   }
 
   String? _linuxClipboardCommand() {
@@ -996,7 +1138,14 @@ fi''';
     }
   }
 
-  Future<({File log, File result})> _launchTmuxSetup({
+  Future<({File log, File result})> _launchLinuxHostSetup(
+    List<String> packages,
+  ) => _launchTerminalSetup(linuxPackages: packages);
+
+  Future<({File log, File result})> _launchTmuxSetup() =>
+      _launchTerminalSetup();
+
+  Future<({File log, File result})> _launchTerminalSetup({
     List<String> linuxPackages = const [],
   }) async {
     // Package-manager installs can ask for a password. Always hand them to a
@@ -1311,6 +1460,8 @@ fi
   }
 
   String _manualCommandFor(EnvironmentStep step) => switch (step) {
+    EnvironmentStep.clipboard =>
+      'sudo apt-get install -y ${_linuxClipboardPackage() ?? 'xclip or wl-clipboard'}',
     EnvironmentStep.tmux =>
       _isMacOS
           ? 'brew install tmux && tmux -V'
