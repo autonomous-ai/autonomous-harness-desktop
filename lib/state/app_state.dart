@@ -21,6 +21,8 @@ import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
 import '../widgets/engine_identity.dart' show allEngines;
+import '../core/harness_file_store.dart';
+import 'dial_status.dart';
 import 'pane_layout_store.dart';
 import 'terminal_pane.dart';
 import '../terminal/terminal_binary.dart';
@@ -380,6 +382,12 @@ class AppNotifier extends ChangeNotifier {
     PaneLayoutStore? paneLayoutStore,
     this.turnActivityTimeout = const Duration(seconds: 12),
   }) : _paneLayout = paneLayoutStore,
+       // Remembers "a dial has been seen here" on the same terms the pane
+       // layout is remembered: with a layout store there is a state file, and
+       // without one (the tests) nothing is written anywhere.
+       dial = DialState(
+         paneLayoutStore == null ? null : HarnessFileStore.shared,
+       ),
        session = authSession,
        _store = configStore,
        cliLogin = cliLogin ?? CliLogin(),
@@ -418,6 +426,11 @@ class AppNotifier extends ChangeNotifier {
   /// the developer's own ~/.harness state file. Production passes one; see
   /// [appStateProvider].
   final PaneLayoutStore? _paneLayout;
+
+  /// The dial on this desk, for the rail's device row. Fed by `dial_status`
+  /// frames from the local daemon; its own notifier, so the row rebuilds
+  /// without dragging the whole rail through a machine-list rebuild.
+  final DialState dial;
 
   TerminalPane? get focusedPane {
     final id = focusedPaneId;
@@ -1253,6 +1266,7 @@ class AppNotifier extends ChangeNotifier {
     // for as long as the slowest one takes, and would hand the first-run
     // auto-pick a window in which the grid still looks empty.
     await _restorePaneLayout();
+    await dial.restore();
     _ensurePool();
     try {
       await ensureCliDaemonReady();
@@ -3794,6 +3808,11 @@ class AppNotifier extends ChangeNotifier {
       // ── the dial, over the cable, forwarded by the local daemon ──────────────────────────────────
       // Local-only frames (backend.sendLocal in the harness CLI): they describe a hand at THIS desk, so
       // they never reach the cloud web audience, who may be sitting at another computer entirely.
+      case 'dial_status':
+        // The dial came, went, or started taking an update. Its own notifier —
+        // see [dial] — so nothing else in the window rebuilds for it.
+        dial.apply(DialStatus.fromJson(payload));
+        break;
       case 'dial_scroll':
         // Straight through, including the reports carrying no travel — the ends of a stroke are the point
         // of the message. The window does no arithmetic here; the terminal that owns the scrollback does.

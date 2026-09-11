@@ -339,6 +339,10 @@ class _Avatar extends StatelessWidget {
     grid.AppTheme.watch(context);
     final size = large ? 36.0 : 32.0;
     return Container(
+      // Keyed so the rows that stand on this pill's column can prove, in a
+      // test, that they do — the device row above it measures its mark
+      // against this centre.
+      key: const Key('account-avatar'),
       width: size,
       height: size,
       alignment: Alignment.center,

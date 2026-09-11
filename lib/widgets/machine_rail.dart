@@ -19,6 +19,7 @@ import '../state/app_state.dart';
 import 'agent_drag.dart';
 import 'rename_agent_dialog.dart';
 import 'account_footer.dart';
+import 'device_row.dart';
 import 'engine_identity.dart';
 import 'link_machine_dialog.dart';
 import 'new_agent_dialog.dart';
@@ -299,6 +300,10 @@ class _MachineRailState extends State<MachineRail> {
                         ),
                       ),
               ),
+              // The dial's row stands on the rail's floor, above the account. It is
+              // not a setting, it is a thing on the desk — present, absent, or on its
+              // way — and the one place someone without one is told where to get one.
+              DeviceRow(notifier: widget.notifier),
               AccountFooter(notifier: widget.notifier),
             ],
           ),
