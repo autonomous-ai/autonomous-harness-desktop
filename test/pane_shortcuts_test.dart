@@ -119,16 +119,31 @@ void main() {
     app.dispose();
   });
 
-  test('the edge of the grid is where it stops', () {
-    // No wrap: an arrow that jumps to the far side of the screen reads as a
-    // jump, not a step.
+  test('the edge of the grid is where it COMES ROUND', () {
+    // It used to stop, on the reasoning that an arrow jumping to the far side of
+    // the screen reads as a jump rather than a step. Reversed on the owner's
+    // call, and the argument against it turned out to be the stronger one: a key
+    // that steps in the middle of the grid and does NOTHING at its edge is a key
+    // people stop trusting, and the dead press is indistinguishable from the app
+    // having missed the keystroke.
+    //
+    // It wraps IN COLUMN, which is what keeps it from reading as a jump: the
+    // tile it lands on is the one directly above or below, as far as that goes.
     final app = withPanes(4);
     app.focusPaneVertically(-1);
-    expect(app.focusedPane?.agentId, 'a0', reason: 'nothing above the top row');
+    expect(
+      app.focusedPane?.agentId,
+      'a2',
+      reason: 'up from the top of a column comes back to its bottom',
+    );
 
     app.focusPaneByIndex(2);
     app.focusPaneVertically(1);
-    expect(app.focusedPane?.agentId, 'a2', reason: 'nothing below the bottom');
+    expect(
+      app.focusedPane?.agentId,
+      'a0',
+      reason: 'down from the bottom comes back to the top of the same column',
+    );
     app.dispose();
   });
 

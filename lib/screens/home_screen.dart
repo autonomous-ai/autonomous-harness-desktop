@@ -225,15 +225,15 @@ class _HomeScreenState extends State<HomeScreen> {
               // hjkl could not simply be aliased onto the old keys.
               ShortcutAction.focusPaneLeft: () =>
                   notifier.focusPaneHorizontally(-1),
-              ShortcutAction.focusPaneRight: () {
-                // Out of the rail first. ⌘l is "go right", and from inside the
-                // sidebar the thing on the right is the grid.
-                if (notifier.railFocused) {
-                  notifier.unfocusRail();
-                  return;
-                }
-                notifier.focusPaneHorizontally(1);
-              },
+              // BOTH directions go to the same place, and that is the fix.
+              //
+              // ⌘l used to be special-cased here — "if the rail has focus, leave
+              // it" — which returned before the ring in focusPaneHorizontally
+              // could run. So ⌘h came round and ⌘l stopped dead at the sidebar,
+              // and the asymmetry was invisible because the two keys looked
+              // symmetrical at the call site.
+              ShortcutAction.focusPaneRight: () =>
+                  notifier.focusPaneHorizontally(1),
               ShortcutAction.focusPaneAbove: () =>
                   notifier.focusPaneVertically(-1),
               ShortcutAction.focusPaneBelow: () =>

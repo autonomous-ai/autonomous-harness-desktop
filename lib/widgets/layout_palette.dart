@@ -17,19 +17,74 @@ import '../theme/app_theme.dart';
 /// above that the choice is the column count, with "Auto" — as many columns as
 /// the width carries at the forty-column floor — sitting among them as the
 /// measured answer rather than as the only one.
-/// Guards against a second ⌘S while the palette is already up. Without this,
-/// each press stacked another dialog route — and another 30%-black barrier —
-/// on top of the last, so holding or repeatedly pressing ⌘S read as the whole
-/// window fading to black rather than as "already open".
-bool _layoutPaletteOpen = false;
+/// Set while the palette is up, so a second ⌘S can be answered rather than
+/// stacking a route.
+///
+/// It used to be a bool and a bare return. That stopped the palette fading the
+/// window to black under a held key — each press laid another dialog and another
+/// 30% barrier over the last — but it left ⌘S meaning "open" once and nothing
+/// ever after, which is the one thing a person holding a key does not expect.
+///
+/// THE SAME KEY WALKS THE STRIP. ⌘S opens it, ⌘S again steps to the next shape,
+/// Enter takes it. That is how every cycling chord on this OS behaves, and it
+/// means the shape can be chosen without the hand leaving the chord it arrived
+/// on.
+void Function()? _layoutPaletteAdvance;
 
 Future<void> showLayoutPalette(BuildContext context, AppNotifier notifier) {
-  if (_layoutPaletteOpen) return Future<void>.value();
-  _layoutPaletteOpen = true;
+  final open = _layoutPaletteAdvance;
+  if (open != null) {
+    open();
+    return Future<void>.value();
+  }
   return showAppDialog<void>(
     context: context,
     builder: (context) => _LayoutPalette(notifier: notifier),
-  ).whenComplete(() => _layoutPaletteOpen = false);
+  ).whenComplete(() => _layoutPaletteAdvance = null);
+}
+
+/// The strip's geometry, in one place.
+///
+/// Both the [Wrap] that draws the shapes and the keys that walk them read these.
+/// They used to be literals in the build method alone, which is why the arrow
+/// keys could not tell a row from a column: nothing outside the layout knew how
+/// many shapes fitted on a line.
+/// Where [at] lands after one press, on a strip [n] long.
+///
+/// BOTH AXES WRAP. The strip is short and every shape is on screen, so running
+/// off one end and appearing at the other cannot be mistaken for a jump to
+/// somewhere unseen — and a key that dies at the edge is one people stop
+/// trusting, which is the same argument the window's own pane ring rests on.
+///
+/// Vertical keeps the COLUMN: down from the second shape lands under it, not
+/// at the start of the next line. A last row shorter than the others clamps,
+/// because there is no shape under that column to land on.
+int layoutPaletteMove(int at, int n, int dx, int dy, int perRow) {
+  if (n <= 1) return 0;
+  if (dx != 0) return (at + dx + n) % n;
+  final rows = (n / perRow).ceil();
+  if (rows <= 1) return at; // one line has no up and no down
+  final col = at % perRow;
+  final row = at ~/ perRow;
+  final target = ((row + dy + rows) % rows) * perRow + col;
+  return target >= n ? n - 1 : target;
+}
+
+class _Strip {
+  /// Wide enough that a diagram stays readable — see the note on the Wrap.
+  static const shape = 108.0;
+  static const gap = 10.0;
+  static const sidePadding = 14.0;
+
+  /// The dialog's own width, which changes with how many shapes there are.
+  static double width(int choices) => choices > 3 ? 500 : 420;
+
+  /// How many shapes sit on one line. The same arithmetic Wrap does.
+  static int perRow(int choices) {
+    final room = width(choices) - sidePadding * 2;
+    final fits = ((room + gap) / (shape + gap)).floor();
+    return fits.clamp(1, choices < 1 ? 1 : choices);
+  }
 }
 
 class _LayoutPalette extends StatefulWidget {
@@ -42,6 +97,52 @@ class _LayoutPalette extends StatefulWidget {
 }
 
 class _LayoutPaletteState extends State<_LayoutPalette> {
+  /// An EXPLICIT node, requested after the first frame.
+  ///
+  /// `autofocus: true` alone was not enough: it only takes the focus when the
+  /// enclosing scope has none to give, and by the time this is laid out the
+  /// route that opened it has already settled focus somewhere. The symptom was
+  /// precise — ⌘S opened the palette and cycled it, because that chord is a
+  /// global binding, while the arrow keys did nothing at all, because those are
+  /// read HERE and nothing here was listening.
+  final FocusNode _keys = FocusNode(debugLabel: 'layout-palette');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _keys.requestFocus();
+    });
+    // Registered here rather than by the opener, so the hook cannot outlive the
+    // widget it steps: a stale callback would move a cursor on a palette that
+    // is no longer on screen, and the next ⌘S would find the strip already
+    // walked.
+    _layoutPaletteAdvance = _advance;
+  }
+
+  @override
+  void dispose() {
+    if (_layoutPaletteAdvance == _advance) _layoutPaletteAdvance = null;
+    _keys.dispose();
+    super.dispose();
+  }
+
+  /// One step along the strip — what a SECOND ⌘S does.
+  ///
+  /// Wraps, unlike the arrow keys, and the difference is deliberate. An arrow is
+  /// a direction: running off the end of a strip you can see the ends of reads
+  /// as a mis-key. A repeated chord is a CYCLE — nobody holding ⌘S means "stop
+  /// at the last one", they mean "show me the next".
+  void _advance() {
+    final count = widget.notifier.panes.length;
+    final choices = PanePreset.forCount(count);
+    if (choices.isEmpty) return;
+    // presetFor is keyed on the PANE COUNT, not on how many shapes that count
+    // offers — the two are different numbers and only one of them is a key.
+    final at = _cursorIn(choices, widget.notifier.presetFor(count));
+    setState(() => _cursor = (at + 1) % choices.length);
+  }
+
   /// Which shape the arrow keys are resting on, which is NOT the same as the
   /// one in use: moving the cursor must not rearrange the grid under someone
   /// still looking at the choices. Applying is Enter, a digit, or a click.
@@ -78,6 +179,7 @@ class _LayoutPaletteState extends State<_LayoutPalette> {
         side: BorderSide(color: grid.AppGlass.hair),
       ),
       child: Focus(
+        focusNode: _keys,
         autofocus: true,
         onKeyEvent: (node, event) {
           // Repeats count: holding an arrow should walk the list, the way it
@@ -93,12 +195,17 @@ class _LayoutPaletteState extends State<_LayoutPalette> {
           }
 
           final at = _cursorIn(choices, current);
-          final step = _step(event.logicalKey);
-          if (step != null) {
-            // Clamped, not wrapped: the shapes are laid out as a strip on
-            // screen, and a cursor that leaps from the last to the first reads
-            // as a mis-key rather than as an answer.
-            setState(() => _cursor = (at + step).clamp(0, choices.length - 1));
+          final direction = _direction(event.logicalKey);
+          if (direction != null) {
+            setState(
+              () => _cursor = layoutPaletteMove(
+                at,
+                choices.length,
+                direction.$1,
+                direction.$2,
+                _Strip.perRow(choices.length),
+              ),
+            );
             return KeyEventResult.handled;
           }
           if (_isCommit(event.logicalKey)) {
@@ -147,17 +254,22 @@ class _LayoutPaletteState extends State<_LayoutPalette> {
                 )
               else ...[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                  padding: const EdgeInsets.fromLTRB(
+                    _Strip.sidePadding,
+                    0,
+                    _Strip.sidePadding,
+                    6,
+                  ),
                   // Wrapped, not a Row: a big grid offers five column counts,
                   // and five diagrams squeezed across one line are five things
                   // nobody can tell apart. 108px keeps a shape readable.
                   child: Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
+                    spacing: _Strip.gap,
+                    runSpacing: _Strip.gap,
                     children: [
                       for (var i = 0; i < choices.length; i++)
                         SizedBox(
-                          width: 108,
+                          width: _Strip.shape,
                           child: _ShapeButton(
                             preset: choices[i],
                             count: count,
@@ -201,9 +313,23 @@ class _LayoutPaletteState extends State<_LayoutPalette> {
   /// them: a vertical key that only moved between rows would do nothing on a
   /// single-row palette, and stepping by one is the only motion that means the
   /// same thing however the wrap happens to fall.
-  static int? _step(LogicalKeyboardKey key) => switch (key) {
-    LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowUp => -1,
-    LogicalKeyboardKey.arrowRight || LogicalKeyboardKey.arrowDown => 1,
+  /// Which way a key points, as (dx, dy).
+  ///
+  /// hjkl beside the arrows, unmodified, for the reason the window binds both: a
+  /// hand that reaches for one and a hand that reaches for the other are two
+  /// hands on the same keyboard. Bare letters are safe HERE and nowhere else in
+  /// this app — a dialog is not a pty, and no shell is waiting behind it.
+  ///
+  /// UP AND DOWN ARE VERTICAL. They used to be a second spelling of left and
+  /// right — every key stepped the list by one — on the reasoning that a
+  /// vertical key would do nothing on a single-row palette. What that actually
+  /// produced was `j` walking sideways, which is worse than a key that waits:
+  /// the motion did not match the arrow on the cap.
+  static (int, int)? _direction(LogicalKeyboardKey key) => switch (key) {
+    LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.keyH => (-1, 0),
+    LogicalKeyboardKey.arrowRight || LogicalKeyboardKey.keyL => (1, 0),
+    LogicalKeyboardKey.arrowUp || LogicalKeyboardKey.keyK => (0, -1),
+    LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.keyJ => (0, 1),
     _ => null,
   };
 

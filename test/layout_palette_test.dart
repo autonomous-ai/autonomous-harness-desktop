@@ -51,7 +51,9 @@ Future<AppNotifier> _open(
 }
 
 void main() {
-  testWidgets('picking a shape re-lays the grid there and then', (tester) async {
+  testWidgets('picking a shape re-lays the grid there and then', (
+    tester,
+  ) async {
     // The end-to-end the other tests here do NOT cover: they set the shape
     // before the grid is built, which proves the arithmetic and nothing about
     // the app. This one taps the picker with a grid on screen and measures what
@@ -179,11 +181,41 @@ void main() {
     final choices = PanePreset.forCount(6);
     expect(choices.first, PanePreset.auto);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    // RIGHT, not down. Down used to be a second spelling of "one along"; it
+    // moves a ROW now, which is what the arrow on the cap says.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     expect(notifier.presetFor(6), choices[1]);
     expect(notifier.presetFor(6)!.statedColumns, isNotNull);
+  });
+
+  testWidgets('down moves a ROW of the strip, not one along it', (
+    tester,
+  ) async {
+    // Six shapes wrap to four over two, so down from the first lands on the
+    // fifth — the one drawn underneath it. Reported from the desk: it used to
+    // walk sideways, which is worse than a key that waits.
+    final notifier = await _open(tester, panes: 6);
+    final choices = PanePreset.forCount(6);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(notifier.presetFor(6), choices[4]);
+  });
+
+  testWidgets('the strip comes round at both ends', (tester) async {
+    final notifier = await _open(tester, panes: 3);
+    final choices = PanePreset.forCount(3);
+
+    // Left from the first shape appears at the last.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(notifier.presetFor(3), choices.last);
   });
 }

@@ -87,6 +87,17 @@ class _MachineRailState extends State<MachineRail> {
     final notifier = widget.notifier;
     final key = event.logicalKey;
 
+    // BARE KEYS ONLY. `h` and `l` mean two different things two pixels apart:
+    // plain, they are the rail's own — close this machine, open this agent —
+    // and with ⌘ they are the window's ring, which seats the rail between the
+    // last tile and the first. Without this guard the rail swallows ⌘h and the
+    // ring has no way out of the sidebar.
+    if (HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+
     if (key == LogicalKeyboardKey.keyJ || key == LogicalKeyboardKey.arrowDown) {
       notifier.moveRailCursor(1);
       return KeyEventResult.handled;
