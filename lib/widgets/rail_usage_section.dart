@@ -206,10 +206,19 @@ class _UsageLine extends StatelessWidget {
           ),
           const SizedBox(width: 9),
           SizedBox(
-            width: 32,
+            // Wide enough for "100%", which is the widest this can ever be —
+            // and the one value it was NOT sized for. At 32 the figure wrapped
+            // onto a second line the moment an account was actually spent,
+            // which is precisely when someone is looking at it.
+            width: 38,
             child: Text(
               '${window.usedPercent.round()}%',
               textAlign: TextAlign.right,
+              // Belt as well as braces: a font the width was measured against
+              // is not the font every machine resolves, and a figure that wraps
+              // silently changes the height of the whole section.
+              maxLines: 1,
+              softWrap: false,
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: grid.AppFont.medium,
