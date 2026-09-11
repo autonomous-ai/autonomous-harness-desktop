@@ -1,57 +1,58 @@
-# Desktop terminal shell design QA
+# Environment Setup Missing-Only UI — Design QA
 
 ## Evidence
 
 - Source visual truth:
-  - `/var/folders/ct/7rts83zj1fbc0tsh73wpt4_80000gp/T/codex-clipboard-TGSZU4.png` — existing terminal desktop screen, 3586 × 2126 px.
-  - `/var/folders/ct/7rts83zj1fbc0tsh73wpt4_80000gp/T/codex-clipboard-1vyvm7.png` — account-menu placement reference, 590 × 636 px.
-- Implementation:
-  - `/tmp/autonomous-desktop-account-menu-final.png` — final account-menu state, 3600 × 2134 px.
-  - `/tmp/autonomous-desktop-settings-final.png` — final Settings state, 3600 × 2134 px.
-  - `/tmp/autonomous-desktop-resized.png` — responsive terminal state, 2600 × 1700 px.
-- Combined full-view comparison: `/tmp/autonomous-desktop-design-qa-comparison.png`.
-- Focused menu comparison: `/tmp/autonomous-desktop-menu-focused-qa.png`.
-- Viewport: 1800 × 1067 logical px at macOS 2× density; responsive check at 1300 × 850 logical px.
-- Normalization: source and implementation full views were scaled to the same 1800 × 1067 logical frame before the combined comparison. The account-menu source remained at native size for the focused comparison.
-- State: local Backend + local Harness CLI, encrypted terminal attached to an existing OpenCode tmux session; profile menu and Settings tested while the terminal remained visible.
+  - `/var/folders/ct/7rts83zj1fbc0tsh73wpt4_80000gp/T/codex-clipboard-2hdxTE.png`
+  - `/var/folders/ct/7rts83zj1fbc0tsh73wpt4_80000gp/T/codex-clipboard-rSVFNm.png`
+  - User-approved direction: Step 2 keeps only the readiness checklist; Step 3 lists only dependencies that are still missing.
+- Implementation screenshots:
+  - `/tmp/harness-env-step2-missing-only.png`
+  - `/tmp/harness-env-step3-missing-only.png`
+- Side-by-side comparisons:
+  - `/tmp/harness-env-step2-comparison.png`
+  - `/tmp/harness-env-step3-comparison.png`
+- Source pixels: `1712 x 1452` (Step 2), `1664 x 1398` (Step 3).
+- Implementation pixels and CSS viewport: `1600 x 1200`, device pixel ratio `1.0`.
+- Comparison normalization: both sides scaled to `800px` width and top-aligned on a `800 x 700` canvas.
+- State: macOS dark theme; system tools, Harness CLI, and Grid CLI ready; Homebrew and tmux missing.
 
-## Full-view comparison
+## Findings
 
-- Information architecture matches the requested composition: global terminal header, fixed Machines → Agents sidebar, uninterrupted terminal pane, and account controls anchored at the bottom-left.
-- The former top-right Settings and Logout actions are gone; Reload remains in the global header.
-- The 252–300 px sidebar keeps the terminal dominant at both checked window sizes. Machine scrolling and the account footer occupy separate layout regions.
-- Opening the profile menu and Settings dims or overlays the shell without replacing the terminal session. The active engine and `CONTROLLING` state remain visible.
+- No actionable P0, P1, or P2 findings.
+- Step 2 preserves the existing hierarchy, checklist grouping, status colors, sidebar, and footer while removing the redundant numbered installation plan.
+- Step 3 preserves the existing mode selector and warning treatment while reducing the install plan to the two missing dependencies. Ready Apple tools, Harness CLI, and Grid CLI are not shown.
+- Automatic and Manual modes derive their rows and commands from the same missing-item model, avoiding mismatched instructions.
 
-## Focused-region comparison
+## Required Fidelity Surfaces
 
-- The focused comparison was required because account-menu hierarchy and anchoring are too small to judge from the full view.
-- The implementation preserves the reference relationship: account row fixed at the bottom, popover opens upward, identity appears first, Settings is a primary row, version/environment is secondary, and disconnect/sign-out is separated at the bottom.
-- Dark monospace styling is an intentional adaptation of the light reference so the menu belongs to the terminal shell.
+- Fonts and typography: existing application text styles, weights, line heights, wrapping, and hierarchy are preserved. The Flutter golden-test renderer uses block glyphs in the captured artifact, so textual correctness is additionally covered by widget assertions.
+- Spacing and layout rhythm: card width, padding, row rhythm, sidebar proportions, footer position, radii, and borders remain aligned with the existing setup flow. Removing redundant content creates the intended shorter Step 2 and Step 3 layouts without overflow.
+- Colors and visual tokens: existing dark surfaces, blue accent, semantic green/red states, amber terminal notice, borders, and muted text tokens are reused.
+- Image quality and asset fidelity: the screen contains no raster illustration or product-image assets; existing Material icons remain unchanged.
+- Copy and content: Step 2 now says ready items stay untouched. Step 3 states the exact missing count, shows only missing items, and treats final verification as a short hint instead of an install step.
 
-## Required fidelity surfaces
+## Focused Comparison
 
-- Fonts and typography: Menlo is used across shell, machine tree, menu, and Settings; compact weights and labels remain legible at 2× density without clipping.
-- Spacing and layout rhythm: 48 px global header, compact tree rows, 66 px account footer, small radii, and 1 px borders produce consistent terminal density. No persistent control is hidden at 1300 × 850.
-- Colors and tokens: shared dark palette maps shell, sidebar, surfaces, borders, muted text, cyan accent, and green connection state consistently.
-- Image quality and assets: the target contains no product raster imagery. Standard Material icons are used for terminal, Settings, account actions, status, and search; the avatar is a normal account-initial component.
-- Copy and content: only implemented actions are shown. Invite, feedback, and update controls were deliberately omitted. Local manual mode uses `Local`, while production sessions use the authenticated email and selected environment.
+No additional crop was needed: the complete checklist, missing-only plan, mode selector, warning, verification hint, and footer CTA are all visible and distinguishable in the full-view comparisons. Widget tests verify exact labels and command visibility where golden-test font rasterization is not readable.
 
-## Comparison history
+## Comparison History
 
-1. Initial pass found one P2 consistency issue: local footer said `LOCAL SESSION`, while the menu version row and Settings environment still said `Production`.
-2. Fixed both surfaces to render `Local`/`LOCAL` whenever the guarded local-manual fixture is active.
-3. Post-fix evidence in `autonomous-desktop-account-menu-final.png` and `autonomous-desktop-settings-final.png` confirms the mismatch is gone. No actionable P0/P1/P2 differences remain.
+- Initial source finding: Step 2 repeated every dependency in a numbered plan after already showing the complete readiness checklist; Step 3 repeated ready dependencies and their commands.
+- Fix: removed the Step 2 plan, introduced readiness metadata for Homebrew/tmux/Linux packages, and generated Automatic/Manual Step 3 content only from missing dependencies.
+- Post-fix evidence: Step 2 ends after the checklist and notice; Step 3 contains only Homebrew and tmux for the captured state. No actionable visual mismatch remains.
 
-## Interaction and runtime checks
+## Implementation Checklist
 
-- Opened and closed the account menu.
-- Opened Settings from the menu and confirmed the Backend URL and environment state.
-- Resized the native window from 1800 × 1067 to 1300 × 850 and restored it.
-- Confirmed the same terminal session stayed rendered and controlling through menu, dialog, and resize states.
-- Flutter runtime log showed a successful macOS build and no UI exception during these checks.
+- [x] Remove redundant Step 2 numbered plan.
+- [x] Show only missing dependencies in Automatic mode.
+- [x] Show only missing commands in Manual mode.
+- [x] Hide the admin-terminal notice when no missing item needs Terminal.
+- [x] Keep final verification as a non-numbered hint.
+- [x] Verify missing-only behavior with widget tests.
 
-## Follow-up polish
+## Follow-up Polish
 
-- P3: production can use `avatarUrl` later if the API starts returning a non-null image; the initials avatar is intentional for the current response.
+- None required for this scope.
 
 final result: passed

@@ -16,8 +16,9 @@ const int _linuxClockSyncFailureExitCode = 31;
 const int _linuxAptUpdateFailureExitCode = 32;
 const int _linuxAptInstallFailureExitCode = 33;
 const String _linuxClockRepairCommand =
-    'sudo timedatectl set-ntp true && '
-    'sudo systemctl restart systemd-timesyncd';
+    'if command -v chronyc >/dev/null 2>&1; then '
+    'sudo chronyc makestep; else sudo timedatectl set-ntp true && '
+    'sudo systemctl restart systemd-timesyncd; fi';
 
 enum EnvironmentStep {
   clipboard,
@@ -89,6 +90,9 @@ class EnvironmentReadiness {
   final String? terminalResultPath;
   final EnvironmentTerminalSetup? terminalSetup;
   final bool systemReady;
+  final bool? homebrewReady;
+  final bool? tmuxBinaryReady;
+  final List<String> missingLinuxPackages;
 
   const EnvironmentReadiness({
     required this.steps,
@@ -101,6 +105,9 @@ class EnvironmentReadiness {
     this.terminalResultPath,
     this.terminalSetup,
     this.systemReady = false,
+    this.homebrewReady,
+    this.tmuxBinaryReady,
+    this.missingLinuxPackages = const [],
   });
 
   factory EnvironmentReadiness.initial() => EnvironmentReadiness(
@@ -135,6 +142,9 @@ class EnvironmentReadiness {
     String? terminalResultPath,
     EnvironmentTerminalSetup? terminalSetup,
     bool? systemReady,
+    bool? homebrewReady,
+    bool? tmuxBinaryReady,
+    List<String>? missingLinuxPackages,
     bool clearFailure = false,
     bool clearTerminalHandoff = false,
   }) => EnvironmentReadiness(
@@ -154,6 +164,9 @@ class EnvironmentReadiness {
         ? null
         : terminalSetup ?? this.terminalSetup,
     systemReady: systemReady ?? this.systemReady,
+    homebrewReady: homebrewReady ?? this.homebrewReady,
+    tmuxBinaryReady: tmuxBinaryReady ?? this.tmuxBinaryReady,
+    missingLinuxPackages: missingLinuxPackages ?? this.missingLinuxPackages,
   );
 }
 
@@ -306,6 +319,9 @@ class EnvironmentProvisioner {
       String? terminalResultPath,
       EnvironmentTerminalSetup? terminalSetup,
       bool? systemReady,
+      bool? homebrewReady,
+      bool? tmuxBinaryReady,
+      List<String>? missingLinuxPackages,
     }) {
       final next = Map<EnvironmentStep, EnvironmentStepStatus>.from(
         state.steps,
@@ -330,6 +346,10 @@ class EnvironmentProvisioner {
         terminalResultPath: terminalResultPath ?? state.terminalResultPath,
         terminalSetup: terminalSetup ?? state.terminalSetup,
         systemReady: systemReady ?? state.systemReady,
+        homebrewReady: homebrewReady ?? state.homebrewReady,
+        tmuxBinaryReady: tmuxBinaryReady ?? state.tmuxBinaryReady,
+        missingLinuxPackages:
+            missingLinuxPackages ?? state.missingLinuxPackages,
       );
       onProgress(state);
     }
@@ -350,13 +370,21 @@ class EnvironmentProvisioner {
       }
     }
     final previousTerminalResult = state.terminalResultPath;
+    var terminalResultPending = false;
     if (previousTerminalResult != null) {
       if (!await File(previousTerminalResult).exists()) {
+        terminalResultPending = true;
+        // `terminal.exit` is a handoff hint, not the source of truth. Some
+        // Linux terminal emulators keep the launched shell/window alive after
+        // apt has already finished, and an interrupted EXIT trap can omit the
+        // file entirely. Continue into the read-only command probes below so
+        // the 5-second poll (and the user's Recheck button) can observe that
+        // the host is actually ready instead of waiting forever for a file a
+        // cold app launch does not need either.
         emit(
           message: state.message ?? 'Complete the visible prompts in Terminal.',
           phase: EnvironmentSetupPhase.waitingForTerminal,
         );
-        return state;
       }
       try {
         final exitCode = int.tryParse(
@@ -423,7 +451,8 @@ class EnvironmentProvisioner {
         }
         if (exitCode == 0) completedTerminalSetup = state.terminalSetup;
       } on FileSystemException {
-        // Still running: the result file is written by the terminal script's EXIT trap.
+        // The result can disappear between exists() and readAsString(). The
+        // live dependency probes below remain the authoritative fallback.
       }
     }
     onProgress(state);
@@ -472,6 +501,12 @@ class EnvironmentProvisioner {
           : linuxMissingBasePackages.isEmpty;
       emit(
         systemReady: systemReady,
+        missingLinuxPackages: _isLinux
+            ? <String>[
+                ...linuxMissingBasePackages,
+                ?linuxMissingClipboardPackage,
+              ]
+            : const [],
         output: systemReady
             ? '✓ required system tools · writable home'
             : _isMacOS
@@ -528,6 +563,8 @@ class EnvironmentProvisioner {
             : _isMacOS && !homebrewReady
             ? '✗ Homebrew · brew --version'
             : '✗ tmux --version',
+        homebrewReady: _isMacOS ? homebrewReady : null,
+        tmuxBinaryReady: tmuxBinaryReady,
       );
 
       final harnessReady = await _hasHarness();
@@ -557,6 +594,15 @@ class EnvironmentProvisioner {
           ...linuxMissingBasePackages,
           ?linuxMissingClipboardPackage,
         ];
+        if (terminalResultPending &&
+            (!systemReady || !clipboardReady || !tmuxReady)) {
+          emit(
+            message:
+                state.message ?? 'Complete the visible prompts in Terminal.',
+            phase: EnvironmentSetupPhase.waitingForTerminal,
+          );
+          return state;
+        }
         if (completedTerminalSetup == EnvironmentTerminalSetup.linuxHost &&
             (linuxMissingPackages.isNotEmpty || !tmuxBinaryReady)) {
           emit(
@@ -650,6 +696,11 @@ class EnvironmentProvisioner {
                       ? EnvironmentStepStatus.ready
                       : EnvironmentStepStatus.failed
                 : EnvironmentStepStatus.notApplicable,
+            missingLinuxPackages: <String>[
+              ...linuxMissingBasePackages,
+              ?linuxMissingClipboardPackage,
+            ],
+            tmuxBinaryReady: tmuxBinaryReady,
           );
           final classifiedBackgroundFailure = backgroundInstall == null
               ? null
@@ -691,6 +742,8 @@ class EnvironmentProvisioner {
               message: 'Linux system packages and tmux are ready.',
               output: '✓ Linux host dependencies installed and verified',
               systemReady: true,
+              tmuxBinaryReady: true,
+              missingLinuxPackages: const [],
             );
           } else {
             if (backgroundInstall != null) {
@@ -760,6 +813,8 @@ class EnvironmentProvisioner {
             status: EnvironmentStepStatus.ready,
             message: 'Homebrew and tmux are ready.',
             output: '✓ tmux installed via Homebrew',
+            homebrewReady: true,
+            tmuxBinaryReady: true,
           );
         } else {
           if (installResult != null) {
@@ -1110,8 +1165,31 @@ apt_as_root() {
   run_as_root env DEBIAN_FRONTEND=noninteractive apt-get "\$@"
 }
 repair_system_clock() {
+  if command -v chronyc >/dev/null 2>&1; then
+    echo 'Repository metadata is ahead of this computer. Enabling automatic time synchronization with chrony…'
+    run_as_root chronyc online >/dev/null 2>&1 || true
+    run_as_root chronyc burst 4/4 >/dev/null 2>&1 || true
+    clock_attempt=0
+    while :; do
+      chrony_tracking="\$(chronyc tracking 2>/dev/null || true)"
+      if printf '%s\n' "\$chrony_tracking" | grep -Eq 'Leap status[[:space:]]*:[[:space:]]*Normal'; then
+        if run_as_root chronyc makestep; then
+          echo 'System clock stepped with chrony.'
+          return 0
+        fi
+        echo 'chrony has a synchronized source but could not step the system clock.' >&2
+        break
+      fi
+      clock_attempt=\$((clock_attempt + 1))
+      if [ "\$clock_attempt" -ge 15 ]; then
+        echo 'chrony did not obtain a synchronized source within 30 seconds.' >&2
+        break
+      fi
+      sleep 2
+    done
+  fi
   if ! command -v timedatectl >/dev/null 2>&1; then
-    echo 'System clock is behind repository metadata, but timedatectl is unavailable.' >&2
+    echo 'System clock is behind repository metadata, but no usable time synchronization service was found.' >&2
     return $_linuxClockSyncFailureExitCode
   fi
   echo 'Repository metadata is ahead of this computer. Enabling automatic time synchronization…'
@@ -1345,7 +1423,9 @@ if ! command -v brew >/dev/null 2>&1; then
   /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 fi
 eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
-brew install tmux
+if ! command -v tmux >/dev/null 2>&1; then
+  brew install tmux
+fi
 echo 'tmux is ready. Return to Harness.'
 ''', flush: true);
       await _run('/bin/chmod', ['700', script.path]);
@@ -1391,9 +1471,7 @@ exec > >(tee -a "\$LOG_FILE") 2>&1
 finish() {
   status=\$?
   printf '%s\\n' "\$status" > "\$RESULT_FILE"
-  if [ "\$status" -eq 0 ]; then
-    echo 'Linux host dependencies are ready. Return to Harness and click Retry.'
-  else
+  if [ "\$status" -ne 0 ]; then
     echo
     echo 'Linux package installation failed. Review the error above, then try again.'
     read -r -p 'Press Enter to close this window…' || true
@@ -1407,6 +1485,8 @@ if command -v apt-get >/dev/null 2>&1; then
   $aptInstallCommand
   $verification
   echo 'Installed packages: $packages'
+  echo 'Linux host dependencies are ready. This window will close automatically in 5 seconds.'
+  sleep 5
 else
   echo 'Automatic Linux package installation only supports apt-based distributions (Ubuntu/Debian).'
   echo 'Install these packages with your distribution package manager: $packages'

@@ -144,6 +144,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (_) async => terminalLaunches++,
         run: runner(tmuxPresent: () => false, calls: calls),
       );
@@ -166,6 +167,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         developerToolsPresent: false,
@@ -195,6 +197,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         developerToolsPresent: false,
@@ -211,6 +214,8 @@ void main() {
 
     expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
     expect(readiness.systemReady, isFalse);
+    expect(readiness.homebrewReady, isTrue);
+    expect(readiness.tmuxBinaryReady, isFalse);
     expect(terminalScript, isNotNull);
     expect(calls.where((line) => line.contains('install.sh')), isEmpty);
     final script = await File(terminalScript!).readAsString();
@@ -223,10 +228,13 @@ void main() {
     );
     expect(script, contains('xcode-select --install'));
     expect(script, contains('did not become ready within 10 minutes'));
-    expect(
-      (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
-      0,
-    );
+    expect(script, contains('if ! command -v tmux'));
+    if (File('/bin/zsh').existsSync()) {
+      expect(
+        (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
+        0,
+      );
+    }
   });
 
   test(
@@ -239,6 +247,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (_) async => terminalLaunches++,
         run: runner(
           tmuxPresent: () => tmuxPresent,
@@ -254,6 +263,8 @@ void main() {
       );
 
       expect(readiness.isReady, isTrue);
+      expect(readiness.homebrewReady, isTrue);
+      expect(readiness.tmuxBinaryReady, isTrue);
       expect(terminalLaunches, 0);
       expect(
         calls.where((line) => line.contains('brew install tmux')),
@@ -270,6 +281,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         tmuxPresent: () => false,
@@ -302,6 +314,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         openTerminal: (path) async => terminalScript = path,
         run: runner(
           homebrewPresent: () => false,
@@ -317,6 +330,8 @@ void main() {
       );
 
       expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(readiness.homebrewReady, isFalse);
+      expect(readiness.tmuxBinaryReady, isFalse);
       expect(terminalScript, isNotNull);
       expect(
         calls.where((line) => line.contains('brew install tmux')),
@@ -331,6 +346,7 @@ void main() {
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
+      isLinux: false,
       run: runner(
         tmuxPresent: () => true,
         installHarness: createManagedHarness,
@@ -423,8 +439,14 @@ void main() {
       final script = await File(terminalScript!).readAsString();
       expect(script, contains('apt_as_root install -y xclip'));
       expect(script, isNot(contains('apt_as_root install -y tmux')));
+      expect(script, contains('chronyc tracking'));
+      expect(script, contains('chronyc makestep'));
       expect(script, contains('timedatectl set-ntp true'));
       expect(script, contains('NTPSynchronized'));
+      expect(
+        script.indexOf('chronyc makestep'),
+        lessThan(script.indexOf('timedatectl set-ntp true')),
+      );
       expect(script, isNot(contains('apt_as_root update || true')));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
@@ -530,6 +552,7 @@ void main() {
 
     expect(readiness.phase, EnvironmentSetupPhase.failed);
     expect(readiness.failure?.title, contains('clock'));
+    expect(readiness.failure?.command, contains('chronyc makestep'));
     expect(readiness.failure?.command, contains('timedatectl set-ntp true'));
     expect(terminalLaunches, 0);
   });
@@ -688,6 +711,49 @@ void main() {
     expect(polled.terminalSetup, EnvironmentTerminalSetup.linuxHost);
   });
 
+  test(
+    'a Terminal poll trusts live Linux probes when terminal.exit is absent',
+    () async {
+      await createManagedHarness();
+      var launches = 0;
+      var tmuxPresent = false;
+      var xclipPresent = false;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        platformEnvironment: const {'DISPLAY': ':0'},
+        openTerminal: (_) async => launches++,
+        run: runner(
+          tmuxPresent: () => tmuxPresent,
+          xclipPresent: () => xclipPresent,
+        ),
+      );
+      final waiting = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+      expect(await File(waiting.terminalResultPath!).exists(), isFalse);
+
+      // The visible terminal completed the actual installation, but its EXIT
+      // handoff file was never produced (for example because the terminal
+      // profile keeps the launched command alive).
+      tmuxPresent = true;
+      xclipPresent = true;
+      final rechecked = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: waiting,
+        install: false,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(launches, 1);
+      expect(rechecked.isReady, isTrue);
+      expect(rechecked.phase, EnvironmentSetupPhase.ready);
+    },
+  );
+
   test('a completed host transaction that still misses clipboard fails without reopening Terminal', () async {
     await createManagedHarness();
     var launches = 0;
@@ -755,6 +821,11 @@ void main() {
       );
       final script = await File(terminalScript!).readAsString();
       expect(script, contains('apt_as_root install -y xclip tmux'));
+      expect(
+        script,
+        contains('This window will close automatically in 5 seconds.'),
+      );
+      expect(script, contains('sleep 5'));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
         0,
@@ -874,6 +945,7 @@ void main() {
 
       expect(failed.phase, EnvironmentSetupPhase.failed);
       expect(failed.failure?.title, contains('clock'));
+      expect(failed.failure?.command, contains('chronyc makestep'));
       expect(failed.failure?.command, contains('timedatectl set-ntp true'));
       expect(failed.output.join('\n'), contains('is not valid yet'));
       expect(launches, 1);
@@ -925,6 +997,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
+        isLinux: false,
         run: runner(tmuxPresent: () => true, calls: calls),
       );
 

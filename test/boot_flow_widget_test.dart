@@ -615,6 +615,8 @@ void main() {
     expect(find.text('Here is exactly what is required'), findsOneWidget);
     expect(find.text('HOST DEPENDENCIES'), findsOneWidget);
     expect(find.text('HARNESS COMPONENTS'), findsOneWidget);
+    expect(find.text('Final verification'), findsNothing);
+    expect(find.text('Apple developer tools'), findsNothing);
     await tester.tap(find.text('Continue'));
     await tester.pump();
 
@@ -626,6 +628,80 @@ void main() {
 
     expect(find.textContaining('/bin/sh -s -- --desktop'), findsOneWidget);
     expect(find.text('I ran these · Recheck'), findsOneWidget);
+  });
+
+  testWidgets('install plan and manual commands show only missing tools', (
+    tester,
+  ) async {
+    final app = makeNotifier(AppStatus.preparingEnvironment);
+    app.environmentReadiness = const EnvironmentReadiness(
+      steps: {
+        EnvironmentStep.clipboard: EnvironmentStepStatus.notApplicable,
+        EnvironmentStep.harness: EnvironmentStepStatus.ready,
+        EnvironmentStep.tmux: EnvironmentStepStatus.failed,
+      },
+      phase: EnvironmentSetupPhase.chooseMethod,
+      mode: EnvironmentSetupMode.automatic,
+      systemReady: true,
+      homebrewReady: false,
+      tmuxBinaryReady: false,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Homebrew'), findsOneWidget);
+    expect(find.text('tmux'), findsOneWidget);
+    expect(find.text('Managed Node 20+ & Harness CLI'), findsNothing);
+    expect(find.text('Install 2 tools'), findsOneWidget);
+    expect(find.text('Admin prompts stay in Terminal'), findsOneWidget);
+
+    await tester.tap(find.text('Manual'));
+    await tester.pump();
+
+    expect(find.text('1 · Homebrew'), findsOneWidget);
+    expect(find.text('2 · tmux'), findsOneWidget);
+    expect(
+      find.textContaining('Homebrew/install/HEAD/install.sh'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('brew install tmux'), findsOneWidget);
+    expect(find.textContaining('cdn.autonomous.ai'), findsNothing);
+  });
+
+  testWidgets('CLI-only install plan does not warn about admin prompts', (
+    tester,
+  ) async {
+    final app = makeNotifier(AppStatus.preparingEnvironment);
+    app.environmentReadiness = const EnvironmentReadiness(
+      steps: {
+        EnvironmentStep.clipboard: EnvironmentStepStatus.notApplicable,
+        EnvironmentStep.harness: EnvironmentStepStatus.failed,
+        EnvironmentStep.tmux: EnvironmentStepStatus.ready,
+      },
+      phase: EnvironmentSetupPhase.chooseMethod,
+      mode: EnvironmentSetupMode.automatic,
+      systemReady: true,
+      homebrewReady: true,
+      tmuxBinaryReady: true,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Managed Node 20+ & Harness CLI'), findsOneWidget);
+    expect(find.text('Homebrew'), findsNothing);
+    expect(find.text('tmux'), findsNothing);
+    expect(find.text('Install 1 tool'), findsOneWidget);
+    expect(find.text('Admin prompts stay in Terminal'), findsNothing);
   });
 
   testWidgets('review marks unusable Apple developer tools as missing', (

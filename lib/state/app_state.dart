@@ -1134,6 +1134,7 @@ class AppNotifier extends ChangeNotifier {
       if (!result.isReady &&
           mode == EnvironmentSetupMode.automatic &&
           result.phase != EnvironmentSetupPhase.waitingForTerminal &&
+          result.systemReady &&
           result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready &&
           (result.steps[EnvironmentStep.clipboard] ==
                   EnvironmentStepStatus.ready ||
