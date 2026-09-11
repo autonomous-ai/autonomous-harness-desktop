@@ -349,9 +349,16 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
         Navigator.of(context).pop(choice);
         return KeyEventResult.handled;
     }
-    // Escape included, deliberately: the dialog route already dismisses on it,
-    // and a second handler here would be a second thing to keep in step with
-    // the cap the title bar draws.
+    // Escape included, deliberately: `showAppDialog` dismisses on it for every
+    // dialog in the app, and a second handler here would be a second thing to
+    // keep in step with the cap the title bar draws.
+    //
+    // ⚠️ That was not always true. The route is built `barrierDismissible:
+    // false` — the barrier is a widget, not the route's own — and Flutter
+    // wires Escape off that same flag, so for a while nothing dismissed on it
+    // and this comment was describing a handler that did not exist. It is
+    // `_DismissOnEscape` in `app_dialog.dart` now; if Escape stops working,
+    // look there rather than adding a case to this switch.
     return KeyEventResult.ignored;
   }
 

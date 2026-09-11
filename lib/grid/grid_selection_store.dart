@@ -35,7 +35,52 @@ import 'grid_surface.dart';
 /// providers. Every switch being off IS this state there. The sidebar pill
 /// keeps the row — it is a picker, not a roster, and "use nothing" is a real
 /// thing to pick from it.
+///
+/// ⚠️ **Nothing prints this directly any more — read [thisComputerLabel].**
+/// The surfaces name the machine itself (`MacBook-Pro.local`) so the label
+/// matches the row the sidebar shows for it; this is what they fall back to
+/// before a name is known, and what the tests pin. It stays `const` for that
+/// reason, and because a name can only be had at runtime.
 const String kNoGridTargetLabel = 'This computer';
+
+/// This computer's own name, once something has resolved it — what every
+/// surface prints in place of [kNoGridTargetLabel].
+///
+/// ⚠️ **Why a mutable global rather than a parameter.** The label is reached
+/// from pure, `const`-heavy code — `gridTargetMenuOptions`, `ModelChoice.label`,
+/// `agentModelLabel`, the picker's own search — none of which has a
+/// `BuildContext` or an `AppNotifier` to ask, and several of which are `const`
+/// constructors that a runtime string cannot be threaded through without
+/// turning the whole layer non-const. The name is one immutable fact about the
+/// machine the process is running on, so a single slot set once at startup is
+/// honest here in a way it would not be for anything a user can change.
+///
+/// Empty until [resolveThisComputerLabel] runs, and [thisComputerLabel] falls
+/// back to the constant meanwhile — so a frame drawn before startup finishes
+/// reads exactly as it always did rather than blank.
+String _thisComputerName = '';
+
+/// What to call this computer on screen: its own name, or [kNoGridTargetLabel]
+/// until one is known.
+String get thisComputerLabel =>
+    _thisComputerName.isEmpty ? kNoGridTargetLabel : _thisComputerName;
+
+/// Records this machine's name for [thisComputerLabel].
+///
+/// Called at startup with the OS hostname, and again by `AppNotifier` once the
+/// machine list lands — the backend's `displayName` is what the sidebar prints,
+/// and the two must not disagree. A blank or whitespace-only name is ignored
+/// rather than stored, so a bad answer leaves the previous good one standing.
+void resolveThisComputerLabel(String? name) {
+  final trimmed = name?.trim() ?? '';
+  if (trimmed.isEmpty) return;
+  _thisComputerName = trimmed;
+}
+
+/// Forgets the resolved name. Tests only — the label is process-wide, so a test
+/// that set it would otherwise leak into every test after it.
+@visibleForTesting
+void resetThisComputerLabel() => _thisComputerName = '';
 
 /// The line under [kNoGridTargetLabel] in the model picker, naming the kinds of
 /// credential that label deliberately does not.
@@ -75,7 +120,7 @@ class GridSelection {
   /// What to print for this selection WHATEVER it is — a grid's name, or the
   /// label that stands for having picked none. [label] answers only half of
   /// that, and every caller was completing it with the same ternary.
-  String get targetLabel => hasGrid ? label : kNoGridTargetLabel;
+  String get targetLabel => hasGrid ? label : thisComputerLabel;
 
   @override
   bool operator ==(Object other) =>

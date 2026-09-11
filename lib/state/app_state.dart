@@ -17,7 +17,9 @@ import '../core/engine_availability.dart';
 import '../core/models.dart';
 import '../core/retry.dart';
 import '../grid/grid_agent_override.dart';
+import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
+import '../share/node_identity.dart';
 import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
@@ -1447,6 +1449,12 @@ class AppNotifier extends ChangeNotifier {
         unawaited(_applyNodeStatus(state, reportedOnline));
       }
     }
+    // Now that the list has landed, the local machine has the name the sidebar
+    // prints — better than the OS hostname `loadPersistedSettings` seeded this
+    // with, because it is the name the user sees everywhere else. Ignored if it
+    // resolves to nothing, so a machine list without a local row leaves the
+    // seeded name standing rather than reverting to "This computer".
+    resolveThisComputerLabel(thisMachineName);
     _autoConnectAndLoadMachines();
     notifyListeners();
   }
@@ -2414,6 +2422,24 @@ class AppNotifier extends ChangeNotifier {
       for (final machine in remotes) _readMachineUsage(machine),
     ]);
     return [for (final answer in answers) ?answer];
+  }
+
+  /// What to call THIS computer wherever a usage figure has to say whose it is.
+  ///
+  /// The same `displayName` the sidebar prints and `_readMachineUsage` labels
+  /// every remote machine with, so a panel listing one local and one remote
+  /// account names them in one vocabulary rather than setting a hostname
+  /// beside the words "this computer".
+  ///
+  /// Falls back to the OS hostname when the local machine has not been fetched
+  /// yet — the rail can open before `refreshMachines` lands — and to null when
+  /// even that is empty, which the caller renders by dropping the caption
+  /// rather than printing a blank one.
+  String? get thisMachineName {
+    for (final state in machineStates.values) {
+      if (state.isLocalMachine) return state.machine.displayName;
+    }
+    return localHostnameOrNull();
   }
 
   Future<MachineUsage?> _readMachineUsage(MachineState machine) async {

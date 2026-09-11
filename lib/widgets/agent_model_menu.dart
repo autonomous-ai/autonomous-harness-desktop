@@ -66,7 +66,7 @@ const String kModelPillLabel = 'Model';
 /// as two different models. It cannot BE that method: what the CLI reports for a
 /// running agent is a relay URL and a model, with no provider name in it.
 String agentModelLabel(AgentGrid? grid) {
-  if (grid == null) return kNoGridTargetLabel;
+  if (grid == null) return thisComputerLabel;
   final model = grid.model;
   return model == null ? kAutoModelLabel : withoutGridRunPrefix(model);
 }

@@ -16,6 +16,7 @@ library;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// How far the app blurs what sits behind a dialog.
 ///
@@ -93,24 +94,85 @@ class _AppDialogVeil extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Stack(
-    children: [
-      Positioned.fill(
-        child: GestureDetector(
-          // `opaque`, so a tap on the veil is taken here rather than falling
-          // through to whatever the window has underneath — a terminal would
-          // otherwise get the click that was meant to close the panel.
-          behavior: HitTestBehavior.opaque,
-          onTap: dismissible ? () => Navigator.of(context).maybePop() : null,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-            child: ColoredBox(color: tint),
+  Widget build(BuildContext context) => _DismissOnEscape(
+    enabled: dismissible,
+    child: Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            // `opaque`, so a tap on the veil is taken here rather than falling
+            // through to whatever the window has underneath — a terminal would
+            // otherwise get the click that was meant to close the panel.
+            behavior: HitTestBehavior.opaque,
+            onTap: dismissible ? () => Navigator.of(context).maybePop() : null,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+              child: ColoredBox(color: tint),
+            ),
           ),
         ),
-      ),
-      // ⚠️ The dialog is NOT inside the GestureDetector above: nested in it, a
-      // tap on the panel itself would close the panel.
-      child,
-    ],
+        // ⚠️ The dialog is NOT inside the GestureDetector above: nested in it,
+        // a tap on the panel itself would close the panel.
+        child,
+      ],
+    ),
   );
+}
+
+/// Closes the dialog on Escape.
+///
+/// ⚠️ **This exists because `showAppDialog` passes `barrierDismissible: false`
+/// to the route, and that flag is not only about taps.** Flutter wires the
+/// Escape key off the same flag: a modal route built with it false installs no
+/// `DismissIntent` handler, so Escape reaches nothing. The barrier here is a
+/// widget rather than the route's own, so the flag has to stay false — leaving
+/// it true makes Material dismiss on a tap anywhere over a barrier it believes
+/// it is drawing, the panel included — and the key has to be put back by hand,
+/// exactly as the tap was.
+///
+/// It was missed when the tap was wired, and every dialog in the app lost
+/// Escape with it — including the ones whose own chrome draws an `esc` cap.
+///
+/// `maybePop`, matching the tap: a route that refuses to leave still gets to
+/// refuse.
+class _DismissOnEscape extends StatelessWidget {
+  const _DismissOnEscape({required this.enabled, required this.child});
+
+  /// False leaves the key alone, so a dialog that opted out of tap-dismissal
+  /// is not quietly closable by keyboard instead.
+  final bool enabled;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+      },
+      child: Actions(
+        actions: {
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) {
+              Navigator.of(context).maybePop();
+              return null;
+            },
+          ),
+        },
+        // A `Shortcuts` only sees a key once focus is somewhere inside it, and
+        // not every dialog focuses something of its own — so the scope takes
+        // focus itself when nothing else claims it.
+        //
+        // ⚠️ `Focus`, not `FocusScope`. Both autofocus, and a descendant that
+        // also autofocuses (the model picker's search field) wins either way —
+        // but a `FocusScope` additionally becomes the dialog's focus ROOT,
+        // which changes where traversal wraps and what `unfocus` falls back
+        // to. Nothing here wants to move those; this only needs to be a node
+        // in the chain that holds focus when no descendant asks for it.
+        // `skipTraversal` keeps it out of the tab order it is not a stop in.
+        child: Focus(autofocus: true, skipTraversal: true, child: child),
+      ),
+    );
+  }
 }

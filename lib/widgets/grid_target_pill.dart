@@ -62,7 +62,7 @@ List<GridTargetOption> gridTargetMenuOptions(
   GridNetworksState state, {
   bool Function(String)? isEnabled,
 }) => [
-  const GridTargetOption(label: kNoGridTargetLabel),
+  GridTargetOption(label: thisComputerLabel),
   ...switch (state) {
     GridNetworksReady(:final me) => _readyOptions(me.networks, isEnabled),
     // Loading, signed out, failed — one disabled row saying which, in the words

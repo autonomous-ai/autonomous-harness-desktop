@@ -21,7 +21,7 @@ import 'grid_models_controller.dart';
 import 'grid_network.dart';
 import 'grid_networks_controller.dart';
 import 'grid_selection_store.dart'
-    show kNoGridTargetDetail, kNoGridTargetLabel;
+    show kNoGridTargetDetail, kNoGridTargetLabel, thisComputerLabel;
 import 'node_display.dart' show kAutoModelId, modelKey, withoutGridRunPrefix;
 
 /// What "let the provider choose" is called on screen — the state the launch
@@ -75,7 +75,7 @@ class ModelChoice {
   /// the engine's own login, which is the one row on the list that reaches no
   /// provider to route anything.
   String get label {
-    if (!hasProvider) return kNoGridTargetLabel;
+    if (!hasProvider) return thisComputerLabel;
     final model = this.model;
     return model == null ? kAutoModelLabel : withoutGridRunPrefix(model);
   }
@@ -171,7 +171,7 @@ List<ModelPickerItem> modelPickerItems({
   // First and unconditionally, the way the old menu had it: it is the one row
   // that needs no network call, so it must not be a choice that appears once a
   // fetch lands.
-  if (_matches(kNoGridTargetLabel, needle)) {
+  if (_matches(thisComputerLabel, needle)) {
     items.add(
       const ModelPickerRow(
         choice: ModelChoice.none,

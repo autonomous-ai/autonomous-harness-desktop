@@ -148,7 +148,16 @@ class _RailProviderPillState extends State<RailProviderPill> {
           // provider's row is named after the provider, which is the whole
           // answer; this row is named after a kind of account, and `on this
           // computer` is what tells a reader whose.
-          note: option.networkId == null ? 'on this computer' : null,
+          //
+          // ⚠️ Which is why it DROPS once that row names the machine: with the
+          // label reading `MacBook-Pro.local`, the note repeats in weaker ink
+          // what the row already says in stronger, and the reason the note
+          // exists has been answered by the name.
+          note:
+              option.networkId == null &&
+                  thisComputerLabel == kNoGridTargetLabel
+              ? 'on this computer'
+              : null,
           selected: option.networkId == chosen.networkId,
           onPressed: () {
             _menu.close();
@@ -215,7 +224,13 @@ class _RailProviderPillState extends State<RailProviderPill> {
 /// running on no provider" rather than as a claim about which credential it is.
 /// Left alone deliberately: it is referenced from tests, and renaming an alias
 /// to fix a comment is not worth breaking their compile over.
-const String kRailSubscriptionLabel = kNoGridTargetLabel;
+///
+/// ⚠️ No longer `const`: it resolves to [thisComputerLabel], which is this
+/// machine's own name once startup has found one and [kNoGridTargetLabel]
+/// until then. The pill prints the machine rather than the words "This
+/// computer" — a reader with several machines in the sidebar should see the
+/// same name here that names the row they are working on.
+String get kRailSubscriptionLabel => thisComputerLabel;
 
 /// The pill itself — a bolt, a name, a caret.
 ///

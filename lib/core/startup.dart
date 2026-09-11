@@ -2,6 +2,7 @@ import '../grid/grid_selection_store.dart';
 import '../grid/grid_session.dart';
 import '../grid/model_recents_store.dart';
 import '../grid/provider_enablement_store.dart';
+import '../share/node_identity.dart';
 import '../share/share_target_store.dart';
 import '../shared/theme/appearance_prefs_store.dart';
 import '../stats/harness_stats.dart';
@@ -31,6 +32,15 @@ Future<void> loadPersistedSettings({
   HarnessStats? stats,
   UsageNudgeStore? usageNudges,
 }) async {
+  // Before anything draws: the sidebar pill, the model picker and the agent
+  // header all print this machine's name where they used to print the words
+  // "This computer", and a name that landed a frame later would swap the label
+  // out from under whoever was already reading it. The OS hostname is the
+  // answer available this early; `AppNotifier` refines it to the backend's
+  // `displayName` once the machine list arrives, which is what the sidebar
+  // shows. Synchronous and guarded — it must never be the reason a launch
+  // fails, and a machine with no usable name simply keeps the old wording.
+  resolveThisComputerLabel(localHostnameOrNull());
   await (terminalFont ?? terminalFontStore).load();
   // The sidebar names the chosen grid in its first frame; loading this later
   // would show "No grid" and then snap to the real choice.

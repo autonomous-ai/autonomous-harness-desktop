@@ -267,7 +267,7 @@ class _NoGridRow extends StatelessWidget {
     return _RowSurface(
       selected: selected,
       onTap: onTap,
-      semanticsLabel: kNoGridTargetLabel,
+      semanticsLabel: thisComputerLabel,
       child: Row(
         children: [
           SizedBox(
@@ -282,7 +282,7 @@ class _NoGridRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    kNoGridTargetLabel,
+                    thisComputerLabel,
                     style: TextStyle(
                       color: grid.AppPalette.textPrimary,
                       fontSize: 13,
