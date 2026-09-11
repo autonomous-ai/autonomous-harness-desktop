@@ -186,42 +186,39 @@ void main() {
     },
   );
 
-  test(
-    'forceReconnect() sends forceReconnect:true on the next machine_select, only for local transport',
-    () async {
-      hub = await FakeHub.start();
-      conn = WsConn(
-        wsBaseUrl: 'wss://unused.example',
-        autonomousEnv: 'prod',
-        machineId: 'm1',
-        accessTokenProvider: (_, _) async => 'sso-token',
-        onAuthFailure: (_) {},
-        onEvent: (_) {},
-        onStatus: (_) {},
-        transportKind: WsTransportKind.localPlaintext,
-        localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
-      );
-      await conn!.connect();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      final selects = hub.frames
-          .where((frame) => frame['type'] == 'machine_select')
-          .toList();
-      expect(selects, hasLength(1));
-      expect(
-        (selects.first['payload'] as Map).containsKey('forceReconnect'),
-        isFalse,
-      );
+  test('forceReconnect() sends forceReconnect:true on the next machine_select, only for local transport', () async {
+    hub = await FakeHub.start();
+    conn = WsConn(
+      wsBaseUrl: 'wss://unused.example',
+      autonomousEnv: 'prod',
+      machineId: 'm1',
+      accessTokenProvider: (_, _) async => 'sso-token',
+      onAuthFailure: (_) {},
+      onEvent: (_) {},
+      onStatus: (_) {},
+      transportKind: WsTransportKind.localPlaintext,
+      localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
+    );
+    await conn!.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final selects = hub.frames
+        .where((frame) => frame['type'] == 'machine_select')
+        .toList();
+    expect(selects, hasLength(1));
+    expect(
+      (selects.first['payload'] as Map).containsKey('forceReconnect'),
+      isFalse,
+    );
 
-      await conn!.forceReconnect();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      final selectsAfter = hub.frames
-          .where((frame) => frame['type'] == 'machine_select')
-          .toList();
-      expect(selectsAfter, hasLength(2));
-      expect((selectsAfter[1]['payload'] as Map)['forceReconnect'], isTrue);
-      expect(conn!.isReady, isTrue);
-    },
-  );
+    await conn!.forceReconnect();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final selectsAfter = hub.frames
+        .where((frame) => frame['type'] == 'machine_select')
+        .toList();
+    expect(selectsAfter, hasLength(2));
+    expect((selectsAfter[1]['payload'] as Map)['forceReconnect'], isTrue);
+    expect(conn!.isReady, isTrue);
+  });
 
   test('blocked encrypted RPC fails immediately and is never sent', () async {
     hub = await FakeHub.start();
@@ -267,6 +264,36 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(hub.protocols, hasLength(1));
     expect(failures.single, contains('environment'));
+  });
+
+  // AppNotifier's onStatus handler reads machine.needsLink to decide whether a
+  // disconnect should be treated as the node going offline — it only sees the
+  // right value if onLocalFailure (which sets needsLink) has already run.
+  test('4404 reports onLocalFailure before onStatus(disconnected)', () async {
+    hub = await FakeHub.start(closeCodeOnSelect: 4404);
+    final calls = <String>[];
+    conn = WsConn(
+      wsBaseUrl: 'wss://unused.example',
+      autonomousEnv: 'prod',
+      machineId: 'm1',
+      accessTokenProvider: (_, _) async => 'sso-token',
+      onAuthFailure: (_) {},
+      onLocalFailure: (code, reason) => calls.add('onLocalFailure'),
+      onEvent: (_) {},
+      onStatus: (status) => calls.add('onStatus:$status'),
+      transportKind: WsTransportKind.localPlaintext,
+      localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
+    );
+    await conn!.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(
+      calls,
+      containsAllInOrder([
+        'onLocalFailure',
+        'onStatus:ConnectionStatus.disconnected',
+      ]),
+    );
+    expect(conn!.isClosed, isTrue);
   });
 
   test(

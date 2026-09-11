@@ -122,6 +122,11 @@ void main() {
     final state = MachineState(machine)
       ..connectionStatus = ConnectionStatus.connected
       ..agentLoadStatus = loadStatus
+      // In production these two are always set together — see onLocalFailure
+      // in app_state.dart — so a needsLink fixture must carry both, or the
+      // caption row's link affordance (which reads the raw bool, the same
+      // signal the root-cause fix operates on) would never see it.
+      ..needsLink = loadStatus == AgentLoadStatus.needsLink
       ..agentsLoadError = error;
     notifier.machines = [machine];
     notifier.machineStates[machine.machineId] = state;
@@ -286,6 +291,37 @@ void main() {
         find.byKey(const ValueKey('machine-connection-icon')),
       );
       expect(machineIcon.color, AppPalette.textFaint);
+      notifier.dispose();
+    },
+  );
+
+  testWidgets(
+    'shows a green icon and an always-visible link button when reachable but not yet linked',
+    (tester) async {
+      // A NO_PEER_LINK close is itself proof the daemon answered — this reads
+      // as online, and the fix is one click away on the row itself, not
+      // hidden behind hover or a Link this machine… row nobody expanded to.
+      final notifier = notifierWithLoadState(AgentLoadStatus.needsLink);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(width: 320, child: MachineRail(notifier: notifier)),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final machineIcon = tester.widget<Icon>(
+        find.byKey(const ValueKey('machine-connection-icon')),
+      );
+      expect(machineIcon.color, AppPalette.online);
+      expect(find.text('offline'), findsNothing);
+      final linkButton = find.byKey(const ValueKey('machine-link-affordance'));
+      expect(linkButton, findsOneWidget);
+
+      await tester.tap(linkButton);
+      await tester.pump();
+      expect(notifier.selectedMachineId, machine.machineId);
       notifier.dispose();
     },
   );
@@ -766,6 +802,13 @@ void main() {
     );
     // …and the offline mark is a word on the caption, not a chip.
     expect(find.text('offline'), findsOneWidget);
+    // Offline wins on the caption row too: no link button pretending the
+    // handshake is one click away, and the icon reads exactly as offline.
+    expect(find.byKey(const ValueKey('machine-link-affordance')), findsNothing);
+    final machineIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey('machine-connection-icon')),
+    );
+    expect(machineIcon.color, AppPalette.textFaint);
     notifier.dispose();
   });
 
@@ -785,7 +828,18 @@ void main() {
       // a condition dressed as a command.
       expect(find.text('Link this machine…'), findsOneWidget);
       expect(find.text('link required'), findsNothing);
-      notifier.adoptSessionForTest(
+      // The same fact is also on the caption row itself, not just the
+      // expanded tree — reachable-but-unlinked reads as online, with its own
+      // one-click way to fix it right beside the name.
+      final machineIcon = tester.widget<Icon>(
+        find.byKey(const ValueKey('machine-connection-icon')),
+      );
+      expect(machineIcon.color, AppPalette.online);
+      expect(
+        find.byKey(const ValueKey('machine-link-affordance')),
+        findsOneWidget,
+      );
+      final otherPane = notifier.adoptSessionForTest(
         TerminalSession(
           machineId: 'other-machine',
           agentId: 'other-agent',
@@ -798,7 +852,11 @@ void main() {
       await tester.tap(find.text('Link this machine…'));
       await tester.pump();
       expect(notifier.selectedMachineId, machine.machineId);
-      expect(notifier.activeTerminal, isNull);
+      // showMachinePane's own doc comment: a needsLink machine gets no tile
+      // of its own (the blocking link dialog is the surface for it instead),
+      // so selecting it must not steal focus from whatever pane is already
+      // open — it stays the unrelated session adopted above.
+      expect(notifier.activeTerminal, same(otherPane.session));
       notifier.dispose();
 
       notifier = notifierWithLoadState(AgentLoadStatus.loading);
