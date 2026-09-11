@@ -20,6 +20,7 @@ import '../core/retry.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
+import '../terminal/remote_media_download.dart';
 import '../widgets/engine_identity.dart' show allEngines;
 import 'pane_layout_store.dart';
 import 'terminal_pane.dart';
@@ -126,6 +127,7 @@ class MachineState {
   // file, written to disk on that machine and pasted as a path — see TerminalSession.pasteFile).
   // Only consulted for a REMOTE pane; a local one pastes its own path directly and never needs this.
   bool terminalPasteFileAvailable = false;
+  bool mediaPreviewAvailable = false;
   // Which engines this machine actually has, as this machine answered it. Kept
   // on MachineState rather than globally because that is the whole point: two
   // machines on one account hold different engines, and the Docker rig holds
@@ -2396,6 +2398,8 @@ class AppNotifier extends ChangeNotifier {
           features is Map && features['imagePaste'] == true;
       machine.terminalPasteFileAvailable =
           features is Map && features['pasteFile'] == true;
+      machine.mediaPreviewAvailable =
+          features is Map && features['mediaPreview'] == true;
     } catch (_) {
       machine.terminalCapabilityLoaded = true;
       machine.terminalCapabilityAvailable = false;
@@ -2403,6 +2407,7 @@ class AppNotifier extends ChangeNotifier {
       machine.terminalPasteRawAvailable = false;
       machine.terminalImagePasteAvailable = false;
       machine.terminalPasteFileAvailable = false;
+      machine.mediaPreviewAvailable = false;
     }
   }
 
@@ -2698,6 +2703,48 @@ class AppNotifier extends ChangeNotifier {
       );
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Media uses the existing machine-scoped, encrypted file RPC. It is never
+  /// queued for a disconnected machine or resolved against this app's cwd.
+  Future<Map<String, dynamic>> readRemoteMediaChunk(
+    String machineId,
+    String agentId,
+    String target, {
+    required int offset,
+    String? revision,
+  }) async {
+    final machine = machineStates[machineId];
+    if (machine == null || machine.needsLink || machine.nodeOnline == false ||
+        machine.connectionStatus != ConnectionStatus.connected) {
+      throw const RemoteMediaException('This machine is disconnected. Reconnect and try opening the preview again.');
+    }
+    if (!machine.mediaPreviewAvailable) {
+      throw const RemoteMediaException('Update the Harness CLI on this remote machine to open image and video previews.');
+    }
+    final connection = _conn(machineId);
+    if (!connection.isReady) {
+      throw const RemoteMediaException('This machine is disconnected. Reconnect and try opening the preview again.');
+    }
+    try {
+      return await connection.request('agent_read_file', payload: {
+        'agentId': agentId, 'path': target, 'media': true, 'offset': offset,
+        'revision': ?revision,
+      }, timeout: const Duration(seconds: 15));
+    } on WsRequestFailure catch (error) {
+      throw RemoteMediaException(switch (error.code) {
+        'MEDIA_NOT_FOUND' || 'NOT_FOUND' => 'This file is no longer available on the remote machine. It may have moved or been deleted.',
+        'MEDIA_TOO_LARGE' => 'Remote previews support files up to 512 MB. Use a smaller export or transfer this file separately.',
+        'MEDIA_CHANGED' => 'The file changed while downloading. Wait for it to finish generating and try again.',
+        'MEDIA_UNSUPPORTED' => 'This file is not a supported image or video.',
+        'MEDIA_INVALID_REQUEST' => 'Use a full path or a path inside this agent’s working folder.',
+        'AGENT_NOT_FOUND' => 'This agent is no longer available. Reconnect to the agent and try again.',
+        'NOT_TEXT' || 'FILE_TOO_LARGE' => 'Update the Harness CLI on this remote machine to open media previews.',
+        _ => 'The remote machine could not read this file. Check that it is accessible and try again.',
+      });
+    } catch (_) {
+      throw const RemoteMediaException('The media download was interrupted. Check the connection and try again.');
     }
   }
 

@@ -37,9 +37,32 @@ text selection, copy/paste and terminal mouse input keep their existing behavior
 Local previews support absolute paths, `~/...` and `file://...` URLs, including
 spaces, Unicode, visible Markdown links and terminal soft wraps. The file must
 already exist. Relative paths need a full path because CLI agent frames do not
-currently include the working directory. Remote media needs a web link or a local
-download; a path on another machine is never opened against this computer's disk.
+currently include the working directory.
+
+For a remote agent, the same shortcut downloads the file over the existing E2EE
+connection and opens the completed local copy in the OS viewer. The remote
+machine must run a CLI advertising `mediaPreview`; older CLIs show update guidance.
+Remote relative paths resolve inside that agent's working folder; absolute paths,
+`~/...`, and `file://...` resolve on the remote machine, including artifacts in `/tmp`.
+The pane shows download progress and Cancel. Closing/changing panes cancels the
+download. An interrupted transfer or a file changed during transfer is never opened.
+
+Previews are limited to 512 MiB per file and downloaded in bounded chunks. Copies
+live in `~/.harness/desktop-app/media-previews`; before each download, inactive
+copies older than 24 hours or over the 1 GiB cache budget are pruned. Cache names
+are unique, so matching paths on different machines cannot overwrite one another.
 This reads visible terminal text, not hidden OSC 8 hyperlink targets.
+
+The optional A/B smoke test uses isolated identities, two loopback WebSockets,
+the CLI's real E2EE handshake/media reader and ffmpeg-generated PNG/MP4 fixtures:
+
+```bash
+REMOTE_MEDIA_CLI_ROOT=../autonomous-harness/cli flutter test test/remote_media_smoke_test.dart
+```
+
+Install the companion CLI's npm dependencies first; ffmpeg must be on PATH.
+The smoke test does not use a real account or remote machine. It verifies the OS
+launch URI; playback in the native viewer is a separate manual check.
 
 ## Local Codex profiles
 

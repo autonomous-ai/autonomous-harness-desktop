@@ -17,6 +17,7 @@ import 'terminal_composer.dart';
 import '../terminal/terminal_binary.dart';
 import '../terminal/terminal_font_store.dart';
 import '../terminal/terminal_link_opener.dart';
+import '../terminal/remote_media_download.dart';
 import '../terminal/terminal_links.dart';
 import '../terminal/terminal_session.dart';
 import '../terminal/terminal_theme.dart';
@@ -60,6 +61,7 @@ class TerminalPanel extends StatefulWidget {
 
   /// Test seam for OS actions; normal panes use the platform launcher.
   final TerminalLinkOpener? linkOpener;
+  final RemoteMediaDownloader? mediaDownloader;
 
   const TerminalPanel({
     super.key,
@@ -75,6 +77,7 @@ class TerminalPanel extends StatefulWidget {
     this.onRendererFocus,
     this.paneDrag,
     this.linkOpener,
+    this.mediaDownloader,
   });
 
   @override
@@ -105,6 +108,9 @@ class _TerminalPanelState extends State<TerminalPanel>
   String? _pressedLink;
   bool _openingLink = false;
   bool _linkRefreshPending = false;
+  late final RemoteMediaDownloader _mediaDownloader;
+  MediaDownloadCancellation? _previewCancellation;
+  RemoteMediaProgress? _previewProgress;
 
   @override
   void initState() {
@@ -114,6 +120,7 @@ class _TerminalPanelState extends State<TerminalPanel>
     _scrollController.addListener(_scheduleLinkRefresh);
     _terminalViewKey = GlobalKey<TerminalViewState>();
     _linkOpener = widget.linkOpener ?? TerminalLinkOpener();
+    _mediaDownloader = widget.mediaDownloader ?? RemoteMediaDownloader();
     HardwareKeyboard.instance.addHandler(_onLinkModifierChanged);
     _focusNode.addListener(_handleFocusChange);
     _composerFocus.addListener(_handleComposerFocusChange);
@@ -131,6 +138,8 @@ class _TerminalPanelState extends State<TerminalPanel>
   void didUpdateWidget(TerminalPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.session, widget.session)) {
+      _previewCancellation?.cancel();
+      _previewProgress = null;
       oldWidget.session.setCursorBlinkPhase(true);
       oldWidget.session.removeListener(_onSessionChanged);
       oldWidget.session.detachViewport(this);
@@ -161,6 +170,7 @@ class _TerminalPanelState extends State<TerminalPanel>
 
   @override
   void dispose() {
+    _previewCancellation?.cancel();
     _viewTerminal.removeListener(_scheduleLinkRefresh);
     _scrollController.removeListener(_scheduleLinkRefresh);
     HardwareKeyboard.instance.removeHandler(_onLinkModifierChanged);
@@ -583,11 +593,41 @@ class _TerminalPanelState extends State<TerminalPanel>
     if (_openingLink) return;
     _openingLink = true;
     final session = widget.session;
+    final notifier = widget.notifier;
+    final cancellation = MediaDownloadCancellation();
+    _previewCancellation = cancellation;
     try {
       final message = await _linkOpener.open(
         target,
         isLocalMachine:
-            widget.notifier.stateOf(session.machineId)?.isLocalMachine == true,
+            notifier.stateOf(session.machineId)?.isLocalMachine == true,
+        isCancelled: () =>
+            cancellation.isCancelled ||
+            !mounted ||
+            !identical(session, widget.session),
+        downloadRemote: (path) async {
+          setState(
+            () => _previewProgress = const RemoteMediaProgress('', 0, null),
+          );
+          return _mediaDownloader.download(
+            readChunk: ({required offset, revision}) =>
+                notifier.readRemoteMediaChunk(
+                  session.machineId,
+                  session.agentId,
+                  path,
+                  offset: offset,
+                  revision: revision,
+                ),
+            cancellation: cancellation,
+            onProgress: (progress) {
+              if (mounted &&
+                  !cancellation.isCancelled &&
+                  identical(session, widget.session)) {
+                setState(() => _previewProgress = progress);
+              }
+            },
+          );
+        },
       );
       if (!mounted || !identical(session, widget.session) || message == null) {
         return;
@@ -596,6 +636,10 @@ class _TerminalPanelState extends State<TerminalPanel>
           ?.showSnackBar(SnackBar(content: Text(message)));
     } finally {
       _openingLink = false;
+      if (identical(_previewCancellation, cancellation)) {
+        _previewCancellation = null;
+        if (mounted) setState(() => _previewProgress = null);
+      }
     }
   }
 
@@ -702,14 +746,32 @@ class _TerminalPanelState extends State<TerminalPanel>
                   ),
                 // Bottom, not top-right alongside ATTACHING/RESYNCING: the two are not mutually
                 // exclusive (a reconnect can happen mid-upload) and must not overlap each other.
-                if (session.uploadProgress != null)
+                if (session.uploadProgress != null || _previewProgress != null)
                   Positioned(
                     left: 14,
                     right: 14,
                     bottom: 12,
-                    child: _UploadProgressBadge(
-                      progress: session.uploadProgress!,
-                      onCancel: () => unawaited(session.cancelUpload()),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (session.uploadProgress != null)
+                          _TransferProgressBadge(
+                            label: 'Uploading ${session.uploadProgress!.label}',
+                            fraction: session.uploadProgress!.percent,
+                            onCancel: () => unawaited(session.cancelUpload()),
+                          ),
+                        if (session.uploadProgress != null &&
+                            _previewProgress != null)
+                          const SizedBox(height: 8),
+                        if (_previewProgress != null)
+                          _TransferProgressBadge(
+                            label: _previewProgress!.totalBytes == null
+                                ? 'Preparing preview…'
+                                : 'Downloading ${_previewProgress!.filename}',
+                            fraction: _previewProgress!.fraction,
+                            onCancel: () => _previewCancellation?.cancel(),
+                          ),
+                      ],
                     ),
                   ),
               ],
@@ -981,15 +1043,22 @@ class _OverlayBadge extends StatelessWidget {
 /// Same container language as [_OverlayBadge] (panelBg@0.93, borderStrong border, radius 4,
 /// textSoft label) with a thin [LinearProgressIndicator] in place of a spinner, plus a Cancel
 /// affordance.
-class _UploadProgressBadge extends StatelessWidget {
-  final UploadProgress progress;
+class _TransferProgressBadge extends StatelessWidget {
+  final String label;
+  final double? fraction;
   final VoidCallback onCancel;
-  const _UploadProgressBadge({required this.progress, required this.onCancel});
+  const _TransferProgressBadge({
+    required this.label,
+    required this.fraction,
+    required this.onCancel,
+  });
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
-    final percentLabel = '${(progress.percent * 100).round()}%';
+    final percentLabel = fraction == null
+        ? ''
+        : ' · ${(fraction! * 100).round()}%';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -1005,7 +1074,7 @@ class _UploadProgressBadge extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Uploading ${progress.label} · $percentLabel',
+                  '$label$percentLabel',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppColors.textSoft,
@@ -1035,7 +1104,7 @@ class _UploadProgressBadge extends StatelessWidget {
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
               minHeight: 4,
-              value: progress.percent,
+              value: fraction,
               backgroundColor: AppColors.border,
               color: AppColors.accent,
             ),
