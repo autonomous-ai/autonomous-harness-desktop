@@ -66,7 +66,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SizedBox(width: width, child: MachineRail(notifier: notifier)),
+          body: SizedBox(
+            width: width,
+            child: MachineRail(notifier: notifier),
+          ),
         ),
       ),
     );

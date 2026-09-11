@@ -70,14 +70,12 @@ class StatsSummaryCards extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final columns = constraints.maxWidth < 420 ? 1 : 3;
-            final width =
-                (constraints.maxWidth - (columns - 1) * 10) / columns;
+            final width = (constraints.maxWidth - (columns - 1) * 10) / columns;
             return Wrap(
               spacing: 10,
               runSpacing: 10,
               children: [
-                for (final card in cards)
-                  SizedBox(width: width, child: card),
+                for (final card in cards) SizedBox(width: width, child: card),
               ],
             );
           },
@@ -95,8 +93,18 @@ class StatsSummaryCards extends StatelessWidget {
 
   static String _trackingDate(DateTime at) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[at.month - 1]} ${at.day}, ${at.year}';
   }
@@ -344,7 +352,8 @@ class TokenMixBar extends StatelessWidget {
 
     return _PanelCard(
       title: 'Token mix',
-      subtitle: 'Combined input, output and cache tokens across enabled '
+      subtitle:
+          'Combined input, output and cache tokens across enabled '
           'providers.',
       // Reasoning is a SUBSET of output, so it cannot be a fourth slice — it
       // rides as a badge instead, which is exactly what it is: a note about one
@@ -505,8 +514,18 @@ String _dayLabel(DateTime day) =>
 /// `Aug 19` — how a date is named on a badge or under the grid.
 String _shortDate(DateTime day) {
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${months[day.month - 1]} ${day.day}';
 }
@@ -581,10 +600,7 @@ class ProviderUsageRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${formatTokens(ledger.totals.total)} tokens',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppPalette.textPrimary,
-                  ),
+                  style: TextStyle(fontSize: 12, color: AppPalette.textPrimary),
                 ),
               ),
               Text(
@@ -655,7 +671,9 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppTheme.watch(context);
-    final (label, color) = switch (state.enabled ? state.status : LedgerStatus.disabled) {
+    final (label, color) = switch (state.enabled
+        ? state.status
+        : LedgerStatus.disabled) {
       LedgerStatus.ok => ('On', AppPalette.online),
       LedgerStatus.scanning => ('Scanning', AppPalette.accentOnSurface),
       LedgerStatus.unavailable => ('Not found', AppPalette.textFaint),

@@ -387,14 +387,11 @@ void main() {
     },
   );
 
-  test(
-    'currentBundlePath on Linux is null with no override and no APPIMAGE env var',
-    () {
-      // Production falls through to Platform.environment['APPIMAGE'], which is unset for the test
-      // runner's own process — the same "cannot resolve" state a non-packaged dev run would hit.
-      expect(currentBundlePath(isLinux: true), isNull);
-    },
-  );
+  test('currentBundlePath on Linux is null with no override and no APPIMAGE env var', () {
+    // Production falls through to Platform.environment['APPIMAGE'], which is unset for the test
+    // runner's own process — the same "cannot resolve" state a non-packaged dev run would hit.
+    expect(currentBundlePath(isLinux: true), isNull);
+  });
 
   group('macOS picks its build by CPU', () {
     /// Serves a manifest holding exactly [versions] (key → version). Every entry points at an archive
@@ -605,34 +602,31 @@ void main() {
       },
     );
 
-    test(
-      'applyStaged on Linux execs the swapped AppImage file directly instead of `open -n`',
-      () async {
-        final calls = <String>[];
-        final updater = DesktopUpdater(
-          isLinux: true,
-          architecture: 'x64',
-          launchDetached: (command) async => calls.add(command),
-        );
-        final staged = StagedUpdate(
-          version: newVersion,
-          bundlePath: '${scratch.path}/staged/Harness-linux-x64.AppImage',
-          stagingDirPath: '${scratch.path}/staged',
-        );
-        final ok = await updater.applyStaged(
-          staged,
-          selfPid: 12345,
-          runningBundlePath: '/home/user/.local/opt/Harness.AppImage',
-        );
-        expect(ok, isTrue);
-        expect(calls, hasLength(1));
-        expect(calls.single, contains('kill -0 12345'));
-        expect(calls.single, contains('/home/user/.local/opt/Harness.AppImage'));
-        expect(calls.single, contains(staged.bundlePath));
-        expect(calls.single, contains('nohup'));
-        expect(calls.single, isNot(contains('open -n')));
-        expect(calls.single, contains('pgrep -f'));
-      },
-    );
+    test('applyStaged on Linux execs the swapped AppImage file directly instead of `open -n`', () async {
+      final calls = <String>[];
+      final updater = DesktopUpdater(
+        isLinux: true,
+        architecture: 'x64',
+        launchDetached: (command) async => calls.add(command),
+      );
+      final staged = StagedUpdate(
+        version: newVersion,
+        bundlePath: '${scratch.path}/staged/Harness-linux-x64.AppImage',
+        stagingDirPath: '${scratch.path}/staged',
+      );
+      final ok = await updater.applyStaged(
+        staged,
+        selfPid: 12345,
+        runningBundlePath: '/home/user/.local/opt/Harness.AppImage',
+      );
+      expect(ok, isTrue);
+      expect(calls, hasLength(1));
+      expect(calls.single, contains('kill -0 12345'));
+      expect(calls.single, contains('/home/user/.local/opt/Harness.AppImage'));
+      expect(calls.single, contains(staged.bundlePath));
+      expect(calls.single, contains('nohup'));
+      expect(calls.single, isNot(contains('open -n')));
+      expect(calls.single, contains('pgrep -f'));
+    });
   });
 }

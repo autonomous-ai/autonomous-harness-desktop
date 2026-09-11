@@ -42,8 +42,7 @@ void main() {
   testWidgets('a spinning button turns its glyph', (tester) async {
     await pumpButton(tester, spinning: true, onPressed: () {});
 
-    double turns() =>
-        tester.widget<RotationTransition>(rotation).turns.value;
+    double turns() => tester.widget<RotationTransition>(rotation).turns.value;
 
     // Angle at rest, then again part-way through a revolution. Comparing two
     // samples rather than asserting a number keeps this off the controller's

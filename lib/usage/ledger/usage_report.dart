@@ -137,7 +137,8 @@ class UsageReport {
   }
 
   /// The share of turns that started cold, or null when there were no turns.
-  double? get zeroCacheReadShare => turns == 0 ? null : zeroCacheReadTurns / turns;
+  double? get zeroCacheReadShare =>
+      turns == 0 ? null : zeroCacheReadTurns / turns;
 }
 
 /// Read [entries] into the pane's headline figures.

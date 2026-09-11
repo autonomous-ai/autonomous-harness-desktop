@@ -47,7 +47,10 @@ void main() {
           // it needs room above it to land in.
           body: Align(
             alignment: Alignment.bottomLeft,
-            child: SizedBox(width: 240, child: AccountFooter(notifier: notifier)),
+            child: SizedBox(
+              width: 240,
+              child: AccountFooter(notifier: notifier),
+            ),
           ),
         ),
       ),
@@ -57,14 +60,15 @@ void main() {
     return notifier;
   }
 
-  AppMenuItem itemByKey(WidgetTester tester, String key) => tester.widget<AppMenuItem>(
-    find.byKey(Key(key)),
-  );
+  AppMenuItem itemByKey(WidgetTester tester, String key) =>
+      tester.widget<AppMenuItem>(find.byKey(Key(key)));
 
   for (final brightness in Brightness.values) {
     final label = brightness == Brightness.dark ? 'dark' : 'light';
 
-    testWidgets('sign out is the only destructive row ($label)', (tester) async {
+    testWidgets('sign out is the only destructive row ($label)', (
+      tester,
+    ) async {
       await pumpMenu(tester, brightness: brightness);
 
       expect(itemByKey(tester, 'sign-out-menu-item').danger, isTrue);
@@ -77,7 +81,9 @@ void main() {
     testWidgets('sign out draws in the error ink ($label)', (tester) async {
       await pumpMenu(tester, brightness: brightness);
 
-      final context = tester.element(find.byKey(const Key('sign-out-menu-item')));
+      final context = tester.element(
+        find.byKey(const Key('sign-out-menu-item')),
+      );
       final error = Theme.of(context).colorScheme.error;
       final text = tester.widget<Text>(
         find.descendant(
@@ -108,7 +114,9 @@ void main() {
     expect(find.byKey(const Key('settings-menu-item')), findsOneWidget);
   });
 
-  testWidgets('the summary names the account above its address', (tester) async {
+  testWidgets('the summary names the account above its address', (
+    tester,
+  ) async {
     await pumpMenu(tester, brightness: Brightness.dark);
 
     expect(find.text('Tony at Autonomous'), findsOneWidget);

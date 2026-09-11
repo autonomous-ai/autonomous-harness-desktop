@@ -56,16 +56,18 @@ void main() {
     });
   }
 
-  testWidgets('a window too short to hold the rows scrolls instead of squeezing',
-      (tester) async {
-    // Squeezing is the tempting answer and wrong twice: the daemon clamps the
-    // terminal at twelve rows anyway, so a shrunk tile just loses its own
-    // bottom, and the chrome overflows. Nine usable tiles behind a scrollbar
-    // beat nine unusable ones in view.
-    await _pump(tester, 9, const Size(1750, 420));
-    expect(tester.takeException(), isNull);
-    expect(find.byType(SingleChildScrollView), findsWidgets);
-  });
+  testWidgets(
+    'a window too short to hold the rows scrolls instead of squeezing',
+    (tester) async {
+      // Squeezing is the tempting answer and wrong twice: the daemon clamps the
+      // terminal at twelve rows anyway, so a shrunk tile just loses its own
+      // bottom, and the chrome overflows. Nine usable tiles behind a scrollbar
+      // beat nine unusable ones in view.
+      await _pump(tester, 9, const Size(1750, 420));
+      expect(tester.takeException(), isNull);
+      expect(find.byType(SingleChildScrollView), findsWidgets);
+    },
+  );
 
   testWidgets('a window with the room does not scroll', (tester) async {
     await _pump(tester, 6, const Size(1750, 900));

@@ -173,9 +173,8 @@ class _ScrollRevealTextState extends State<ScrollRevealText>
 Shader _edgeFade(Rect bounds, double t) {
   final w = bounds.width;
   if (w <= kEdgeFadeWidth * 2) {
-    return const LinearGradient(
-      colors: [Colors.white, Colors.white],
-    ).createShader(bounds);
+    return const LinearGradient(colors: [Colors.white, Colors.white])
+        .createShader(bounds);
   }
   final head = (t * 8).clamp(0.0, 1.0);
   final tail = ((1 - t) * 8).clamp(0.0, 1.0);
@@ -208,9 +207,8 @@ Shader tailFade(Rect bounds) {
   // A box narrower than the fade itself has nothing to ramp across, and
   // dissolving the whole label would be worse than a hard edge.
   if (w <= kEdgeFadeWidth) {
-    return const LinearGradient(
-      colors: [Colors.white, Colors.white],
-    ).createShader(bounds);
+    return const LinearGradient(colors: [Colors.white, Colors.white])
+        .createShader(bounds);
   }
   return LinearGradient(
     stops: [0, 1 - kEdgeFadeWidth / w, 1],

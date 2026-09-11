@@ -28,11 +28,7 @@ Widget _host({double textScale = 1.0}) => MaterialApp(
           // The pane the settings rail leaves for a section at the window's
           // own minimum width.
           child: const Scaffold(
-            body: SizedBox(
-              width: 820,
-              height: 700,
-              child: TerminalSection(),
-            ),
+            body: SizedBox(width: 820, height: 700, child: TerminalSection()),
           ),
         ),
       );

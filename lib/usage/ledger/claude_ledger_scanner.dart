@@ -175,9 +175,8 @@ int _tokens(Object? value) =>
     value is num && value.isFinite && value > 0 ? value.toInt() : 0;
 
 /// The thinking share of an assistant turn's output, when the row reports one.
-int _reasoning(Object? details) => details is Map<String, Object?>
-    ? _tokens(details['thinking_tokens'])
-    : 0;
+int _reasoning(Object? details) =>
+    details is Map<String, Object?> ? _tokens(details['thinking_tokens']) : 0;
 
 /// A necessary condition for `type == "assistant"`, checked before the parse.
 ///
@@ -218,10 +217,8 @@ ClaudeTurn? parseClaudeLine(String line, String fallbackSessionId) {
   final write1h = cacheCreation is Map<String, Object?>
       ? _max(
           0,
-          _tokens(cacheCreation['ephemeral_1h_input_tokens']).clamp(
-            0,
-            cacheWriteTotal,
-          ),
+          _tokens(cacheCreation['ephemeral_1h_input_tokens'])
+              .clamp(0, cacheWriteTotal),
         )
       : 0;
 

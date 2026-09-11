@@ -202,21 +202,22 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('offers Codex profiles for a remote machine too, not only this computer', (
-    tester,
-  ) async {
-    await open(
-      tester,
-      local: false,
-      initialPaths: const ['/custom/work-login'],
-    );
-    expect(
-      find.byKey(const Key('new-agent-codex-profile-field')),
-      findsNothing,
-    );
-    expect(find.text('/custom/work-login'), findsOneWidget);
-    expect(find.text('Link a profile folder…'), findsOneWidget);
-  });
+  testWidgets(
+    'offers Codex profiles for a remote machine too, not only this computer',
+    (tester) async {
+      await open(
+        tester,
+        local: false,
+        initialPaths: const ['/custom/work-login'],
+      );
+      expect(
+        find.byKey(const Key('new-agent-codex-profile-field')),
+        findsNothing,
+      );
+      expect(find.text('/custom/work-login'), findsOneWidget);
+      expect(find.text('Link a profile folder…'), findsOneWidget);
+    },
+  );
 
   testWidgets('the picker appears at two profiles and hides again at one', (
     tester,
@@ -251,9 +252,8 @@ void main() {
   testWidgets('creation waits for discovery to select the single account', (
     tester,
   ) async {
-    final notifier = _Notifier(const [
-      '/custom/work-login',
-    ])..pending = Completer<void>();
+    final notifier = _Notifier(const ['/custom/work-login'])
+      ..pending = Completer<void>();
     await open(tester, notifier: notifier);
     await tester.tap(find.text('Browse…'));
     await tester.pumpAndSettle();

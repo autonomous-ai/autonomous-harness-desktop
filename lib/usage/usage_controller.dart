@@ -26,8 +26,7 @@ class UsageController extends ChangeNotifier {
     this.remote,
     this.interval = const Duration(seconds: 60),
     bool autoStart = true,
-  }) : _sources =
-           sources ?? [ClaudeUsageSource(), CodexUsageSource()] {
+  }) : _sources = sources ?? [ClaudeUsageSource(), CodexUsageSource()] {
     for (final source in _sources) {
       _readings[source.provider] = ProviderUsage.loading(source.provider);
     }

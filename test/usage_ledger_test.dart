@@ -177,14 +177,17 @@ void main() {
       );
     });
 
-    test('a fork keeps the message and request ids, so the key survives it', () {
-      final original = parseClaudeLine(claudeRow(sessionId: 'a'), 'f')!;
-      final forked = parseClaudeLine(claudeRow(sessionId: 'b'), 'f')!;
-      // Different sessions, same exchange — which is exactly the case that
-      // would otherwise be billed twice.
-      expect(original.sessionId, isNot(forked.sessionId));
-      expect(original.dedupeKey, forked.dedupeKey);
-    });
+    test(
+      'a fork keeps the message and request ids, so the key survives it',
+      () {
+        final original = parseClaudeLine(claudeRow(sessionId: 'a'), 'f')!;
+        final forked = parseClaudeLine(claudeRow(sessionId: 'b'), 'f')!;
+        // Different sessions, same exchange — which is exactly the case that
+        // would otherwise be billed twice.
+        expect(original.sessionId, isNot(forked.sessionId));
+        expect(original.dedupeKey, forked.dedupeKey);
+      },
+    );
   });
 
   group('Codex delta resolution', () {
@@ -225,7 +228,11 @@ void main() {
     test('subtracts cached input, because Codex counts it inside input', () {
       final context = CodexParseContext(sessionId: 's1');
       final entry = parseCodexLine(
-        codexTokenCount(totalInput: 16827, totalCached: 13056, totalOutput: 134),
+        codexTokenCount(
+          totalInput: 16827,
+          totalCached: 13056,
+          totalOutput: 134,
+        ),
         context,
       )!;
       expect(entry.totals.freshInput, 16827 - 13056);
@@ -285,31 +292,34 @@ void main() {
       );
     });
 
-    test('a stale regression is dropped rather than taken as a new baseline', () {
-      final previous = const CodexRawUsage(
-        input: 10000,
-        cached: 0,
-        output: 1000,
-        reasoning: 0,
-        total: 11000,
-      );
-      // An echo of an earlier state: still within 2% of what we already had.
-      final echo = const CodexRawUsage(
-        input: 9900,
-        cached: 0,
-        output: 990,
-        reasoning: 0,
-        total: 10890,
-      );
-      final last = const CodexRawUsage(
-        input: 100,
-        cached: 0,
-        output: 10,
-        reasoning: 0,
-        total: 110,
-      );
-      expect(resolveCodexDelta(echo, last, previous), isNull);
-    });
+    test(
+      'a stale regression is dropped rather than taken as a new baseline',
+      () {
+        final previous = const CodexRawUsage(
+          input: 10000,
+          cached: 0,
+          output: 1000,
+          reasoning: 0,
+          total: 11000,
+        );
+        // An echo of an earlier state: still within 2% of what we already had.
+        final echo = const CodexRawUsage(
+          input: 9900,
+          cached: 0,
+          output: 990,
+          reasoning: 0,
+          total: 10890,
+        );
+        final last = const CodexRawUsage(
+          input: 100,
+          cached: 0,
+          output: 10,
+          reasoning: 0,
+          total: 110,
+        );
+        expect(resolveCodexDelta(echo, last, previous), isNull);
+      },
+    );
   });
 
   group('pricing', () {
@@ -336,13 +346,22 @@ void main() {
 
     test('matches dated and thinking variants onto their family', () {
       expect(normalizeClaudeModel('claude-opus-5-20260101'), 'claude-opus-5');
-      expect(normalizeClaudeModel('claude-opus-4.6-thinking'), 'claude-opus-4-6');
-      expect(normalizeClaudeModel('claude-3-5-sonnet-20241022'), 'claude-sonnet-3-5');
+      expect(
+        normalizeClaudeModel('claude-opus-4.6-thinking'),
+        'claude-opus-4-6',
+      );
+      expect(
+        normalizeClaudeModel('claude-3-5-sonnet-20241022'),
+        'claude-sonnet-3-5',
+      );
     });
 
     test('strips a reasoning tier before pricing a Codex model', () {
       expect(normalizeCodexModel('gpt-5.3-codex-high'), 'gpt-5.3-codex');
-      expect(normalizeCodexModel('gpt-5.1-codex-max-xhigh'), 'gpt-5.1-codex-max');
+      expect(
+        normalizeCodexModel('gpt-5.1-codex-max-xhigh'),
+        'gpt-5.1-codex-max',
+      );
       expect(normalizeCodexModel('gpt-5.6'), 'gpt-5.6-sol');
     });
 
@@ -375,22 +394,25 @@ void main() {
   });
 
   group('persisted shape', () {
-    test('the serialised keys are pinned, so a new field cannot slip through', () {
-      // ⚠️ **If this fails you added a field to `UsageTotals`.** Update the list
-      // AND bump `_kCacheVersion` in `usage_ledger_store.dart` — a cached source
-      // still matches its {path, mtime, size} fingerprint after the shape
-      // changes, so without the bump every old entry is served back with the new
-      // field defaulted and re-saved that way, forever. That is exactly how
-      // `reasoning` came to report 90.9k against a true 2.3M.
-      expect(const UsageTotals().toJson().keys.toSet(), {
-        'freshInput',
-        'output',
-        'cacheRead',
-        'cacheWrite5m',
-        'cacheWrite1h',
-        'reasoning',
-      });
-    });
+    test(
+      'the serialised keys are pinned, so a new field cannot slip through',
+      () {
+        // ⚠️ **If this fails you added a field to `UsageTotals`.** Update the list
+        // AND bump `_kCacheVersion` in `usage_ledger_store.dart` — a cached source
+        // still matches its {path, mtime, size} fingerprint after the shape
+        // changes, so without the bump every old entry is served back with the new
+        // field defaulted and re-saved that way, forever. That is exactly how
+        // `reasoning` came to report 90.9k against a true 2.3M.
+        expect(const UsageTotals().toJson().keys.toSet(), {
+          'freshInput',
+          'output',
+          'cacheRead',
+          'cacheWrite5m',
+          'cacheWrite1h',
+          'reasoning',
+        });
+      },
+    );
 
     test('an entry round-trips every field it carries', () {
       final original = entryOf(

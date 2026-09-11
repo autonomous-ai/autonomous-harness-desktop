@@ -23,7 +23,10 @@ void main() {
   });
 
   test('the default face is the one the store opens on', () {
-    expect(TerminalFontChoice.defaultForPlatform.fontFamily, terminalFontFamily);
+    expect(
+      TerminalFontChoice.defaultForPlatform.fontFamily,
+      terminalFontFamily,
+    );
     expect(
       TerminalFontChoice.defaultForPlatform.fontFamilyFallback,
       terminalFontFallback,

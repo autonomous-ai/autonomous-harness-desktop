@@ -54,7 +54,8 @@ ProviderLedger ledgerFromEntries(
     // The provider's own figure wins where there is one; otherwise the model
     // name is priced. A model nothing prices leaves the running total alone and
     // raises the flag — see `ProviderLedger.hasUnpricedModel`.
-    final entryCost = entry.costUsd ?? costOf(provider, entry.model, entry.totals);
+    final entryCost =
+        entry.costUsd ?? costOf(provider, entry.model, entry.totals);
     if (entryCost == null) {
       hasUnpriced = true;
     } else {
@@ -94,7 +95,8 @@ List<LedgerDay> dailyTotals(ProviderLedger ledger) {
         for (final entry in byDay[day]!) {
           totals += entry.totals;
           final entryCost =
-              entry.costUsd ?? costOf(ledger.provider, entry.model, entry.totals);
+              entry.costUsd ??
+              costOf(ledger.provider, entry.model, entry.totals);
           if (entryCost != null) cost = (cost ?? 0) + entryCost;
         }
         return LedgerDay(day: day, totals: totals, costUsd: cost);

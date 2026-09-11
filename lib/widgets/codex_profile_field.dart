@@ -83,7 +83,8 @@ class _CodexProfileFieldState extends State<CodexProfileField> {
     }
     final loaded = (result['profiles'] as List<dynamic>? ?? const [])
         .map(
-          (raw) => LocalCodexProfile.fromJson(Map<String, dynamic>.from(raw as Map)),
+          (raw) =>
+              LocalCodexProfile.fromJson(Map<String, dynamic>.from(raw as Map)),
         )
         .toList();
     final profiles = {for (final profile in loaded) profile.path: profile}

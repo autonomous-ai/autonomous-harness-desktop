@@ -58,7 +58,8 @@ class ScannedSource {
       entries: [
         if (entries is List)
           for (final raw in entries)
-            if (raw is Map<String, Object?>) ?LedgerEntry.fromJson(provider, raw),
+            if (raw is Map<String, Object?>)
+              ?LedgerEntry.fromJson(provider, raw),
       ],
     );
   }

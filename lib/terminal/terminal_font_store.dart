@@ -60,7 +60,11 @@ enum TerminalFontChoice {
     'monospace',
   ]);
 
-  const TerminalFontChoice(this.label, this.fontFamily, this.fontFamilyFallback);
+  const TerminalFontChoice(
+    this.label,
+    this.fontFamily,
+    this.fontFamilyFallback,
+  );
 
   final String label;
   final String fontFamily;
@@ -112,6 +116,7 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
 
   static const _familyKey = 'terminal_font_family';
   static const _sizeKey = 'terminal_font_size';
+
   /// The bounds the size is held inside — public because the Settings stepper
   /// has to *show* them: a + that stays lit at 22pt is a control that answers a
   /// click by doing nothing.
@@ -132,11 +137,10 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
         ),
       );
 
-  TerminalFontChoice get family =>
-      TerminalFontChoice.values.firstWhere(
-        (choice) => choice.fontFamily == value.fontFamily,
-        orElse: () => TerminalFontChoice.defaultForPlatform,
-      );
+  TerminalFontChoice get family => TerminalFontChoice.values.firstWhere(
+    (choice) => choice.fontFamily == value.fontFamily,
+    orElse: () => TerminalFontChoice.defaultForPlatform,
+  );
 
   double get size => value.fontSize;
 
@@ -156,7 +160,10 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
         _clamp(size ?? terminalFontSize),
       );
     } catch (_) {
-      value = _styleFor(TerminalFontChoice.defaultForPlatform, terminalFontSize);
+      value = _styleFor(
+        TerminalFontChoice.defaultForPlatform,
+        terminalFontSize,
+      );
     }
   }
 

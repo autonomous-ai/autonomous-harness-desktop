@@ -56,7 +56,9 @@ class _FileCliLogEntry implements CliLogEntry {
   void output(String line, {bool isError = false}) {
     if (_ended) return;
     // `!` gutter marks stderr so failures stand out; `|` for normal output.
-    _file.append('[${logClock(DateTime.now())}] #$_id ${isError ? '!' : '|'} $line');
+    _file.append(
+      '[${logClock(DateTime.now())}] #$_id ${isError ? '!' : '|'} $line',
+    );
   }
 
   @override

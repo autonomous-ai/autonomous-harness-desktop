@@ -82,9 +82,10 @@ class ShortcutsDeck extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = math.min(constraints.maxWidth, maxWidth);
-        final columns = ((width + _gap) / (minCardWidth + _gap))
-            .floor()
-            .clamp(1, _maxColumns);
+        final columns = ((width + _gap) / (minCardWidth + _gap)).floor().clamp(
+          1,
+          _maxColumns,
+        );
 
         // Dealt round-robin rather than split into runs, so the cards keep
         // reading left to right in declaration order across the first row.

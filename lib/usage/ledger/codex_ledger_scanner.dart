@@ -308,7 +308,9 @@ LedgerEntry? parseCodexLine(String line, CodexParseContext context) {
       return null;
     case 'turn_context':
       context.currentCwd =
-          (payload['cwd'] as String?) ?? context.currentCwd ?? context.sessionCwd;
+          (payload['cwd'] as String?) ??
+          context.currentCwd ??
+          context.sessionCwd;
       context.currentModel = _model(payload) ?? context.currentModel;
       return null;
     case 'event_msg':

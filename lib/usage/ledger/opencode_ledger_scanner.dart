@@ -23,9 +23,10 @@ import 'ledger_scanner.dart';
 import 'ledger_types.dart';
 
 class OpenCodeLedgerScanner implements LedgerScanner {
-  OpenCodeLedgerScanner({String? dataDirectory, Map<String, String>? environment})
-    : _dataDirectory =
-          dataDirectory ?? _resolveDataDirectory(environment);
+  OpenCodeLedgerScanner({
+    String? dataDirectory,
+    Map<String, String>? environment,
+  }) : _dataDirectory = dataDirectory ?? _resolveDataDirectory(environment);
 
   final String? _dataDirectory;
 
@@ -232,11 +233,10 @@ class OpenCodeLedgerScanner implements LedgerScanner {
     return null;
   }
 
-  static bool _hasTable(Database db, String name) => db
-      .select("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [
-        name,
-      ])
-      .isNotEmpty;
+  static bool _hasTable(Database db, String name) => db.select(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+    [name],
+  ).isNotEmpty;
 
   static Set<String> _columns(Database db, String table) => {
     for (final row in db.select('PRAGMA table_info($table)'))

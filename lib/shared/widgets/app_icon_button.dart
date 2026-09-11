@@ -146,11 +146,11 @@ class _AppIconButtonState extends State<AppIconButton>
       // Let the current revolution land instead of stopping the glyph at
       // whatever angle the reply happened to arrive at. A mark frozen at 200°
       // reads as a failure state; one that comes to rest upright reads as done.
-      _spin.animateTo(1, duration: _spinPeriod * (1 - _spin.value)).whenComplete(
-        () {
-          if (mounted && !widget.spinning) _spin.value = 0;
-        },
-      );
+      _spin
+          .animateTo(1, duration: _spinPeriod * (1 - _spin.value))
+          .whenComplete(() {
+            if (mounted && !widget.spinning) _spin.value = 0;
+          });
     }
   }
 

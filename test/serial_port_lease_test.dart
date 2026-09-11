@@ -92,7 +92,9 @@ void main() {
       // Flashing stops the daemon first, so discovery finds nothing and the
       // old code went straight on to start it again — taking back the port
       // esptool was writing through.
-      expect(await discovery.ensureRunning(), isNull);
+      final probe = await discovery.ensureRunning();
+      expect(probe.state, LocalCliProbeState.down);
+      expect(probe.endpoint, isNull);
     });
 
     expect(spawned, isFalse);

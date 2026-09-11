@@ -54,8 +54,16 @@ void main() {
   });
 
   test('a list is counted, not printed', () {
-    expect(redactValue({'agents': List.filled(40, 'a')}), '{agents: [40 items]}');
-    expect(redactValue({'agents': ['a']}), '{agents: [1 item]}');
+    expect(
+      redactValue({'agents': List.filled(40, 'a')}),
+      '{agents: [40 items]}',
+    );
+    expect(
+      redactValue({
+        'agents': ['a'],
+      }),
+      '{agents: [1 item]}',
+    );
   });
 
   test('the whole line is capped', () {

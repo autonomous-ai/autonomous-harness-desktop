@@ -27,15 +27,18 @@ enum TerminalBinaryKind {
   output(2),
   keyframe(3),
   sync(4),
+
   /// A clipboard paste made directly into the terminal, delivered as one atomic unit instead of
   /// going through the chunked keystroke pipeline — see [TerminalSession.pasteText]. Upload
   /// (client→CLI) only; nothing ever sends this back down.
   paste(5),
+
   /// A clipboard IMAGE paste (raw PNG bytes) — same "atomic, out-of-band" shape as [paste], but
   /// carrying binary image data instead of UTF-8 text, so it cannot share that kind (the CLI's
   /// paste handler requires valid UTF-8). See [TerminalSession.pasteImage]. Upload (client→CLI)
   /// only; nothing ever sends this back down.
   imagePaste(6),
+
   /// A dropped (non-image) FILE — carries the original filename plus its bytes, so the daemon can
   /// write it to disk on its own machine and paste that path as text (never the OS clipboard, and
   /// never a Ctrl+V replay — unlike [imagePaste], the goal here is only "the pane gets a valid
@@ -182,7 +185,8 @@ TerminalBinaryFrame? decodeTerminalPlain(
 /// wire format the app ever needs; there is no separate encrypted variant anymore.
 Uint8List? encodeTerminalLocal(TerminalBinaryFrame frame) {
   final payload = encodeTerminalPlain(frame);
-  if (payload == null || payload.length > _maxLocalPayloadBytesFor(frame.kind)) {
+  if (payload == null ||
+      payload.length > _maxLocalPayloadBytesFor(frame.kind)) {
     return null;
   }
   final header = Uint8List(terminalLocalHeaderBytes)

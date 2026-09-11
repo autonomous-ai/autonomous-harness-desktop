@@ -107,15 +107,18 @@ void main() {
     },
   );
 
-  test('an unreadable state file costs the preference, not the launch', () async {
-    final storage = _FakeStore()..broken = true;
-    final store = TerminalFontStore(storage: storage);
+  test(
+    'an unreadable state file costs the preference, not the launch',
+    () async {
+      final storage = _FakeStore()..broken = true;
+      final store = TerminalFontStore(storage: storage);
 
-    await store.load();
+      await store.load();
 
-    expect(store.family, TerminalFontChoice.defaultForPlatform);
-    expect(store.size, terminalFontSize);
-  });
+      expect(store.family, TerminalFontChoice.defaultForPlatform);
+      expect(store.size, terminalFontSize);
+    },
+  );
 
   test('the terminal moves even when the disk refuses', () async {
     final store = TerminalFontStore(storage: _FakeStore()..broken = true);
@@ -125,12 +128,16 @@ void main() {
     expect(store.family, TerminalFontChoice.menlo);
   });
 
-  test('an unknown saved family name falls back rather than throwing', () async {
-    final storage = _FakeStore()..values['terminal_font_family'] = 'comic-sans';
-    final store = TerminalFontStore(storage: storage);
+  test(
+    'an unknown saved family name falls back rather than throwing',
+    () async {
+      final storage = _FakeStore()
+        ..values['terminal_font_family'] = 'comic-sans';
+      final store = TerminalFontStore(storage: storage);
 
-    await store.load();
+      await store.load();
 
-    expect(store.family, TerminalFontChoice.defaultForPlatform);
-  });
+      expect(store.family, TerminalFontChoice.defaultForPlatform);
+    },
+  );
 }

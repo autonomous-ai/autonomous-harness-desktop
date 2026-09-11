@@ -41,13 +41,15 @@ class UploadProgress {
   final int bytesWritten;
   final int totalBytes;
 
-  double get percent => totalBytes <= 0 ? 0 : (bytesWritten / totalBytes).clamp(0, 1);
+  double get percent =>
+      totalBytes <= 0 ? 0 : (bytesWritten / totalBytes).clamp(0, 1);
 
-  UploadProgress copyWith({int? bytesWritten, int? totalBytes}) => UploadProgress(
-    label: label,
-    bytesWritten: bytesWritten ?? this.bytesWritten,
-    totalBytes: totalBytes ?? this.totalBytes,
-  );
+  UploadProgress copyWith({int? bytesWritten, int? totalBytes}) =>
+      UploadProgress(
+        label: label,
+        bytesWritten: bytesWritten ?? this.bytesWritten,
+        totalBytes: totalBytes ?? this.totalBytes,
+      );
 }
 
 /// Internal bookkeeping for one in-flight upload — see [TerminalSession._uploadBytes]. Two
@@ -347,7 +349,9 @@ class TerminalSession extends ChangeNotifier {
         if (!_matchesStream(payload)) return true;
         final bytesWritten = (payload['bytesWritten'] as num?)?.toInt();
         final totalBytes = (payload['totalBytes'] as num?)?.toInt();
-        if (bytesWritten != null && totalBytes != null && uploadProgress != null) {
+        if (bytesWritten != null &&
+            totalBytes != null &&
+            uploadProgress != null) {
           uploadProgress = uploadProgress!.copyWith(
             bytesWritten: bytesWritten,
             totalBytes: totalBytes,
@@ -755,7 +759,9 @@ class TerminalSession extends ChangeNotifier {
     if (!upload.finished.isCompleted) upload.finished.complete(false);
     _clearUpload();
     if (currentStreamId != null) {
-      await send('terminal_chunked_upload_cancel', {'streamId': currentStreamId});
+      await send('terminal_chunked_upload_cancel', {
+        'streamId': currentStreamId,
+      });
     }
   }
 

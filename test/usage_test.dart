@@ -72,15 +72,18 @@ void main() {
       expect(seconds, millis);
     });
 
-    test('an ISO string is read, and nonsense is null rather than epoch zero', () {
-      expect(
-        parseResetTimestamp('2026-09-08T12:00:00Z'),
-        DateTime.utc(2026, 9, 8, 12),
-      );
-      expect(parseResetTimestamp('not a date'), isNull);
-      expect(parseResetTimestamp(null), isNull);
-      expect(parseResetTimestamp(''), isNull);
-    });
+    test(
+      'an ISO string is read, and nonsense is null rather than epoch zero',
+      () {
+        expect(
+          parseResetTimestamp('2026-09-08T12:00:00Z'),
+          DateTime.utc(2026, 9, 8, 12),
+        );
+        expect(parseResetTimestamp('not a date'), isNull);
+        expect(parseResetTimestamp(null), isNull);
+        expect(parseResetTimestamp(''), isNull);
+      },
+    );
   });
 
   group('used percent', () {
@@ -89,10 +92,13 @@ void main() {
       expect(parseUsedPercent([null, 'x']), isNull);
     });
 
-    test('a figure outside 0-100 is clamped, not drawn off the end of the bar', () {
-      expect(parseUsedPercent([140]), 100);
-      expect(parseUsedPercent([-3]), 0);
-    });
+    test(
+      'a figure outside 0-100 is clamped, not drawn off the end of the bar',
+      () {
+        expect(parseUsedPercent([140]), 100);
+        expect(parseUsedPercent([-3]), 0);
+      },
+    );
   });
 
   group('countdown', () {
@@ -112,15 +118,18 @@ void main() {
       );
     });
 
-    test('a window with no reset time, or one already past, counts nothing', () {
-      // Null is not zero: "resets in 0m" would be a measurement invented out
-      // of a silence.
-      expect(
-        const UsageWindow(label: 'Fable', usedPercent: 0).resetsInLabel(),
-        isNull,
-      );
-      expect(at(const Duration(seconds: -5)).resetsInLabel(now: now), isNull);
-    });
+    test(
+      'a window with no reset time, or one already past, counts nothing',
+      () {
+        // Null is not zero: "resets in 0m" would be a measurement invented out
+        // of a silence.
+        expect(
+          const UsageWindow(label: 'Fable', usedPercent: 0).resetsInLabel(),
+          isNull,
+        );
+        expect(at(const Duration(seconds: -5)).resetsInLabel(now: now), isNull);
+      },
+    );
   });
 
   test('the tightest window is the one closest to stopping the work', () {
@@ -196,7 +205,11 @@ void main() {
     });
 
     test('Fable is found under any of the three names it has had', () async {
-      for (final key in ['fable_weekly', 'fable_seven_day', 'seven_day_fable']) {
+      for (final key in [
+        'fable_weekly',
+        'fable_seven_day',
+        'seven_day_fable',
+      ]) {
         final source = ClaudeUsageSource(
           dio: _dioAnswering({
             key: {'utilization': 7},
@@ -220,25 +233,30 @@ void main() {
       expect(reading.status, UsageStatus.signedOut);
     });
 
-    test('an expired token is spent as a sign-in, not as a round trip', () async {
-      var called = false;
-      final dio = _dioAnswering(const {});
-      dio.interceptors.add(
-        InterceptorsWrapper(onRequest: (o, h) {
-          called = true;
-          h.next(o);
-        }),
-      );
-      final reading = await ClaudeUsageSource(
-        dio: dio,
-        credentials: _creds(
-          claudeJson: '{"claudeAiOauth":{"accessToken":"t","expiresAt":1}}',
-        ),
-      ).read();
+    test(
+      'an expired token is spent as a sign-in, not as a round trip',
+      () async {
+        var called = false;
+        final dio = _dioAnswering(const {});
+        dio.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (o, h) {
+              called = true;
+              h.next(o);
+            },
+          ),
+        );
+        final reading = await ClaudeUsageSource(
+          dio: dio,
+          credentials: _creds(
+            claudeJson: '{"claudeAiOauth":{"accessToken":"t","expiresAt":1}}',
+          ),
+        ).read();
 
-      expect(reading.status, UsageStatus.signedOut);
-      expect(called, isFalse);
-    });
+        expect(reading.status, UsageStatus.signedOut);
+        expect(called, isFalse);
+      },
+    );
 
     test('a 401 is a sign-in and a 500 is a failure', () async {
       Future<UsageStatus> statusFor(int code) async => (await ClaudeUsageSource(
@@ -281,21 +299,24 @@ void main() {
       expect(reading.windows.first.usedPercent, 9);
     });
 
-    test('a window whose duration was never sent is not given a made-up one', () async {
-      final reading = await CodexUsageSource(
-        dio: _dioAnswering({
-          'rate_limit': {
-            'primary_window': {'used_percent': 9},
-          },
-        }),
-        credentials: _creds(
-          codexJson: '{"tokens":{"access_token":"t","account_id":"acct"}}',
-        ),
-      ).read();
+    test(
+      'a window whose duration was never sent is not given a made-up one',
+      () async {
+        final reading = await CodexUsageSource(
+          dio: _dioAnswering({
+            'rate_limit': {
+              'primary_window': {'used_percent': 9},
+            },
+          }),
+          credentials: _creds(
+            codexJson: '{"tokens":{"access_token":"t","account_id":"acct"}}',
+          ),
+        ).read();
 
-      // A confident "5h" beside a real percentage would be read as measured.
-      expect(reading.windows.single.label, 'Limit');
-    });
+        // A confident "5h" beside a real percentage would be read as measured.
+        expect(reading.windows.single.label, 'Limit');
+      },
+    );
 
     test('no auth.json is a sign-in, not a failure', () async {
       final reading = await CodexUsageSource(
@@ -380,8 +401,10 @@ void main() {
       expect(claude.color, engineIdentity('claude').color);
       // The mark at the top of the panel is drawn from the same source, so the
       // two cannot drift into two colours for one account.
-      expect(claude.color.r == claude.color.g && claude.color.g == claude.color.b,
-          isFalse);
+      expect(
+        claude.color.r == claude.color.g && claude.color.g == claude.color.b,
+        isFalse,
+      );
     });
 
     testWidgets('a nearly spent window stops wearing the account colour', (
@@ -414,10 +437,7 @@ void main() {
 
     test('the last good reading survives a failed refresh, and goes stale', () async {
       final source = _SwitchableSource();
-      final controller = UsageController(
-        sources: [source],
-        autoStart: false,
-      );
+      final controller = UsageController(sources: [source], autoStart: false);
 
       await controller.refresh();
       expect(controller.answered.single.windows.single.usedPercent, 2);

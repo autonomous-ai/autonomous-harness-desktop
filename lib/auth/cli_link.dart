@@ -47,7 +47,11 @@ class CliLinkConnectResult {
   /// The linked machine's fingerprint, for the user to verify.
   final String? fingerprint;
 
-  const CliLinkConnectResult({this.error, this.linkedMachineId, this.fingerprint});
+  const CliLinkConnectResult({
+    this.error,
+    this.linkedMachineId,
+    this.fingerprint,
+  });
 }
 
 /// One row of `harness link list`.
@@ -95,7 +99,9 @@ class CliLink {
     }
     final json = invocation.result!;
     if (json['ok'] == true) {
-      return RemotePasswordSetResult(fingerprint: json['fingerprint'] as String?);
+      return RemotePasswordSetResult(
+        fingerprint: json['fingerprint'] as String?,
+      );
     }
     return RemotePasswordSetResult(
       error: json['error'] as String? ?? 'harness remote-password set failed',
@@ -104,10 +110,11 @@ class CliLink {
 
   /// Whether this machine currently has a remote password set, and its fingerprint/set time.
   Future<RemotePasswordStatus> remotePasswordStatus() async {
-    final invocation = await _runJson(
-      ['remote-password', 'status', '--json'],
-      label: 'harness remote-password status',
-    );
+    final invocation = await _runJson([
+      'remote-password',
+      'status',
+      '--json',
+    ], label: 'harness remote-password status');
     if (invocation.error != null) {
       return RemotePasswordStatus(error: invocation.error);
     }
@@ -125,10 +132,11 @@ class CliLink {
   /// Clears this machine's remote password, revoking remote access for anyone who knew it. Null
   /// on success.
   Future<String?> clearRemotePassword() async {
-    final invocation = await _runJson(
-      ['remote-password', 'clear', '--json'],
-      label: 'harness remote-password clear',
-    );
+    final invocation = await _runJson([
+      'remote-password',
+      'clear',
+      '--json',
+    ], label: 'harness remote-password clear');
     if (invocation.error != null) return invocation.error;
     final json = invocation.result!;
     if (json['ok'] == true) return null;
@@ -154,7 +162,8 @@ class CliLink {
         machineId,
         '--stdin',
         '--json',
-        if (displayName != null && displayName.isNotEmpty) '--name=$displayName',
+        if (displayName != null && displayName.isNotEmpty)
+          '--name=$displayName',
       ],
       password,
       label: 'harness link connect',
@@ -176,7 +185,8 @@ class CliLink {
     // `message` is the CLI's human sentence for the code (what it prints without --json); `error`
     // is the bare code and only a fallback for a CLI too old to send one.
     return CliLinkConnectResult(
-      error: json['message'] as String? ??
+      error:
+          json['message'] as String? ??
           json['error'] as String? ??
           'harness link connect failed',
     );

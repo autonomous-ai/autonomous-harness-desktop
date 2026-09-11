@@ -37,10 +37,7 @@ Dio buildUsageDio({String? baseUrl}) => Dio(
 ///
 /// Shared because the two vendors fail in the same four ways even though they
 /// succeed in different shapes.
-ProviderUsage? usageFailureFor(
-  UsageProvider provider,
-  int? statusCode,
-) {
+ProviderUsage? usageFailureFor(UsageProvider provider, int? statusCode) {
   if (statusCode == null) {
     return ProviderUsage(
       provider: provider,

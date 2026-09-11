@@ -72,9 +72,7 @@ class _UsageProviderPaneState extends State<UsageProviderPane> {
             state.status == LedgerStatus.failed)
           _Notice(message: state.message ?? 'No figures.')
         else if (!report.hasData)
-          _Notice(
-            message: 'No ${provider.label} usage in this range.',
-          )
+          _Notice(message: 'No ${provider.label} usage in this range.')
         else ...[
           _Figures(report: report),
           const SizedBox(height: 8),

@@ -68,7 +68,8 @@ LedgerEntry _entry({
 /// field and the overview's own provider rows print the same words — and the
 /// repo's `app_select_field_test` drives it exactly this way.
 final _lensField = find.byWidgetPredicate(
-  (widget) => widget.runtimeType.toString() == 'AppSelectField<LedgerProvider?>',
+  (widget) =>
+      widget.runtimeType.toString() == 'AppSelectField<LedgerProvider?>',
 );
 
 /// The overview's range picker, found the same way as the lens.
@@ -159,19 +160,20 @@ void main() {
   });
 
   group('stats', () {
-    testWidgets('an app that has done nothing says so, rather than three zeroes', (
-      tester,
-    ) async {
-      final controller = controllerWith(const {});
-      await controller.load();
-      await pumpUsage(tester, controller);
+    testWidgets(
+      'an app that has done nothing says so, rather than three zeroes',
+      (tester) async {
+        final controller = controllerWith(const {});
+        await controller.load();
+        await pumpUsage(tester, controller);
 
-      expect(
-        find.text('Start your first agent to begin tracking.'),
-        findsOneWidget,
-      );
-      expect(find.text('Agents spawned'), findsNothing);
-    });
+        expect(
+          find.text('Start your first agent to begin tracking.'),
+          findsOneWidget,
+        );
+        expect(find.text('Agents spawned'), findsNothing);
+      },
+    );
 
     testWidgets('draws the three counters and the date they run from', (
       tester,
@@ -454,7 +456,10 @@ void main() {
       // The eight figures, the range it is showing, and the panels under them.
       expect(find.text('Cache reuse rate'), findsOneWidget);
       expect(find.text('Sessions / turns'), findsOneWidget);
-      expect(find.text('All local Claude usage · Last 30 days'), findsOneWidget);
+      expect(
+        find.text('All local Claude usage · Last 30 days'),
+        findsOneWidget,
+      );
       expect(find.byType(UsageDailyChart), findsOneWidget);
       expect(find.text('By model'), findsOneWidget);
       expect(find.text('By project'), findsOneWidget);

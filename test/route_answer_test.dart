@@ -16,8 +16,20 @@ void main() {
       'confidence': 0.86,
       'reason': 'name matches the domain',
       'candidates': [
-        {'agentId': 'a1', 'machineId': 'm-local', 'name': 'auth-api', 'machine': 'this computer', 'recent': 'token rotation'},
-        {'agentId': 'a2', 'machineId': 'm-mini', 'name': 'payment-api', 'machine': 'mac-mini', 'recent': 'webhook retries'},
+        {
+          'agentId': 'a1',
+          'machineId': 'm-local',
+          'name': 'auth-api',
+          'machine': 'this computer',
+          'recent': 'token rotation',
+        },
+        {
+          'agentId': 'a2',
+          'machineId': 'm-mini',
+          'name': 'payment-api',
+          'machine': 'mac-mini',
+          'recent': 'webhook retries',
+        },
       ],
     });
     expect(answer.agentId, 'a1');
@@ -27,7 +39,10 @@ void main() {
     expect(answer.candidates.first.recent, 'token rotation');
     // The machine travels with the name: the list spans every computer, so it is the only thing telling
     // two agents called the same thing apart.
-    expect(answer.candidates.map((c) => c.machine), ['this computer', 'mac-mini']);
+    expect(answer.candidates.map((c) => c.machine), [
+      'this computer',
+      'mac-mini',
+    ]);
     // …and the id beside it, which is what actually opens the pane on the right computer.
     expect(answer.machineId, 'm-local');
     expect(answer.candidates.map((c) => c.machineId), ['m-local', 'm-mini']);
@@ -43,8 +58,18 @@ void main() {
       'machines': 4,
       'via': 'model',
       'candidates': [
-        {'agentId': 'a1', 'name': 'auth-api', 'engine': 'claude', 'confidence': 0.44},
-        {'agentId': 'a2', 'name': 'payment-api', 'engine': 'codex', 'confidence': 0.31},
+        {
+          'agentId': 'a1',
+          'name': 'auth-api',
+          'engine': 'claude',
+          'confidence': 0.44,
+        },
+        {
+          'agentId': 'a2',
+          'name': 'payment-api',
+          'engine': 'codex',
+          'confidence': 0.31,
+        },
         {'agentId': 'a3', 'name': 'web'},
       ],
     });
@@ -100,11 +125,17 @@ void main() {
   test('an integer confidence is still a number', () {
     // The router is told to answer 0..1 and a model that says `1` sends an int. Read as a double or the
     // certain answer is the one that gets second-guessed.
-    expect(RouteAnswer.fromJson({'agentId': 'a1', 'confidence': 1}).confidence, 1.0);
+    expect(
+      RouteAnswer.fromJson({'agentId': 'a1', 'confidence': 1}).confidence,
+      1.0,
+    );
   });
 
   test('a picked-nobody answer says so rather than pretending', () {
-    final answer = RouteAnswer.fromJson({'agentId': '', 'reason': 'no agents in machine'});
+    final answer = RouteAnswer.fromJson({
+      'agentId': '',
+      'reason': 'no agents in machine',
+    });
     expect(answer.isEmpty, isTrue);
     expect(answer.confidence, 0);
     expect(answer.candidates, isEmpty);
@@ -116,7 +147,11 @@ void main() {
     final answer = RouteAnswer.fromJson({
       'agentId': 7,
       'confidence': 'high',
-      'candidates': ['not a candidate', 42, {'agentId': 'a3', 'name': 'ok'}],
+      'candidates': [
+        'not a candidate',
+        42,
+        {'agentId': 'a3', 'name': 'ok'},
+      ],
     });
     expect(answer.isEmpty, isTrue);
     expect(answer.confidence, 0);

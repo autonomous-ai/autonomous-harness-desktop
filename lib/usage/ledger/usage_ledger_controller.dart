@@ -27,20 +27,25 @@ import 'usage_overview.dart';
 import 'usage_report.dart';
 
 class UsageLedgerController extends ChangeNotifier {
-  UsageLedgerController({List<UsageLedgerStore>? stores, LocalKeyValueStore? settings})
-    : stores =
-          stores ??
-          [
-            UsageLedgerStore(
-              scanner: ClaudeLedgerScanner(),
-              settings: settings,
-            ),
-            UsageLedgerStore(scanner: CodexLedgerScanner(), settings: settings),
-            UsageLedgerStore(
-              scanner: OpenCodeLedgerScanner(),
-              settings: settings,
-            ),
-          ] {
+  UsageLedgerController({
+    List<UsageLedgerStore>? stores,
+    LocalKeyValueStore? settings,
+  }) : stores =
+           stores ??
+           [
+             UsageLedgerStore(
+               scanner: ClaudeLedgerScanner(),
+               settings: settings,
+             ),
+             UsageLedgerStore(
+               scanner: CodexLedgerScanner(),
+               settings: settings,
+             ),
+             UsageLedgerStore(
+               scanner: OpenCodeLedgerScanner(),
+               settings: settings,
+             ),
+           ] {
     for (final store in this.stores) {
       store.addListener(_onStoreChanged);
     }

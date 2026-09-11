@@ -235,9 +235,7 @@ class _SidebarRow extends StatelessWidget {
     final ink = item.dimmed
         ? AppPalette.textFaint
         : Color.lerp(
-            item.emphasized
-                ? AppPalette.textPrimary
-                : AppPalette.textSecondary,
+            item.emphasized ? AppPalette.textPrimary : AppPalette.textSecondary,
             AppPalette.textPrimary,
             select,
           )!;

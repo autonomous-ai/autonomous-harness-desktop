@@ -11,7 +11,9 @@ import 'package:flutter/services.dart';
 class NativeClipboard {
   NativeClipboard._();
 
-  static const MethodChannel _channel = MethodChannel('harness/clipboard_image');
+  static const MethodChannel _channel = MethodChannel(
+    'harness/clipboard_image',
+  );
 
   /// Reads the system clipboard for an image, returned as PNG bytes.
   ///
@@ -43,7 +45,10 @@ class NativeClipboard {
   static Future<bool> writeImagePng(Uint8List pngBytes) async {
     if (!Platform.isMacOS && !Platform.isLinux) return false;
     try {
-      final wrote = await _channel.invokeMethod<bool>('writeImagePng', pngBytes);
+      final wrote = await _channel.invokeMethod<bool>(
+        'writeImagePng',
+        pngBytes,
+      );
       return wrote ?? false;
     } on MissingPluginException {
       return false;

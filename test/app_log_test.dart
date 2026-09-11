@@ -28,7 +28,10 @@ void main() {
 
       file.append('hello');
 
-      expect(File('${nested.path}/app-20260907.log').readAsStringSync(), 'hello\n');
+      expect(
+        File('${nested.path}/app-20260907.log').readAsStringSync(),
+        'hello\n',
+      );
     });
 
     test('a new day opens a new file and leaves yesterday intact', () {
@@ -39,8 +42,14 @@ void main() {
       now = DateTime(2026, 9, 8);
       file.append('tuesday');
 
-      expect(File('${dir.path}/app-20260907.log').readAsStringSync(), 'monday\n');
-      expect(File('${dir.path}/app-20260908.log').readAsStringSync(), 'tuesday\n');
+      expect(
+        File('${dir.path}/app-20260907.log').readAsStringSync(),
+        'monday\n',
+      );
+      expect(
+        File('${dir.path}/app-20260908.log').readAsStringSync(),
+        'tuesday\n',
+      );
     });
 
     test('the day rollover prunes past retention, and only this base', () {
@@ -84,7 +93,10 @@ void main() {
       );
 
       final text = sink.currentFile.readAsStringSync();
-      expect(text, contains('[2026-09-07 08:05:03] WARN  ws      socket closed'));
+      expect(
+        text,
+        contains('[2026-09-07 08:05:03] WARN  ws      socket closed'),
+      );
       expect(text, contains('err=code 4404'));
       expect(text, contains('    #0 first'));
       expect(text, contains('    #1 second'));
@@ -95,12 +107,18 @@ void main() {
       // frame, and each copy costs an fsync on the UI isolate.
       var now = DateTime(2026, 9, 7, 8);
       final sink = DailyLogFile(dir, 'app', clock: () => now);
-      final log = FileAppLog(sink, burst: ErrorBurstFilter(clock: () => now), clock: () => now);
+      final log = FileAppLog(
+        sink,
+        burst: ErrorBurstFilter(clock: () => now),
+        clock: () => now,
+      );
 
       for (var i = 0; i < 500; i++) {
         log.failure('flutter', 'the same assertion');
       }
-      final duringBurst = '\n'.allMatches(sink.currentFile.readAsStringSync()).length;
+      final duringBurst = '\n'
+          .allMatches(sink.currentFile.readAsStringSync())
+          .length;
       expect(duringBurst, 1, reason: '500 copies must not be 500 lines');
 
       now = now.add(const Duration(minutes: 1));

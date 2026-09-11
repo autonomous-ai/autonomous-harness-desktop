@@ -144,7 +144,11 @@ void main() {
       throwsA(
         isA<WsRequestFailure>()
             .having((f) => f.code, 'code', 'UNSUPPORTED_ON_REMOTE')
-            .having((f) => f.detail, 'detail', 'this machine cannot create agents')
+            .having(
+              (f) => f.detail,
+              'detail',
+              'this machine cannot create agents',
+            )
             .having(
               (f) => f.responseType,
               'responseType',

@@ -53,51 +53,48 @@ void main() {
     },
   );
 
-  test(
-    'auth and config share one persistent document',
-    () async {
-      final storage = HarnessFileStore(directory: dataDirectory);
-      final auth = AuthSession(storage: storage);
-      final config = ConfigStore(storage: storage);
+  test('auth and config share one persistent document', () async {
+    final storage = HarnessFileStore(directory: dataDirectory);
+    final auth = AuthSession(storage: storage);
+    final config = ConfigStore(storage: storage);
 
-      await auth.saveLogin(
-        token: 'access-secret',
-        refreshToken: 'refresh-secret',
-        autonomousEnv: 'stag',
-        expiresIn: 3600,
-      );
-      await config.save('https://harness-api.example.test');
-      await config.saveEnvironment('stag');
-      await config.saveSkippedDesktopUpdateVersion('1.2.3');
+    await auth.saveLogin(
+      token: 'access-secret',
+      refreshToken: 'refresh-secret',
+      autonomousEnv: 'stag',
+      expiresIn: 3600,
+    );
+    await config.save('https://harness-api.example.test');
+    await config.saveEnvironment('stag');
+    await config.saveSkippedDesktopUpdateVersion('1.2.3');
 
-      final reopenedStorage = HarnessFileStore(directory: dataDirectory);
-      final reopenedAuth = AuthSession(storage: reopenedStorage);
-      final reopenedConfig = ConfigStore(storage: reopenedStorage);
+    final reopenedStorage = HarnessFileStore(directory: dataDirectory);
+    final reopenedAuth = AuthSession(storage: reopenedStorage);
+    final reopenedConfig = ConfigStore(storage: reopenedStorage);
 
-      expect(await reopenedAuth.accessToken(), 'access-secret');
-      expect(await reopenedAuth.refreshToken(), 'refresh-secret');
-      expect(await reopenedAuth.autonomousEnv(), 'stag');
-      expect(await reopenedAuth.accessTokenExpiresAt(), isNotNull);
-      expect(
-        (await reopenedConfig.load()).apiBaseUrl,
-        'https://harness-api.example.test',
-      );
-      expect(reopenedConfig.config.autonomousEnv, 'stag');
-      expect(reopenedConfig.skippedDesktopUpdateVersion, '1.2.3');
+    expect(await reopenedAuth.accessToken(), 'access-secret');
+    expect(await reopenedAuth.refreshToken(), 'refresh-secret');
+    expect(await reopenedAuth.autonomousEnv(), 'stag');
+    expect(await reopenedAuth.accessTokenExpiresAt(), isNotNull);
+    expect(
+      (await reopenedConfig.load()).apiBaseUrl,
+      'https://harness-api.example.test',
+    );
+    expect(reopenedConfig.config.autonomousEnv, 'stag');
+    expect(reopenedConfig.skippedDesktopUpdateVersion, '1.2.3');
 
-      await reopenedConfig.saveSkippedDesktopUpdateVersion(null);
-      await reopenedConfig.load();
-      expect(reopenedConfig.skippedDesktopUpdateVersion, isNull);
+    await reopenedConfig.saveSkippedDesktopUpdateVersion(null);
+    await reopenedConfig.load();
+    expect(reopenedConfig.skippedDesktopUpdateVersion, isNull);
 
-      await reopenedAuth.clear();
-      expect(await reopenedAuth.accessToken(), isNull);
-      expect(await reopenedAuth.refreshToken(), isNull);
-      expect(
-        (await reopenedConfig.load()).apiBaseUrl,
-        'https://harness-api.example.test',
-      );
-    },
-  );
+    await reopenedAuth.clear();
+    expect(await reopenedAuth.accessToken(), isNull);
+    expect(await reopenedAuth.refreshToken(), isNull);
+    expect(
+      (await reopenedConfig.load()).apiBaseUrl,
+      'https://harness-api.example.test',
+    );
+  });
 
   test('quarantines malformed JSON and starts with empty state', () async {
     final store = HarnessFileStore(directory: dataDirectory);

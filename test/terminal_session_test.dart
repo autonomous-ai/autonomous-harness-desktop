@@ -138,7 +138,13 @@ void main() {
     // Split across two writes with no ST in sight: the parser must hold the body
     // back rather than print what it has, the same contract OSC keeps.
     await session.handleBinary(
-      output(0, utf8.encode('A\x1bPtmux;partial'), keyframe: true, cols: 80, rows: 24),
+      output(
+        0,
+        utf8.encode('A\x1bPtmux;partial'),
+        keyframe: true,
+        cols: 80,
+        rows: 24,
+      ),
     );
     expect(session.terminal.buffer.getText(), isNot(contains('partial')));
 
@@ -168,33 +174,30 @@ void main() {
     expect(sent.where((frame) => frame.type == 'terminal_resync'), isEmpty);
   });
 
-  test(
-    'copied text keeps cursor-positioned gaps as spaces instead of gluing words together',
-    () async {
-      await ready();
+  test('copied text keeps cursor-positioned gaps as spaces instead of gluing words together', () async {
+    await ready();
 
-      // TUI-style output (Claude Code, Codex, …) lays out text with cursor-forward moves (CSI C)
-      // rather than printing literal space bytes — those cells are never written to, so their
-      // stored codePoint is 0, the same value an erased cell has. Line 1: 3-column indent before
-      // "indented". Line 2: a 5-column gap between two words.
-      await session.handleBinary(
-        output(
-          0,
-          utf8.encode('\x1b[3Cindented\r\nfirst\x1b[5Csecond'),
-          keyframe: true,
-          cols: 80,
-          rows: 24,
-        ),
-      );
+    // TUI-style output (Claude Code, Codex, …) lays out text with cursor-forward moves (CSI C)
+    // rather than printing literal space bytes — those cells are never written to, so their
+    // stored codePoint is 0, the same value an erased cell has. Line 1: 3-column indent before
+    // "indented". Line 2: a 5-column gap between two words.
+    await session.handleBinary(
+      output(
+        0,
+        utf8.encode('\x1b[3Cindented\r\nfirst\x1b[5Csecond'),
+        keyframe: true,
+        cols: 80,
+        rows: 24,
+      ),
+    );
 
-      final lines = session.terminal.buffer.getText().split('\n');
-      expect(lines[0], '   indented');
-      expect(lines[1], 'first     second');
-      // A line with no real content anywhere must still copy as empty, not as columns of padding —
-      // only the gap BEFORE real content becomes spaces, not blank cells with nothing after them.
-      expect(lines[2], isEmpty);
-    },
-  );
+    final lines = session.terminal.buffer.getText().split('\n');
+    expect(lines[0], '   indented');
+    expect(lines[1], 'first     second');
+    // A line with no real content anywhere must still copy as empty, not as columns of padding —
+    // only the gap BEFORE real content becomes spaces, not blank cells with nothing after them.
+    expect(lines[2], isEmpty);
+  });
 
   test(
     'uses measured viewport geometry for the initial terminal_open',
@@ -754,22 +757,19 @@ void main() {
     },
   );
 
-  test(
-    'terminal_link_mode accepts turn, the third transport, alongside the other two',
-    () async {
-      await ready();
+  test('terminal_link_mode accepts turn, the third transport, alongside the other two', () async {
+    await ready();
 
-      // 'turn' is additive: 'relay' keeps meaning the backend WebSocket, so a build that predates TURN
-      // can never read a Cloudflare-relayed session as a WS-relayed one.
-      for (final mode in ['p2p', 'turn', 'relay']) {
-        await session.handleFrame('terminal_link_mode', {
-          'streamId': streamId,
-          'mode': mode,
-        });
-        expect(session.linkMode, mode);
-      }
-    },
-  );
+    // 'turn' is additive: 'relay' keeps meaning the backend WebSocket, so a build that predates TURN
+    // can never read a Cloudflare-relayed session as a WS-relayed one.
+    for (final mode in ['p2p', 'turn', 'relay']) {
+      await session.handleFrame('terminal_link_mode', {
+        'streamId': streamId,
+        'mode': mode,
+      });
+      expect(session.linkMode, mode);
+    }
+  });
 
   test(
     'a mode this build cannot draw leaves the last known one alone',
@@ -892,16 +892,13 @@ void main() {
       expect(messages().single['content'], 'ship it');
     });
 
-    test(
-      'forwards Ctrl+C in composed text rather than stripping it',
-      () async {
-        await live();
+    test('forwards Ctrl+C in composed text rather than stripping it', () async {
+      await live();
 
-        expect(await session.sendComposerText('a\x03b'), isTrue);
+      expect(await session.sendComposerText('a\x03b'), isTrue);
 
-        expect(messages().single['content'], 'a\x03b');
-      },
-    );
+      expect(messages().single['content'], 'a\x03b');
+    });
 
     test('sends nothing while the stream is not accepting input', () async {
       expect(session.acceptsInput, isFalse);
@@ -934,31 +931,34 @@ void main() {
       binarySent.clear();
     }
 
-    test('sends the whole clipboard as one binary frame, not chunked', () async {
-      await live();
-      final big = List.generate(200, (i) => 'line $i').join('\n');
-
-      expect(await session.pasteText(big), isTrue);
-
-      expect(pastes(), hasLength(1));
-      expect(utf8.decode(pastes().single.bytes), big);
-      expect(pastes().single.streamId, streamId);
-      expect(pastes().single.compressed, isFalse);
-      // Never through the ordinary keystroke pipeline this feature exists to avoid, and never as JSON.
-      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.input), isEmpty);
-      expect(sent, isEmpty);
-    });
-
     test(
-      'forwards Ctrl+C in a paste rather than stripping it',
+      'sends the whole clipboard as one binary frame, not chunked',
       () async {
         await live();
+        final big = List.generate(200, (i) => 'line $i').join('\n');
 
-        expect(await session.pasteText('a\x03b'), isTrue);
+        expect(await session.pasteText(big), isTrue);
 
-        expect(utf8.decode(pastes().single.bytes), 'a\x03b');
+        expect(pastes(), hasLength(1));
+        expect(utf8.decode(pastes().single.bytes), big);
+        expect(pastes().single.streamId, streamId);
+        expect(pastes().single.compressed, isFalse);
+        // Never through the ordinary keystroke pipeline this feature exists to avoid, and never as JSON.
+        expect(
+          binarySent.where((f) => f.kind == TerminalBinaryKind.input),
+          isEmpty,
+        );
+        expect(sent, isEmpty);
       },
     );
+
+    test('forwards Ctrl+C in a paste rather than stripping it', () async {
+      await live();
+
+      expect(await session.pasteText('a\x03b'), isTrue);
+
+      expect(utf8.decode(pastes().single.bytes), 'a\x03b');
+    });
 
     test('sends nothing while the stream is not accepting input', () async {
       expect(session.acceptsInput, isFalse);
@@ -973,39 +973,33 @@ void main() {
       expect(pastes(), isEmpty);
     });
 
-    test(
-      'a rejected paste (too large/empty) leaves the stream alive, unlike every other terminal_error',
-      () async {
-        await live();
+    test('a rejected paste (too large/empty) leaves the stream alive, unlike every other terminal_error', () async {
+      await live();
 
-        final handled = await session.handleFrame('terminal_error', {
-          'streamId': streamId,
-          'code': 'TERMINAL_PASTE_INVALID',
-          'message': 'paste too large',
-        });
+      final handled = await session.handleFrame('terminal_error', {
+        'streamId': streamId,
+        'code': 'TERMINAL_PASTE_INVALID',
+        'message': 'paste too large',
+      });
 
-        expect(handled, isTrue);
-        expect(session.status, TerminalSessionStatus.controlling);
-        expect(session.streamId, streamId);
-        expect(session.errorCode, isNull);
-      },
-    );
+      expect(handled, isTrue);
+      expect(session.status, TerminalSessionStatus.controlling);
+      expect(session.streamId, streamId);
+      expect(session.errorCode, isNull);
+    });
 
-    test(
-      'a real paste delivery failure still freezes the stream, like resize/input failures do',
-      () async {
-        await live();
+    test('a real paste delivery failure still freezes the stream, like resize/input failures do', () async {
+      await live();
 
-        await session.handleFrame('terminal_error', {
-          'streamId': streamId,
-          'code': 'TERMINAL_PASTE_FAILED',
-          'message': 'tmux paste-buffer could not be sent',
-        });
+      await session.handleFrame('terminal_error', {
+        'streamId': streamId,
+        'code': 'TERMINAL_PASTE_FAILED',
+        'message': 'tmux paste-buffer could not be sent',
+      });
 
-        expect(session.status, TerminalSessionStatus.error);
-        expect(session.errorCode, 'TERMINAL_PASTE_FAILED');
-      },
-    );
+      expect(session.status, TerminalSessionStatus.error);
+      expect(session.errorCode, 'TERMINAL_PASTE_FAILED');
+    });
   });
 
   group('pasteImage / pasteFile — chunked upload', () {
@@ -1041,114 +1035,149 @@ void main() {
       });
     }
 
-    test('image: begin → one chunk → result, and reports live progress', () async {
-      await live();
-      final png = Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff]);
+    test(
+      'image: begin → one chunk → result, and reports live progress',
+      () async {
+        await live();
+        final png = Uint8List.fromList(const [
+          0x89,
+          0x50,
+          0x4e,
+          0x47,
+          0x0d,
+          0x0a,
+          0x1a,
+          0x0a,
+          0xff,
+        ]);
 
-      final future = session.pasteImage(png);
-      await acceptBegin();
-      expect(sent.single.payload, containsPair('uploadKind', 'image'));
-      expect(sent.single.payload, containsPair('totalBytes', png.length));
-      expect(sent.single.payload, isNot(contains('filename')));
+        final future = session.pasteImage(png);
+        await acceptBegin();
+        expect(sent.single.payload, containsPair('uploadKind', 'image'));
+        expect(sent.single.payload, containsPair('totalBytes', png.length));
+        expect(sent.single.payload, isNot(contains('filename')));
 
-      await pump();
-      expect(imagePastes(), hasLength(1));
-      expect(imagePastes().single.bytes, png);
-      expect(imagePastes().single.seq, 0);
-      expect(imagePastes().single.compressed, isFalse);
-      // Never through the ordinary keystroke pipeline or the text-paste kind.
-      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.input), isEmpty);
-      expect(binarySent.where((f) => f.kind == TerminalBinaryKind.paste), isEmpty);
+        await pump();
+        expect(imagePastes(), hasLength(1));
+        expect(imagePastes().single.bytes, png);
+        expect(imagePastes().single.seq, 0);
+        expect(imagePastes().single.compressed, isFalse);
+        // Never through the ordinary keystroke pipeline or the text-paste kind.
+        expect(
+          binarySent.where((f) => f.kind == TerminalBinaryKind.input),
+          isEmpty,
+        );
+        expect(
+          binarySent.where((f) => f.kind == TerminalBinaryKind.paste),
+          isEmpty,
+        );
 
-      expect(session.uploadProgress, isNotNull);
-      await session.handleFrame('terminal_chunked_upload_progress', {
-        'streamId': streamId,
-        'bytesWritten': png.length,
-        'totalBytes': png.length,
-      });
-      expect(session.uploadProgress!.percent, 1.0);
+        expect(session.uploadProgress, isNotNull);
+        await session.handleFrame('terminal_chunked_upload_progress', {
+          'streamId': streamId,
+          'bytesWritten': png.length,
+          'totalBytes': png.length,
+        });
+        expect(session.uploadProgress!.percent, 1.0);
 
-      await session.handleFrame('terminal_paste_image_result', {
-        'streamId': streamId,
-        'outcome': 'clipboard',
-      });
-      expect(await future, isTrue);
-      expect(session.uploadProgress, isNull); // cleared once finished
-    });
+        await session.handleFrame('terminal_paste_image_result', {
+          'streamId': streamId,
+          'outcome': 'clipboard',
+        });
+        expect(await future, isTrue);
+        expect(session.uploadProgress, isNull); // cleared once finished
+      },
+    );
 
-    test('file: begin carries the filename, and the result frame finishes it', () async {
-      await live();
-      final content = Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]);
+    test(
+      'file: begin carries the filename, and the result frame finishes it',
+      () async {
+        await live();
+        final content = Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]);
 
-      final future = session.pasteFile('report.pdf', content);
-      await acceptBegin();
-      expect(sent.single.payload, containsPair('uploadKind', 'file'));
-      expect(sent.single.payload, containsPair('filename', 'report.pdf'));
+        final future = session.pasteFile('report.pdf', content);
+        await acceptBegin();
+        expect(sent.single.payload, containsPair('uploadKind', 'file'));
+        expect(sent.single.payload, containsPair('filename', 'report.pdf'));
 
-      await pump();
-      expect(filePastes(), hasLength(1));
-      expect(filePastes().single.bytes, content);
+        await pump();
+        expect(filePastes(), hasLength(1));
+        expect(filePastes().single.bytes, content);
 
-      await session.handleFrame('terminal_paste_file_result', {
-        'streamId': streamId,
-        'path': '/remote/path/report.pdf',
-      });
-      expect(await future, isTrue);
-    });
+        await session.handleFrame('terminal_paste_file_result', {
+          'streamId': streamId,
+          'path': '/remote/path/report.pdf',
+        });
+        expect(await future, isTrue);
+      },
+    );
 
-    test('splits a large image across several chunks, indexed by seq', () async {
-      await live();
-      final big = Uint8List(terminalUploadChunkBytes * 2 + 100)..fillRange(0, terminalUploadChunkBytes * 2 + 100, 0xab);
+    test(
+      'splits a large image across several chunks, indexed by seq',
+      () async {
+        await live();
+        final big = Uint8List(terminalUploadChunkBytes * 2 + 100)
+          ..fillRange(0, terminalUploadChunkBytes * 2 + 100, 0xab);
 
-      final future = session.pasteImage(big);
-      await acceptBegin();
-      await pump();
+        final future = session.pasteImage(big);
+        await acceptBegin();
+        await pump();
 
-      expect(imagePastes(), hasLength(3));
-      expect(imagePastes().map((f) => f.seq), [0, 1, 2]);
-      expect(imagePastes()[0].bytes, hasLength(terminalUploadChunkBytes));
-      expect(imagePastes()[1].bytes, hasLength(terminalUploadChunkBytes));
-      expect(imagePastes()[2].bytes, hasLength(100));
+        expect(imagePastes(), hasLength(3));
+        expect(imagePastes().map((f) => f.seq), [0, 1, 2]);
+        expect(imagePastes()[0].bytes, hasLength(terminalUploadChunkBytes));
+        expect(imagePastes()[1].bytes, hasLength(terminalUploadChunkBytes));
+        expect(imagePastes()[2].bytes, hasLength(100));
 
-      await session.handleFrame('terminal_paste_image_result', {'streamId': streamId, 'outcome': 'clipboard'});
-      expect(await future, isTrue);
-    });
+        await session.handleFrame('terminal_paste_image_result', {
+          'streamId': streamId,
+          'outcome': 'clipboard',
+        });
+        expect(await future, isTrue);
+      },
+    );
 
-    test('resolves false, with no chunks sent, when begin is not accepted', () async {
-      await live();
-      final png = Uint8List.fromList(const [1, 2, 3]);
+    test(
+      'resolves false, with no chunks sent, when begin is not accepted',
+      () async {
+        await live();
+        final png = Uint8List.fromList(const [1, 2, 3]);
 
-      final future = session.pasteImage(png);
-      await pump();
-      await session.handleFrame('terminal_chunked_upload_begin_result', {
-        'streamId': streamId,
-        'accepted': false,
-        'reason': 'an upload is already in progress on this pane',
-      });
+        final future = session.pasteImage(png);
+        await pump();
+        await session.handleFrame('terminal_chunked_upload_begin_result', {
+          'streamId': streamId,
+          'accepted': false,
+          'reason': 'an upload is already in progress on this pane',
+        });
 
-      expect(await future, isFalse);
-      expect(imagePastes(), isEmpty);
-      expect(session.uploadProgress, isNull);
-    });
+        expect(await future, isFalse);
+        expect(imagePastes(), isEmpty);
+        expect(session.uploadProgress, isNull);
+      },
+    );
 
-    test('a malformed-chunk error clears the upload without freezing the session', () async {
-      await live();
-      final png = Uint8List.fromList(const [1, 2, 3]);
+    test(
+      'a malformed-chunk error clears the upload without freezing the session',
+      () async {
+        await live();
+        final png = Uint8List.fromList(const [1, 2, 3]);
 
-      final future = session.pasteImage(png);
-      await acceptBegin();
-      await pump();
+        final future = session.pasteImage(png);
+        await acceptBegin();
+        await pump();
 
-      await session.handleFrame('terminal_error', {
-        'streamId': streamId,
-        'code': 'TERMINAL_CHUNKED_UPLOAD_INVALID',
-        'message': 'malformed upload chunk',
-      });
+        await session.handleFrame('terminal_error', {
+          'streamId': streamId,
+          'code': 'TERMINAL_CHUNKED_UPLOAD_INVALID',
+          'message': 'malformed upload chunk',
+        });
 
-      expect(await future, isFalse);
-      expect(session.status, TerminalSessionStatus.controlling);
-      expect(session.uploadProgress, isNull);
-    });
+        expect(await future, isFalse);
+        expect(session.status, TerminalSessionStatus.controlling);
+        expect(session.uploadProgress, isNull);
+      },
+    );
 
     test('a genuine mid-transfer failure freezes the session, like TERMINAL_PASTE_FAILED does', () async {
       await live();
@@ -1187,37 +1216,58 @@ void main() {
       expect(sent.last.payload['streamId'], streamId);
     });
 
-    test('rejects a second upload while one is already in flight on this session', () async {
-      await live();
-      final png = Uint8List.fromList(const [1, 2, 3]);
+    test(
+      'rejects a second upload while one is already in flight on this session',
+      () async {
+        await live();
+        final png = Uint8List.fromList(const [1, 2, 3]);
 
-      final first = session.pasteImage(png);
-      await acceptBegin();
-      await pump();
+        final first = session.pasteImage(png);
+        await acceptBegin();
+        await pump();
 
-      expect(await session.pasteFile('a.txt', Uint8List.fromList(const [1])), isFalse);
+        expect(
+          await session.pasteFile('a.txt', Uint8List.fromList(const [1])),
+          isFalse,
+        );
 
-      await session.handleFrame('terminal_paste_image_result', {'streamId': streamId, 'outcome': 'clipboard'});
-      expect(await first, isTrue);
-    });
+        await session.handleFrame('terminal_paste_image_result', {
+          'streamId': streamId,
+          'outcome': 'clipboard',
+        });
+        expect(await first, isTrue);
+      },
+    );
 
     test('sends nothing while the stream is not accepting input', () async {
       expect(session.acceptsInput, isFalse);
-      expect(await session.pasteImage(Uint8List.fromList(const [1, 2, 3])), isFalse);
-      expect(await session.pasteFile('a.txt', Uint8List.fromList(const [1])), isFalse);
+      expect(
+        await session.pasteImage(Uint8List.fromList(const [1, 2, 3])),
+        isFalse,
+      );
+      expect(
+        await session.pasteFile('a.txt', Uint8List.fromList(const [1])),
+        isFalse,
+      );
       expect(imagePastes(), isEmpty);
       expect(filePastes(), isEmpty);
     });
 
-    test('sends nothing for an empty image or an empty filename/content', () async {
-      await live();
+    test(
+      'sends nothing for an empty image or an empty filename/content',
+      () async {
+        await live();
 
-      expect(await session.pasteImage(Uint8List(0)), isFalse);
-      expect(await session.pasteFile('', Uint8List.fromList(const [1])), isFalse);
-      expect(await session.pasteFile('a.txt', Uint8List(0)), isFalse);
-      expect(imagePastes(), isEmpty);
-      expect(filePastes(), isEmpty);
-      expect(sent, isEmpty);
-    });
+        expect(await session.pasteImage(Uint8List(0)), isFalse);
+        expect(
+          await session.pasteFile('', Uint8List.fromList(const [1])),
+          isFalse,
+        );
+        expect(await session.pasteFile('a.txt', Uint8List(0)), isFalse);
+        expect(imagePastes(), isEmpty);
+        expect(filePastes(), isEmpty);
+        expect(sent, isEmpty);
+      },
+    );
   });
 }

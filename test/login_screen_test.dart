@@ -35,7 +35,9 @@ Widget _host(
 /// machine may not have.
 class _FailingCliLogin extends CliLogin {
   @override
-  Future<void> login({required void Function(String url) onAuthorizeUrl}) async {
+  Future<void> login({
+    required void Function(String url) onAuthorizeUrl,
+  }) async {
     throw CliNotAvailableException('Could not run the harness CLI');
   }
 }
@@ -55,9 +57,7 @@ AppNotifier _notifier(AppStatus status, {CliLogin? cliLogin}) {
 double _luminance(Color c) {
   double channel(double v) =>
       v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
-  return 0.2126 * channel(c.r) +
-      0.7152 * channel(c.g) +
-      0.0722 * channel(c.b);
+  return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
 }
 
 double _contrast(Color a, Color b) {
@@ -177,8 +177,18 @@ void main() {
     // `textFaint` was the first choice and measured 3.33:1 light / 3.18:1 dark
     // against the hub — under the floor in BOTH themes.
     for (final (name, brightness, ink, ground) in [
-      ('light', Brightness.light, const Color(0xFF62615B), const Color(0xFFFFFFFF)),
-      ('dark', Brightness.dark, const Color(0xFFA8A8A2), const Color(0xFF202020)),
+      (
+        'light',
+        Brightness.light,
+        const Color(0xFF62615B),
+        const Color(0xFFFFFFFF),
+      ),
+      (
+        'dark',
+        Brightness.dark,
+        const Color(0xFFA8A8A2),
+        const Color(0xFF202020),
+      ),
     ]) {
       grid.AppTheme.brightness.value = brightness;
       expect(

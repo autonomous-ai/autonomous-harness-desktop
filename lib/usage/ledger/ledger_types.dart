@@ -268,11 +268,7 @@ class ProviderLedger {
 
 /// One day's spend for one provider, which is what the intensity grid draws.
 class LedgerDay {
-  const LedgerDay({
-    required this.day,
-    required this.totals,
-    this.costUsd,
-  });
+  const LedgerDay({required this.day, required this.totals, this.costUsd});
 
   /// Midnight local time. Local rather than UTC on purpose: somebody reading
   /// "yesterday" means the day they had, not the one Greenwich had.

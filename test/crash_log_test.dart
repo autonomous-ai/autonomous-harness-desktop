@@ -13,7 +13,9 @@ void main() {
 
     CrashLog.record(
       TypeError(),
-      StackTrace.fromString('#0 someFrame (package:harness/somewhere.dart:1:2)'),
+      StackTrace.fromString(
+        '#0 someFrame (package:harness/somewhere.dart:1:2)',
+      ),
       context: 'renderer',
     );
 
@@ -33,9 +35,7 @@ void main() {
     FlutterError.onError = (_) => previousRan = true;
     CrashLog.install();
 
-    FlutterError.onError!(
-      FlutterErrorDetails(exception: StateError('boom')),
-    );
+    FlutterError.onError!(FlutterErrorDetails(exception: StateError('boom')));
 
     expect(
       previousRan,

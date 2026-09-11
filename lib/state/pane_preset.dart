@@ -150,7 +150,10 @@ enum PanePreset {
       Rect.fromLTRB(0, 1 / 2, 1 / 3, 1),
       Rect.fromLTRB(2 / 3, 1 / 2, 1, 1),
     ],
-    PanePreset.auto => _lattice(count, columns ?? _autoColumnsForDrawing(count)),
+    PanePreset.auto => _lattice(
+      count,
+      columns ?? _autoColumnsForDrawing(count),
+    ),
     _ => _lattice(count, statedColumns!.clamp(1, count)),
   };
 

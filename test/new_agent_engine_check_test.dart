@@ -87,8 +87,14 @@ void main() {
     expect(find.text('Could not check this machine'), findsOneWidget);
     // The way out is named, and so is what happens if it is ignored — the
     // create still runs, and a missing engine surfaces only as its failure.
-    expect(find.textContaining('did not say which engines it has'), findsOneWidget);
-    expect(find.textContaining('will only show up when it fails'), findsOneWidget);
+    expect(
+      find.textContaining('did not say which engines it has'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('will only show up when it fails'),
+      findsOneWidget,
+    );
     expect(
       find.textContaining('Updating the Harness CLI on harness-remote-box'),
       findsOneWidget,

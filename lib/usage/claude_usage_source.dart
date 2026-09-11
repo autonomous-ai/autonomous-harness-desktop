@@ -79,7 +79,9 @@ class ClaudeUsageSource implements UsageSource {
       ?_window(kWeeklyWindowLabel, data['seven_day']),
       ?_window(
         'Fable',
-        data['fable_weekly'] ?? data['fable_seven_day'] ?? data['seven_day_fable'],
+        data['fable_weekly'] ??
+            data['fable_seven_day'] ??
+            data['seven_day_fable'],
       ),
     ];
     if (windows.isEmpty) {

@@ -70,9 +70,7 @@ class AppCheckbox extends StatelessWidget {
         // the pointer, which is the whole of the hover treatment.
         color: value
             ? (enabled ? AppPalette.accent : AppPalette.accentMuted)
-            : (hovered && enabled
-                  ? AppSurface.recessHover
-                  : AppSurface.recess),
+            : (hovered && enabled ? AppSurface.recessHover : AppSurface.recess),
       ),
       child: AnimatedOpacity(
         duration: AppMotion.hover,

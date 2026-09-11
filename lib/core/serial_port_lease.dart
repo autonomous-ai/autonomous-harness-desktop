@@ -42,8 +42,12 @@ abstract final class SerialPortLease {
       // Honours the same override the flasher script reads, so the two sides cannot end up looking
       // in different places.
       final env = environment ?? Platform.environment;
-      final dir = env['HARNESS_FLASHER_CACHE'] ??
-          HarnessFileStore.defaultDirectoryPath(environment: environment, name: 'flasher');
+      final dir =
+          env['HARNESS_FLASHER_CACHE'] ??
+          HarnessFileStore.defaultDirectoryPath(
+            environment: environment,
+            name: 'flasher',
+          );
       final file = File('$dir/flashing');
       if (!file.existsSync()) return false;
       final started = int.tryParse(file.readAsStringSync().trim());

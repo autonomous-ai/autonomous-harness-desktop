@@ -13,7 +13,6 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-
 /// A token, and when it stops working.
 class UsageToken {
   const UsageToken({required this.accessToken, this.expiresAt});
@@ -53,7 +52,9 @@ class UsageCredentials {
   /// no authorization) is a state, not the end of the road.
   Future<UsageToken?> claude() async {
     final fromKeychain = await _readKeychain();
-    final token = _parseClaude(fromKeychain) ?? _parseClaude(_readFile('.claude/.credentials.json'));
+    final token =
+        _parseClaude(fromKeychain) ??
+        _parseClaude(_readFile('.claude/.credentials.json'));
     return token;
   }
 

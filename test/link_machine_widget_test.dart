@@ -8,10 +8,7 @@ import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/link_machine_screen.dart';
 
 class _FakeCliLink implements CliLink {
-  final Future<CliLinkConnectResult> Function(
-    String machineId,
-    String password,
-  )
+  final Future<CliLinkConnectResult> Function(String machineId, String password)
   onConnect;
   _FakeCliLink(this.onConnect);
 
@@ -89,7 +86,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('remote-password-connect-field')), findsOneWidget);
+    expect(
+      find.byKey(const Key('remote-password-connect-field')),
+      findsOneWidget,
+    );
     expect(find.text('Remote password for remote-mac'), findsOneWidget);
     expect(find.text('Link machine'), findsOneWidget);
     expect(
@@ -171,9 +171,7 @@ void main() {
   ) async {
     final notifier = notifierFor(
       _FakeCliLink(
-        (_, _) async => const CliLinkConnectResult(
-          error: 'Incorrect password',
-        ),
+        (_, _) async => const CliLinkConnectResult(error: 'Incorrect password'),
       ),
     );
     await tester.pumpWidget(

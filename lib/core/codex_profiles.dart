@@ -8,8 +8,9 @@ class LocalCodexProfile {
   final String path;
   final String label;
 
-  factory LocalCodexProfile.fromJson(Map<String, dynamic> json) => LocalCodexProfile(
-    json['path'] as String,
-    json['label'] as String? ?? json['path'] as String,
-  );
+  factory LocalCodexProfile.fromJson(Map<String, dynamic> json) =>
+      LocalCodexProfile(
+        json['path'] as String,
+        json['label'] as String? ?? json['path'] as String,
+      );
 }

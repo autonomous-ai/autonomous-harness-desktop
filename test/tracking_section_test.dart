@@ -119,7 +119,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final tiles = tester.widgetList<TrackingTile>(find.byType(TrackingTile));
-    expect(tiles.map((tile) => tile.entry.name), ['agent_created', 'signed_in']);
+    expect(tiles.map((tile) => tile.entry.name), [
+      'agent_created',
+      'signed_in',
+    ]);
   });
 
   testWidgets('Waiting keeps only what has not settled', (tester) async {

@@ -226,9 +226,8 @@ bool _hasVersion(String model, String family, String version) {
 
 bool _isLegacyBaseOpus4(String model) {
   final normalized = model.replaceAll('.', '-');
-  return RegExp(
-    r'opus-4(?:$|-thinking$|-20\d{6}(?:-thinking)?$|@20\d{6}$)',
-  ).hasMatch(normalized);
+  return RegExp(r'opus-4(?:$|-thinking$|-20\d{6}(?:-thinking)?$|@20\d{6}$)')
+      .hasMatch(normalized);
 }
 
 /// The pricing key a Claude model id maps to, or null when none does.

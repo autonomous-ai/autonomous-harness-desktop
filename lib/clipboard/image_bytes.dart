@@ -8,7 +8,10 @@ import 'dart:ui' as ui;
 bool looksLikeImage(Uint8List bytes) {
   if (isPng(bytes)) return true;
   // JPEG: FF D8 FF
-  if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xFF &&
+      bytes[1] == 0xD8 &&
+      bytes[2] == 0xFF) {
     return true;
   }
   // GIF: "GIF8"

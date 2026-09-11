@@ -72,8 +72,9 @@ Future<void> pumpRail(WidgetTester tester, AppNotifier notifier) async {
 }
 
 void main() {
-  testWidgets('a blocked agent keeps the rail exactly as it was',
-      (tester) async {
+  testWidgets('a blocked agent keeps the rail exactly as it was', (
+    tester,
+  ) async {
     final notifier = notifierWithAgents([_agent('a1', 'payments')]);
     final state = notifier.machineStates['m1']!;
     state.processingAgentIds.add('a1');

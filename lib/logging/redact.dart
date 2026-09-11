@@ -33,9 +33,7 @@ const int _maxValue = 120;
 /// still clipped at [_maxValue], so one blob cannot eat the budget.
 String summariseForLog(Object? value, {int maxLength = 1200}) {
   final text = redactValue(value);
-  return text.length <= maxLength
-      ? text
-      : '${text.substring(0, maxLength)}…';
+  return text.length <= maxLength ? text : '${text.substring(0, maxLength)}…';
 }
 
 /// [value] rendered for a log, with any entry whose KEY looks secret replaced.

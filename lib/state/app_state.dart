@@ -237,6 +237,16 @@ class AppNotifier extends ChangeNotifier {
   final LocalManualFixture? localManualFixture;
   final Duration turnActivityTimeout;
   final LocalCliDiscovery? localCliDiscovery;
+
+  /// ONE discovery for the whole notifier. It used to be built fresh at each of
+  /// three call sites, which was harmless while it was stateless and is not
+  /// now that the supervisor's ready-transition callback lives on it.
+  ///
+  /// `late`, so it reads `config` on first use — which is [ensureCliDaemonReady]
+  /// during bootstrap, AFTER the persisted config has been loaded over the
+  /// default. Touch it earlier and it freezes the wrong `localCliBaseUrl`.
+  late final LocalCliDiscovery _discovery =
+      localCliDiscovery ?? LocalCliDiscovery(config: config);
   final EnvironmentProvisioner? environmentProvisioner;
   final DesktopUpdater? desktopUpdater;
   final Map<String, Timer> _turnActivityWatchdogs = {};
@@ -264,6 +274,10 @@ class AppNotifier extends ChangeNotifier {
   // successful bootstrap (see `ensureCliDaemonReady`), cancelled on dispose. Cancelling only stops this
   // Dart-side loop; the daemon itself self-daemonizes and must keep running after the app quits.
   Timer? _daemonSupervisionTimer;
+
+  /// The last [ensureCliDaemonReady] did not reach a ready daemon — the one
+  /// error the supervisor's ready transition is allowed to retry away.
+  bool _daemonGateFailed = false;
   // Update checks do not depend on the daemon or SSO. A signed-out user should
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
@@ -1285,19 +1299,7 @@ class AppNotifier extends ChangeNotifier {
     // the saved session gone) — that already routed to the login screen, so don't clobber it.
     if (status == AppStatus.unauthenticated) return;
     status = AppStatus.authenticated;
-    try {
-      final me = await api.me();
-      if (me != null) {
-        final profile = CurrentUserProfile.fromMe(me);
-        currentUser = profile;
-        // Every event from here on is filed under the account, including ones
-        // queued while this call was still in flight — the queue reads the
-        // account per event, not per launch.
-        analyticsAccount.set(id: profile.id, email: profile.email);
-      }
-    } catch (error) {
-      debugPrint('bootstrap: profile unavailable: $error');
-    }
+    await _loadProfile();
     try {
       await refreshMachines();
     } catch (error) {
@@ -1311,29 +1313,82 @@ class AppNotifier extends ChangeNotifier {
   /// `harness login`, it does not start on its own. Sets [_cliEndpoint], the dial target every
   /// machine's WsConn now uses. Public (like [refreshMachines]) so a test subclass can stub it
   /// without shelling out to a real `harness` binary.
-  Future<void> ensureCliDaemonReady() async {
-    final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
-    final endpoint = await discovery.ensureRunning();
-    if (endpoint == null) {
-      // Before blaming the environment, check whether the daemon is missing because it signed itself
-      // out. "Try running `harness start` yourself" is advice that cannot work in that case — the
-      // session file is gone, so every start exits again — and it is the advice this branch used to
-      // give unconditionally.
-      if (!(await cliLogin.checkStatus()).loggedIn) {
-        _signedOutAtRuntime(_signedOutMessage);
-        return;
+  /// Who is signed in, from the daemon. Shared by the boot path and by the
+  /// retry path, because a boot that found the daemon still connecting now
+  /// finishes THROUGH the retry path — and a session that never learns its
+  /// own account has an empty footer and unattributed analytics.
+  Future<void> _loadProfile() async {
+    try {
+      final me = await api.me();
+      if (me != null) {
+        final profile = CurrentUserProfile.fromMe(me);
+        currentUser = profile;
+        // Every event from here on is filed under the account, including ones
+        // queued while this call was still in flight — the queue reads the
+        // account per event, not per launch.
+        analyticsAccount.set(id: profile.id, email: profile.email);
       }
-      throw StateError(
-        'The local Harness daemon did not start. Try running `harness start` yourself, then reopen the app.',
-      );
+    } catch (error) {
+      debugPrint('bootstrap: profile unavailable: $error');
     }
-    _cliEndpoint = endpoint;
-    // Only start supervising AFTER the first bootstrap attempt already succeeded above — starting it
-    // earlier risks a concurrent `harness start` spawn from both places at once (the daemon's control
-    // port is fixed, so a second spawn while the first is still binding fails loudly).
+  }
+
+  Future<void> ensureCliDaemonReady() async {
+    final discovery = _discovery;
+    final probe = await discovery.ensureRunning();
+    switch (probe.state) {
+      case LocalCliProbeState.ready:
+        _cliEndpoint = probe.endpoint;
+        _daemonGateFailed = false;
+      case LocalCliProbeState.notReady:
+        _daemonGateFailed = true;
+        // Running, not ready — most often a daemon fresh from a self-update still shaking hands
+        // with the backend. Not "did not start": that sentence sends people to run `harness start`
+        // against a daemon that is up, and the CLI's own lock will just tell them so. It keeps
+        // retrying by itself; the supervisor below picks the app up the moment it gets there.
+        _startDaemonSupervision(discovery);
+        throw StateError(
+          'Harness is running${probe.version == null ? '' : ' (v${probe.version})'} but has not '
+          'connected to the backend yet — ${probe.reason}. It usually finishes on its own; '
+          'retry in a moment.',
+        );
+      case LocalCliProbeState.down:
+        _daemonGateFailed = true;
+        // Before blaming the environment, check whether the daemon is missing because it signed itself
+        // out. "Try running `harness start` yourself" is advice that cannot work in that case — the
+        // session file is gone, so every start exits again — and it is the advice this branch used to
+        // give unconditionally.
+        if (!(await cliLogin.checkStatus()).loggedIn) {
+          _signedOutAtRuntime(_signedOutMessage);
+          return;
+        }
+        throw StateError(
+          'The local Harness daemon did not start. Try running `harness start` yourself, then reopen the app.',
+        );
+    }
+    _startDaemonSupervision(discovery);
+  }
+
+  /// Supervision starts once the daemon is at least ANSWERING — ready or still connecting. It used to
+  /// wait for ready, out of fear of a concurrent `harness start` from both places; the supervisor
+  /// no longer spawns while anything answers on the port, so that race is gone, and starting it on
+  /// a not-ready daemon is what lets a boot that landed mid-update recover without a click.
+  void _startDaemonSupervision(LocalCliDiscovery discovery) {
     _daemonSupervisionTimer ??= discovery.startSupervising(
       stillSignedIn: () async => (await cliLogin.checkStatus()).loggedIn,
       onSignedOut: () => _signedOutAtRuntime(_signedOutMessage),
+      onReady: (endpoint) {
+        // Back (or here for the first time). If the app is sitting on the error strip from a boot
+        // or reload that found the daemon not ready, this is the moment it was waiting for.
+        //
+        // Gated on OUR failure, not on `_lastError`: that strip is shared with errors this cannot
+        // fix (an agent that failed to launch, say), and the supervisor's first tick after every
+        // boot would otherwise clear one of those five seconds after it appeared.
+        if (_cliEndpoint == null || _daemonGateFailed) {
+          _cliEndpoint ??= endpoint;
+          unawaited(retryMachines());
+        }
+      },
     );
   }
 
@@ -1515,6 +1570,11 @@ class AppNotifier extends ChangeNotifier {
     await _pool?.closeAll();
     _pool = null;
     _cliEndpoint = null;
+    // Nothing to supervise for a signed-out app — and a daemon started by hand
+    // on the login screen must not have its ready transition retry the machines.
+    _daemonSupervisionTimer?.cancel();
+    _daemonSupervisionTimer = null;
+    _daemonGateFailed = false;
     _clearAllTurnActivity();
     currentUser = null;
     machines = [];
@@ -1665,7 +1725,7 @@ class AppNotifier extends ChangeNotifier {
   }
 
   Future<void> _refreshMachines() async {
-    final discovery = localCliDiscovery ?? LocalCliDiscovery(config: config);
+    final discovery = _discovery;
     // The CLI computer id is the local identity source of truth. The loopback
     // status endpoint is trusted only when it advertises that same identity.
     final localComputerId = await discovery.computerId();
@@ -1951,8 +2011,7 @@ class AppNotifier extends ChangeNotifier {
     _offlinePollsInFlight.add(machineId);
     try {
       if (machine.isLocalMachine) {
-        final discovery =
-            localCliDiscovery ?? LocalCliDiscovery(config: config);
+        final discovery = _discovery;
         final localComputerId = await discovery.computerId();
         if (localComputerId == null ||
             _normalizeComputerId(machine.machine.computerId) !=
@@ -2058,6 +2117,7 @@ class AppNotifier extends ChangeNotifier {
       return;
     }
     if (status == AppStatus.unauthenticated) return;
+    if (currentUser == null) await _loadProfile();
     try {
       await refreshMachines();
       _lastError = null;
