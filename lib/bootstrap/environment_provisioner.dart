@@ -365,7 +365,10 @@ class EnvironmentProvisioner {
             : '✗ Apple developer tools · xcrun --find clang',
       );
 
-      final tmuxReady = await _hasTmux();
+      final homebrewReady = !_isMacOS || await _hasHomebrew();
+      final tmuxBinaryReady = await _hasTmux();
+      var tmuxReady =
+          (!_isMacOS || homebrewReady) && systemReady && tmuxBinaryReady;
       emit(
         step: EnvironmentStep.tmux,
         status: tmuxReady
@@ -373,12 +376,18 @@ class EnvironmentProvisioner {
             : EnvironmentStepStatus.failed,
         message: tmuxReady
             ? (_isMacOS ? 'Homebrew and tmux are ready.' : 'tmux is ready.')
-            : (_isMacOS
-                  ? 'Homebrew and tmux are required.'
-                  : 'tmux is required.'),
+            : !systemReady
+            ? 'Apple developer tools are required.'
+            : _isMacOS && !homebrewReady
+            ? 'Homebrew is required.'
+            : 'tmux is required.',
         output: tmuxReady
             ? (_isMacOS ? '✓ Homebrew · tmux --version' : '✓ tmux --version')
-            : (_isMacOS ? '✗ Homebrew · tmux --version' : '✗ tmux --version'),
+            : !systemReady
+            ? '✗ Apple developer tools · xcrun --find clang'
+            : _isMacOS && !homebrewReady
+            ? '✗ Homebrew · brew --version'
+            : '✗ tmux --version',
       );
 
       final harnessReady = await _hasHarness();
@@ -422,7 +431,56 @@ class EnvironmentProvisioner {
       }
 
       // Strict dependency order: system tools -> tmux -> managed Node/Harness -> Grid.
-      if (!tmuxReady) {
+      if (_isMacOS && systemReady && homebrewReady && !tmuxBinaryReady) {
+        emit(
+          step: EnvironmentStep.tmux,
+          status: EnvironmentStepStatus.running,
+          message: 'Installing tmux via Homebrew…',
+        );
+        ProcessResult? installResult;
+        try {
+          installResult = await _shellStreaming(
+            'brew install tmux',
+            onOutput: (line) => emit(output: line),
+          );
+        } catch (error) {
+          emit(output: 'Background tmux install failed: $error');
+        }
+        tmuxReady = installResult?.exitCode == 0 && await _hasTmux();
+        if (tmuxReady) {
+          emit(
+            step: EnvironmentStep.tmux,
+            status: EnvironmentStepStatus.ready,
+            message: 'Homebrew and tmux are ready.',
+            output: '✓ tmux installed via Homebrew',
+          );
+        } else {
+          if (installResult != null) {
+            emit(
+              output: installResult.exitCode == 0
+                  ? 'Homebrew finished, but tmux did not pass verification.'
+                  : 'Background tmux install exited ${installResult.exitCode}: '
+                        '${_resultText(installResult)}',
+            );
+          }
+          emit(
+            step: EnvironmentStep.tmux,
+            status: EnvironmentStepStatus.running,
+            message: 'tmux needs attention in Terminal…',
+          );
+          final terminal = await _launchTmuxSetup();
+          emit(
+            step: EnvironmentStep.tmux,
+            status: EnvironmentStepStatus.needsTerminal,
+            message: 'Complete the visible Homebrew prompts in Terminal. Harness never sees your password.',
+            output: 'Background install failed; Terminal opened to retry tmux.',
+            phase: EnvironmentSetupPhase.waitingForTerminal,
+            terminalLogPath: terminal.log.path,
+            terminalResultPath: terminal.result.path,
+          );
+          return state;
+        }
+      } else if (!tmuxReady) {
         emit(
           step: EnvironmentStep.tmux,
           status: EnvironmentStepStatus.running,
@@ -476,7 +534,7 @@ class EnvironmentProvisioner {
         phase: EnvironmentSetupPhase.verifying,
       );
       final finalChecks = <EnvironmentStep, Future<bool> Function()>{
-        EnvironmentStep.tmux: _hasTmux,
+        EnvironmentStep.tmux: _isTmuxEnvironmentReady,
         EnvironmentStep.harness: _hasHarness,
         EnvironmentStep.grid: _hasGrid,
       };
@@ -737,12 +795,19 @@ class EnvironmentProvisioner {
   }
 
   Future<bool> _hasTmux() async {
-    final result = await _shell(
-      _isMacOS
-          ? '/usr/bin/xcrun --find clang >/dev/null 2>&1 && command -v brew >/dev/null && command -v tmux >/dev/null && tmux -V'
-          : 'command -v tmux >/dev/null && tmux -V',
-    );
+    final result = await _shell('command -v tmux >/dev/null && tmux -V');
     return result.exitCode == 0;
+  }
+
+  Future<bool> _hasHomebrew() async {
+    final result = await _shell('command -v brew >/dev/null && brew --version');
+    return result.exitCode == 0;
+  }
+
+  Future<bool> _isTmuxEnvironmentReady() async {
+    if (_isMacOS && !await _hasAppleDeveloperTools()) return false;
+    if (_isMacOS && !await _hasHomebrew()) return false;
+    return _hasTmux();
   }
 
   /// `xcode-select -p` only proves that a path was selected. It also succeeds

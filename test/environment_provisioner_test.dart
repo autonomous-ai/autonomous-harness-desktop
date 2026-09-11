@@ -32,20 +32,34 @@ void main() {
   ProcessRunner runner({
     required bool Function() tmuxPresent,
     required bool Function() gridPresent,
+    bool Function()? homebrewPresent,
     bool developerToolsPresent = true,
+    Future<void> Function()? installTmux,
     Future<void> Function()? installHarness,
     Future<void> Function()? installGrid,
     List<String>? calls,
+    int tmuxInstallExitCode = 0,
     int gridInstallExitCode = 0,
   }) {
     return (executable, arguments, {environment}) async {
       final command = '$executable ${arguments.join(' ')}';
       calls?.add(command);
       final shell = arguments.isNotEmpty ? arguments.last : '';
-      if (shell.contains('command -v tmux')) {
-        return developerToolsPresent && tmuxPresent()
-            ? result(0, stdout: 'tmux 3.4')
+      if (shell.contains('brew install tmux')) {
+        if (tmuxInstallExitCode == 0) await installTmux?.call();
+        return result(
+          tmuxInstallExitCode,
+          stdout: tmuxInstallExitCode == 0 ? 'tmux installed' : '',
+          stderr: tmuxInstallExitCode == 0 ? '' : 'Homebrew install failed',
+        );
+      }
+      if (shell.contains('command -v brew')) {
+        return (homebrewPresent?.call() ?? true)
+            ? result(0, stdout: 'Homebrew 4.0')
             : result(1);
+      }
+      if (shell.contains('command -v tmux')) {
+        return tmuxPresent() ? result(0, stdout: 'tmux 3.4') : result(1);
       }
       if (shell.contains('/usr/bin/xcrun --find clang')) {
         return developerToolsPresent
@@ -178,6 +192,106 @@ void main() {
       0,
     );
   });
+
+  test(
+    'macOS installs only missing tmux in-app when Homebrew is ready',
+    () async {
+      await createManagedHarness();
+      var tmuxPresent = false;
+      var terminalLaunches = 0;
+      final calls = <String>[];
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        openTerminal: (_) async => terminalLaunches++,
+        run: runner(
+          tmuxPresent: () => tmuxPresent,
+          gridPresent: () => true,
+          installTmux: () async => tmuxPresent = true,
+          calls: calls,
+        ),
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(readiness.isReady, isTrue);
+      expect(terminalLaunches, 0);
+      expect(
+        calls.where((line) => line.contains('brew install tmux')),
+        hasLength(1),
+      );
+      expect(readiness.output.join('\n'), contains('tmux installed'));
+    },
+  );
+
+  test('a failed in-app tmux install retries visibly in Terminal', () async {
+    await createManagedHarness();
+    String? terminalScript;
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      openTerminal: (path) async => terminalScript = path,
+      run: runner(
+        tmuxPresent: () => false,
+        gridPresent: () => true,
+        tmuxInstallExitCode: 7,
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+    expect(
+      readiness.steps[EnvironmentStep.tmux],
+      EnvironmentStepStatus.needsTerminal,
+    );
+    expect(terminalScript, isNotNull);
+    expect(readiness.output.join('\n'), contains('exited 7'));
+    expect(readiness.output.join('\n'), contains('Terminal opened to retry'));
+  });
+
+  test(
+    'missing Homebrew still opens Terminal before installing tmux',
+    () async {
+      String? terminalScript;
+      final calls = <String>[];
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        openTerminal: (path) async => terminalScript = path,
+        run: runner(
+          homebrewPresent: () => false,
+          tmuxPresent: () => false,
+          gridPresent: () => false,
+          calls: calls,
+        ),
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(terminalScript, isNotNull);
+      expect(
+        calls.where((line) => line.contains('brew install tmux')),
+        isEmpty,
+      );
+      expect(readiness.output.join('\n'), contains('brew --version'));
+    },
+  );
 
   test(
     'automatic setup installs Harness before required Grid then verifies',
