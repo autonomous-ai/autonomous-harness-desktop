@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:xterm/xterm.dart';
 
 import '../clipboard/native_clipboard.dart';
@@ -17,6 +19,7 @@ import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
 import '../terminal/terminal_binary.dart';
 import '../terminal/terminal_font_store.dart';
+import '../terminal/terminal_links.dart';
 import '../terminal/terminal_session.dart';
 import '../terminal/terminal_theme.dart';
 import '../terminal/terminal_viewport.dart';
@@ -60,6 +63,10 @@ class TerminalPanel extends StatefulWidget {
   /// this is the only tile — see [_TerminalHeader.paneDrag].
   final PaneDragHandle? paneDrag;
 
+  /// Opens a link that was ⌘-clicked (Ctrl-clicked on Linux). Null opens it in
+  /// the default browser; a test passes its own, so nothing leaves the process.
+  final ValueChanged<Uri>? onOpenLink;
+
   const TerminalPanel({
     super.key,
     required this.notifier,
@@ -73,6 +80,7 @@ class TerminalPanel extends StatefulWidget {
     this.onTogglePin,
     this.onRendererFocus,
     this.paneDrag,
+    this.onOpenLink,
   });
 
   @override
@@ -112,6 +120,7 @@ class _TerminalPanelState extends State<TerminalPanel>
     widget.session.attachViewport(this);
     widget.session.addListener(_onSessionChanged);
     terminalFontStore.addListener(_onFontChanged);
+    HardwareKeyboard.instance.addHandler(_onKeyboardChanged);
     _afterTerminalMounted();
   }
 
@@ -149,6 +158,8 @@ class _TerminalPanelState extends State<TerminalPanel>
     widget.session.removeListener(_onSessionChanged);
     widget.session.detachViewport(this);
     terminalFontStore.removeListener(_onFontChanged);
+    HardwareKeyboard.instance.removeHandler(_onKeyboardChanged);
+    _clearLinkHover();
     _cancelDialInertia();
     _cursorBlinkTimer?.cancel();
     _focusNode.removeListener(_handleFocusChange);
@@ -214,6 +225,7 @@ class _TerminalPanelState extends State<TerminalPanel>
     // Selection anchors belong to a specific circular buffer. Detach them
     // before the TerminalView starts laying out the replacement terminal.
     _controller.clearSelection();
+    _clearLinkHover(); // anchored to that buffer as well
     _viewTerminal = terminal;
     _terminalViewKey = GlobalKey<TerminalViewState>();
     _cancelDialInertia();
@@ -474,14 +486,92 @@ class _TerminalPanelState extends State<TerminalPanel>
       return KeyEventResult.ignored; // ⇧⌘V is a different verb
     }
 
-    final apple =
-        defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.iOS;
-    final pasting = apple ? keyboard.isMetaPressed : keyboard.isControlPressed;
-    if (!pasting) return KeyEventResult.ignored;
+    if (!_appModifierPressed()) return KeyEventResult.ignored;
     unawaited(_paste());
     return KeyEventResult.handled;
   }
+
+  /// ⌘ on Apple platforms, Ctrl elsewhere — where ⌘ belongs to the terminal.
+  static bool _appModifierPressed() {
+    final keyboard = HardwareKeyboard.instance;
+    final apple =
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    return apple ? keyboard.isMetaPressed : keyboard.isControlPressed;
+  }
+
+  /// The link printed under [globalPosition], once the terminal is laid out.
+  TerminalLink? _linkAt(Offset globalPosition) {
+    final view = _laidOutTerminalView();
+    if (view == null) return null;
+    final render = view.renderTerminal;
+    return terminalLinkAt(
+      widget.session.terminal.buffer,
+      render.getCellOffset(render.globalToLocal(globalPosition)),
+    );
+  }
+
+  /// ⌘-click (Ctrl-click on Linux) opens the http(s) link under the pointer.
+  void _openLinkUnderPointer(PointerDownEvent event) {
+    if (event.buttons != kPrimaryButton || !_appModifierPressed()) return;
+    final link = _linkAt(event.position);
+    if (link == null) return;
+    final open = widget.onOpenLink;
+    if (open != null) {
+      open(link.url);
+    } else {
+      unawaited(launchUrl(link.url, mode: LaunchMode.externalApplication));
+    }
+  }
+
+  // While the modifier is held over a link: a hand, and the link tinted — so a
+  // ⌘-click is something you can see coming rather than a gesture to know about.
+  Offset? _pointer;
+  TerminalLink? _hoveredLink;
+  TerminalHighlight? _linkHighlight;
+
+  void _trackPointer(Offset? globalPosition) {
+    _pointer = globalPosition;
+    _refreshLinkHover();
+  }
+
+  /// Pressing or releasing the modifier changes the answer without the mouse
+  /// moving. Observes only: the key still goes wherever it was going.
+  bool _onKeyboardChanged(KeyEvent event) {
+    if (_pointer != null) _refreshLinkHover();
+    return false;
+  }
+
+  void _refreshLinkHover() {
+    final at = _pointer;
+    final link = at != null && _appModifierPressed() ? _linkAt(at) : null;
+    if (_sameLink(link, _hoveredLink)) return;
+    _clearLinkHover();
+    if (link != null) {
+      final buffer = widget.session.terminal.buffer;
+      _linkHighlight = _controller.highlight(
+        p1: buffer.createAnchorFromOffset(link.start),
+        p2: buffer.createAnchorFromOffset(link.end),
+        color: AppColors.accent.withValues(alpha: 0.22),
+      );
+    }
+    _hoveredLink = link;
+    if (mounted) setState(() {});
+  }
+
+  void _clearLinkHover() {
+    _linkHighlight?.dispose();
+    _linkHighlight = null;
+    _hoveredLink = null;
+  }
+
+  static bool _sameLink(TerminalLink? a, TerminalLink? b) =>
+      identical(a, b) ||
+      (a != null &&
+          b != null &&
+          a.url == b.url &&
+          a.start.isEqual(b.start) &&
+          a.end.isEqual(b.end));
 
   @override
   Widget build(BuildContext context) {
@@ -509,40 +599,55 @@ class _TerminalPanelState extends State<TerminalPanel>
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: TerminalView(
-                    session.terminal,
-                    key: _terminalViewKey,
-                    controller: _controller,
-                    scrollController: _scrollController,
-                    focusNode: _focusNode,
-                    autofocus: widget.focused && !showComposer,
-                    readOnly: widget.readOnly || !session.acceptsInput,
-                    theme: darkTerminalTheme,
-                    padding: const EdgeInsets.all(10),
-                    textStyle: terminalFontStore.value,
-                    // ⚠️ The terminal is NOT app chrome, and the user said so:
-                    // it carries its own font settings (Settings ▸ Terminal,
-                    // [terminalFontStore]) precisely because its type is a grid
-                    // a remote program is drawing into, not a label.
-                    //
-                    // Without this, `TerminalView` falls back to
-                    // `MediaQuery.textScalerOf(context)` (xterm's
-                    // terminal_view.dart:257), so the app-wide UI size would
-                    // change the cell size — and a changed cell size is not
-                    // cosmetic here: it re-derives `rows`, which fires
-                    // `Terminal.resize` → `session.resize` → a `terminal_resize`
-                    // frame on the wire and a real SIGWINCH at the far end.
-                    //
-                    // Read in `createRenderObject`, not only on update, so this
-                    // holds from the very first frame — no scaled first paint
-                    // and no startup resize.
-                    textScaler: TextScaler.noScaling,
-                    onKeyEvent: _onTerminalKey,
-                    onSecondaryTapDown: (_, _) => _copyOrPaste(),
+                  // Above xterm's gesture handling, not via its onTapUp:
+                  // every agent pane has tmux `mouse on`, and with mouse
+                  // reporting on xterm hands a tap to the program and never
+                  // calls onTapUp. A Listener sees the pointer either way.
+                  child: MouseRegion(
+                    opaque: false,
+                    onHover: (event) => _trackPointer(event.position),
+                    onExit: (_) => _trackPointer(null),
+                    child: Listener(
+                      onPointerDown: _openLinkUnderPointer,
+                      child: TerminalView(
+                        session.terminal,
+                        key: _terminalViewKey,
+                        controller: _controller,
+                        scrollController: _scrollController,
+                        focusNode: _focusNode,
+                        autofocus: widget.focused && !showComposer,
+                        readOnly: widget.readOnly || !session.acceptsInput,
+                        theme: darkTerminalTheme,
+                        padding: const EdgeInsets.all(10),
+                        textStyle: terminalFontStore.value,
+                        // ⚠️ The terminal is NOT app chrome, and the user said so:
+                        // it carries its own font settings (Settings ▸ Terminal,
+                        // [terminalFontStore]) precisely because its type is a grid
+                        // a remote program is drawing into, not a label.
+                        //
+                        // Without this, `TerminalView` falls back to
+                        // `MediaQuery.textScalerOf(context)` (xterm's
+                        // terminal_view.dart:257), so the app-wide UI size would
+                        // change the cell size — and a changed cell size is not
+                        // cosmetic here: it re-derives `rows`, which fires
+                        // `Terminal.resize` → `session.resize` → a `terminal_resize`
+                        // frame on the wire and a real SIGWINCH at the far end.
+                        //
+                        // Read in `createRenderObject`, not only on update, so this
+                        // holds from the very first frame — no scaled first paint
+                        // and no startup resize.
+                        textScaler: TextScaler.noScaling,
+                        onKeyEvent: _onTerminalKey,
+                        mouseCursor: _hoveredLink != null
+                            ? SystemMouseCursors.click
+                            : SystemMouseCursors.text,
+                        onSecondaryTapDown: (_, _) => _copyOrPaste(),
 
-                    onAltBufferScroll: session.scrollViaTmuxCopyMode
-                        ? (up) => session.sendScrollCommand(up, 1)
-                        : null,
+                        onAltBufferScroll: session.scrollViaTmuxCopyMode
+                            ? (up) => session.sendScrollCommand(up, 1)
+                            : null,
+                      ),
+                    ),
                   ),
                 ),
                 if (session.status == TerminalSessionStatus.opening ||
