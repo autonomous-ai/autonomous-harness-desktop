@@ -1043,7 +1043,12 @@ class _GridMark extends StatelessWidget {
       kind: _PanelKind.power,
       anchor: anchor,
       enabled: power != null,
-      semantics: 'grid ${controller.gridName}',
+      // Staleness is said here as well as drawn, because the dot is the only
+      // thing that carries it visually and a reader who cannot see it would
+      // otherwise be given figures with no hint that they are a minute old.
+      semantics: controller.stale
+          ? 'grid ${controller.gridName}, figures may be out of date'
+          : 'grid ${controller.gridName}',
       onEnter: onEnter,
       onExit: onExit,
       // ⚠️ `min`, and the `ConstrainedBox` in `_railBlock` is what makes that
@@ -1056,18 +1061,30 @@ class _GridMark extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              // Stale is its own state and gets its own colour: the figures on
-              // screen are real, they are just not from a moment ago.
-              color: controller.stale
-                  ? grid.AppPalette.warn
-                  : grid.AppPalette.online,
-              shape: BoxShape.circle,
+          // ⚠️ **Drawn ONLY when the reading is stale**, which is why there is
+          // no green here any more.
+          //
+          // This dot never meant "online" the way the sidebar's does — it
+          // answers one question, *are the figures beside me current*, and the
+          // rail keeps the last good answer on screen when a refresh fails
+          // (see `GridOverviewController`) precisely so it does not blank
+          // every minute. The dot is what admits that.
+          //
+          // But the honest state is the rare one. A dot that is green
+          // essentially always spends the rail's width saying "nothing is
+          // wrong", which a reader already assumes; all the information was in
+          // the amber. So the healthy case draws nothing and the amber arrives
+          // as a change rather than as a recolour — which is also the thing
+          // the eye actually catches down here.
+          if (controller.stale)
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: grid.AppPalette.warn,
+                shape: BoxShape.circle,
+              ),
             ),
-          ),
           // ⚠️ The grid's NAME used to follow this dot. The provider pill just
           // ahead of it carries it now — see the note at this row's head. What
           // stays is what the pill does not say: whether the reading is fresh,
@@ -1076,7 +1093,14 @@ class _GridMark extends StatelessWidget {
           // The chevron that marks this block as openable moved up here with
           // it. It used to trail the whole cluster, which read as a caret on
           // the memory figure once the name it actually belonged to was gone —
-          // beside the live dot it marks the block, which is what it means.
+          // at the head of the block it marks the block, which is what it
+          // means.
+          //
+          // ⚠️ It owns the gap ahead of it rather than the stale dot owning
+          // one behind: the dot comes and goes, and a gap that left with it
+          // would leave the chevron hard against the pill on the common path.
+          // This way the block starts in the same place either way and the
+          // dot is inserted into the space that is already there.
           if (power != null) ...[
             const SizedBox(width: 5),
             Icon(
