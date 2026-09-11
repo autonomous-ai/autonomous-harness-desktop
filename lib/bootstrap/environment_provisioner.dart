@@ -91,6 +91,9 @@ class EnvironmentReadiness {
   final String? terminalResultPath;
   final EnvironmentTerminalSetup? terminalSetup;
   final bool systemReady;
+  final bool? homebrewReady;
+  final bool? tmuxBinaryReady;
+  final List<String> missingLinuxPackages;
 
   const EnvironmentReadiness({
     required this.steps,
@@ -103,6 +106,9 @@ class EnvironmentReadiness {
     this.terminalResultPath,
     this.terminalSetup,
     this.systemReady = false,
+    this.homebrewReady,
+    this.tmuxBinaryReady,
+    this.missingLinuxPackages = const [],
   });
 
   factory EnvironmentReadiness.initial() => EnvironmentReadiness(
@@ -137,6 +143,9 @@ class EnvironmentReadiness {
     String? terminalResultPath,
     EnvironmentTerminalSetup? terminalSetup,
     bool? systemReady,
+    bool? homebrewReady,
+    bool? tmuxBinaryReady,
+    List<String>? missingLinuxPackages,
     bool clearFailure = false,
     bool clearTerminalHandoff = false,
   }) => EnvironmentReadiness(
@@ -156,6 +165,9 @@ class EnvironmentReadiness {
         ? null
         : terminalSetup ?? this.terminalSetup,
     systemReady: systemReady ?? this.systemReady,
+    homebrewReady: homebrewReady ?? this.homebrewReady,
+    tmuxBinaryReady: tmuxBinaryReady ?? this.tmuxBinaryReady,
+    missingLinuxPackages: missingLinuxPackages ?? this.missingLinuxPackages,
   );
 }
 
@@ -308,6 +320,9 @@ class EnvironmentProvisioner {
       String? terminalResultPath,
       EnvironmentTerminalSetup? terminalSetup,
       bool? systemReady,
+      bool? homebrewReady,
+      bool? tmuxBinaryReady,
+      List<String>? missingLinuxPackages,
     }) {
       final next = Map<EnvironmentStep, EnvironmentStepStatus>.from(
         state.steps,
@@ -332,6 +347,10 @@ class EnvironmentProvisioner {
         terminalResultPath: terminalResultPath ?? state.terminalResultPath,
         terminalSetup: terminalSetup ?? state.terminalSetup,
         systemReady: systemReady ?? state.systemReady,
+        homebrewReady: homebrewReady ?? state.homebrewReady,
+        tmuxBinaryReady: tmuxBinaryReady ?? state.tmuxBinaryReady,
+        missingLinuxPackages:
+            missingLinuxPackages ?? state.missingLinuxPackages,
       );
       onProgress(state);
     }
@@ -483,6 +502,12 @@ class EnvironmentProvisioner {
           : linuxMissingBasePackages.isEmpty;
       emit(
         systemReady: systemReady,
+        missingLinuxPackages: _isLinux
+            ? <String>[
+                ...linuxMissingBasePackages,
+                ?linuxMissingClipboardPackage,
+              ]
+            : const [],
         output: systemReady
             ? '✓ required system tools · writable home'
             : _isMacOS
@@ -539,6 +564,8 @@ class EnvironmentProvisioner {
             : _isMacOS && !homebrewReady
             ? '✗ Homebrew · brew --version'
             : '✗ tmux --version',
+        homebrewReady: _isMacOS ? homebrewReady : null,
+        tmuxBinaryReady: tmuxBinaryReady,
       );
 
       final harnessReady = await _hasHarness();
@@ -680,6 +707,11 @@ class EnvironmentProvisioner {
                       ? EnvironmentStepStatus.ready
                       : EnvironmentStepStatus.failed
                 : EnvironmentStepStatus.notApplicable,
+            missingLinuxPackages: <String>[
+              ...linuxMissingBasePackages,
+              ?linuxMissingClipboardPackage,
+            ],
+            tmuxBinaryReady: tmuxBinaryReady,
           );
           final classifiedBackgroundFailure = backgroundInstall == null
               ? null
@@ -721,6 +753,8 @@ class EnvironmentProvisioner {
               message: 'Linux system packages and tmux are ready.',
               output: '✓ Linux host dependencies installed and verified',
               systemReady: true,
+              tmuxBinaryReady: true,
+              missingLinuxPackages: const [],
             );
           } else {
             if (backgroundInstall != null) {
@@ -790,6 +824,8 @@ class EnvironmentProvisioner {
             status: EnvironmentStepStatus.ready,
             message: 'Homebrew and tmux are ready.',
             output: '✓ tmux installed via Homebrew',
+            homebrewReady: true,
+            tmuxBinaryReady: true,
           );
         } else {
           if (installResult != null) {
@@ -1485,7 +1521,9 @@ if ! command -v brew >/dev/null 2>&1; then
   /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 fi
 eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
-brew install tmux
+if ! command -v tmux >/dev/null 2>&1; then
+  brew install tmux
+fi
 echo 'tmux is ready. Return to Harness.'
 ''', flush: true);
       await _run('/bin/chmod', ['700', script.path]);

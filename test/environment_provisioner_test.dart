@@ -234,6 +234,8 @@ void main() {
 
     expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
     expect(readiness.systemReady, isFalse);
+    expect(readiness.homebrewReady, isTrue);
+    expect(readiness.tmuxBinaryReady, isFalse);
     expect(terminalScript, isNotNull);
     expect(calls.where((line) => line.contains('install.sh')), isEmpty);
     final script = await File(terminalScript!).readAsString();
@@ -246,6 +248,7 @@ void main() {
     );
     expect(script, contains('xcode-select --install'));
     expect(script, contains('did not become ready within 10 minutes'));
+    expect(script, contains('if ! command -v tmux'));
     if (File('/bin/zsh').existsSync()) {
       expect(
         (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
@@ -281,6 +284,8 @@ void main() {
       );
 
       expect(readiness.isReady, isTrue);
+      expect(readiness.homebrewReady, isTrue);
+      expect(readiness.tmuxBinaryReady, isTrue);
       expect(terminalLaunches, 0);
       expect(
         calls.where((line) => line.contains('brew install tmux')),
@@ -348,6 +353,8 @@ void main() {
       );
 
       expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(readiness.homebrewReady, isFalse);
+      expect(readiness.tmuxBinaryReady, isFalse);
       expect(terminalScript, isNotNull);
       expect(
         calls.where((line) => line.contains('brew install tmux')),

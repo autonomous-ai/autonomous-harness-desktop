@@ -127,11 +127,9 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
       _heading(
         'Step 2 of 3 · Review setup',
         'Here is exactly what is required',
-        'Only missing items are installed, in this order. Existing system Node, nvm and developer tools are not replaced.',
+        'Ready items stay untouched. Only missing items continue to setup.',
       ),
       _checkList(state),
-      const SizedBox(height: 20),
-      _planList(),
       const SizedBox(height: 16),
       _notice(
         Icons.shield_outlined,
@@ -143,13 +141,20 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
 
   Widget _choose(EnvironmentReadiness state) {
     final mode = state.mode ?? EnvironmentSetupMode.automatic;
+    final items = _installItems(state);
+    final count = items.length;
+    final countLabel =
+        '$count missing ${count == 1 ? 'dependency' : 'dependencies'}';
+    final needsTerminal = items.any((item) => item.requiresTerminal);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _heading(
           'Step 3 of 3 · Choose & install',
           'Choose how to prepare this computer',
-          'Both paths finish with the same verification: host dependencies, managed Node 20+, Harness CLI and Grid CLI must all answer.',
+          count == 0
+              ? 'Nothing is left to install. Harness will run one final verification.'
+              : 'Only the $countLabel below will be installed. Ready items stay untouched.',
         ),
         SegmentedButton<EnvironmentSetupMode>(
           segments: const [
@@ -170,16 +175,20 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
         ),
         const SizedBox(height: 18),
         if (mode == EnvironmentSetupMode.automatic) ...[
-          _notice(
-            Icons.terminal,
-            'Admin prompts stay in Terminal',
-            'Harness opens one operating system Terminal for all missing Homebrew or apt host dependencies. Your sudo password is entered there and is never read or stored by this app.',
-            warning: true,
-          ),
-          const SizedBox(height: 16),
-          _planList(),
+          if (needsTerminal) ...[
+            _notice(
+              Icons.terminal,
+              'Admin prompts stay in Terminal',
+              'Harness opens one operating system Terminal for the missing host dependencies. Your password is entered there and is never read or stored by this app.',
+              warning: true,
+            ),
+            const SizedBox(height: 16),
+          ],
+          _planList(items),
         ] else
-          _manualList(),
+          _manualList(items),
+        const SizedBox(height: 14),
+        _verificationHint(),
       ],
     );
   }
@@ -327,27 +336,113 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
     _ => 'Not applicable · image paste uses file-path fallback',
   };
 
-  Widget _planList() {
-    final rows = Platform.isMacOS
-        ? const [
-            ('Apple developer tools', 'Xcode or Command Line Tools'),
-            ('Homebrew', 'Only when missing'),
-            ('tmux', 'Required · Homebrew'),
-            ('Managed Node 20+ & Harness CLI', '~/.harness only'),
-            ('Grid CLI', 'Required'),
-            ('Final verification', 'All commands'),
-          ]
-        : const [
-            ('Host dependency check', 'Read-only'),
-            ('Install missing host dependencies', 'One apt transaction'),
-            ('Managed Node 20+ & Harness CLI', '~/.harness only'),
-            ('Grid CLI', 'Required'),
-            ('Final verification', 'All commands'),
-          ];
+  bool _needsInstall(EnvironmentStepStatus? status) =>
+      status != EnvironmentStepStatus.ready &&
+      status != EnvironmentStepStatus.notApplicable;
+
+  List<_InstallItem> _installItems(EnvironmentReadiness state) {
+    final items = <_InstallItem>[];
+    final tmuxStatusMissing = _needsInstall(state.steps[EnvironmentStep.tmux]);
+    final tmuxMissing =
+        state.tmuxBinaryReady == false ||
+        (state.tmuxBinaryReady == null && tmuxStatusMissing);
+
+    if (Platform.isMacOS) {
+      if (!state.systemReady) {
+        items.add(
+          const _InstallItem(
+            title: 'Apple developer tools',
+            detail: 'Xcode or Command Line Tools',
+            command: '/usr/bin/xcrun --find clang || { if [ -x /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild ]; then sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer; else xcode-select --install; fi; }',
+            requiresTerminal: true,
+          ),
+        );
+      }
+      final homebrewMissing =
+          state.homebrewReady == false ||
+          (state.homebrewReady == null && tmuxStatusMissing);
+      if (homebrewMissing) {
+        items.add(
+          const _InstallItem(
+            title: 'Homebrew',
+            detail: 'Required package manager for tmux',
+            command: '/bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+            requiresTerminal: true,
+          ),
+        );
+      }
+      if (tmuxMissing) {
+        items.add(
+          const _InstallItem(
+            title: 'tmux',
+            detail: 'Required for every terminal session',
+            command: 'eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install tmux',
+          ),
+        );
+      }
+    } else if (Platform.isLinux) {
+      final packages = <String>{...state.missingLinuxPackages};
+      if (!state.systemReady && packages.isEmpty) {
+        packages.addAll(const [
+          'bash',
+          'curl',
+          'tar',
+          'sed',
+          'gawk',
+          'coreutils',
+        ]);
+      }
+      if (_needsInstall(state.steps[EnvironmentStep.clipboard]) &&
+          _linuxClipboardPackage != null) {
+        packages.add(_linuxClipboardPackage!);
+      }
+      if (tmuxMissing) packages.add('tmux');
+      if (packages.isNotEmpty) {
+        final names = packages.join(', ');
+        items.add(
+          _InstallItem(
+            title: 'Linux host dependencies',
+            detail: '$names · one apt transaction',
+            command: 'sudo apt-get install -y ${packages.join(' ')}',
+            requiresTerminal: true,
+          ),
+        );
+      }
+    }
+
+    if (_needsInstall(state.steps[EnvironmentStep.harness])) {
+      items.add(
+        const _InstallItem(
+          title: 'Managed Node 20+ & Harness CLI',
+          detail: '~/.harness only',
+          command: kHarnessDesktopInstallCommand,
+        ),
+      );
+    }
+    if (_needsInstall(state.steps[EnvironmentStep.grid])) {
+      items.add(
+        const _InstallItem(
+          title: 'Grid CLI',
+          detail: 'Required binary',
+          command: 'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
+        ),
+      );
+    }
+    return items;
+  }
+
+  Widget _planList(List<_InstallItem> items) {
+    if (items.isEmpty) {
+      return _notice(
+        Icons.check_circle_outline,
+        'Nothing left to install',
+        'Every dependency is ready. Continue to final verification.',
+      );
+    }
     return _Panel(
       child: Column(
         children: [
-          for (var index = 0; index < rows.length; index++)
+          for (var index = 0; index < items.length; index++)
             ListTile(
               leading: CircleAvatar(
                 radius: 14,
@@ -357,10 +452,19 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
                   style: const TextStyle(fontSize: 11),
                 ),
               ),
-              title: Text(rows[index].$1, style: const TextStyle(fontSize: 13)),
-              trailing: Text(
-                rows[index].$2,
-                style: TextStyle(color: AppColors.muted, fontSize: 11),
+              title: Text(
+                items[index].title,
+                style: const TextStyle(fontSize: 13),
+              ),
+              trailing: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: Text(
+                  items[index].detail,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(color: AppColors.muted, fontSize: 11),
+                ),
               ),
             ),
         ],
@@ -368,49 +472,15 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
     );
   }
 
-  List<(String, String)> get _commands => Platform.isMacOS
-      ? [
-          (
-            '1 · Xcode or Command Line Tools',
-            '/usr/bin/xcrun --find clang || { if [ -x /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild ]; then sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer; else xcode-select --install; fi; }',
-          ),
-          (
-            '2 · Homebrew',
-            '/bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
-          ),
-          (
-            '3 · tmux',
-            'eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install tmux',
-          ),
-          ('4 · Harness CLI', kHarnessDesktopInstallCommand),
-          (
-            '5 · Grid CLI',
-            'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
-          ),
-          (
-            '6 · Verify',
-            'tmux -V && ~/.local/bin/harness version && ~/.local/bin/grid --version',
-          ),
-        ]
-      : [
-          (
-            '1 · Host dependencies',
-            'sudo apt-get install -y bash curl tar sed gawk coreutils tmux${_linuxClipboardPackage == null ? '' : ' $_linuxClipboardPackage'}',
-          ),
-          ('2 · Harness CLI', kHarnessDesktopInstallCommand),
-          (
-            '3 · Grid CLI',
-            'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
-          ),
-          (
-            '4 · Verify',
-            'tmux -V${_linuxClipboardPackage == null ? '' : ' && command -v ${_linuxClipboardPackage == 'wl-clipboard' ? 'wl-copy' : 'xclip'}'} && ~/.local/bin/harness version && ~/.local/bin/grid --version',
-          ),
-        ];
-
-  Widget _manualList() => Column(
+  Widget _manualList(List<_InstallItem> items) => Column(
     children: [
-      for (final item in _commands)
+      if (items.isEmpty)
+        _notice(
+          Icons.check_circle_outline,
+          'Nothing left to install',
+          'Every dependency is ready. Continue to final verification.',
+        ),
+      for (var index = 0; index < items.length; index++)
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: _Panel(
@@ -419,7 +489,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.$1,
+                  '${index + 1} · ${items[index].title}',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -427,14 +497,27 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
                 ),
                 const SizedBox(height: 9),
                 CommandRow(
-                  command: item.$2,
-                  copied: _copied == item.$2,
-                  onCopy: () => _copy(item.$2),
+                  command: items[index].command,
+                  copied: _copied == items[index].command,
+                  onCopy: () => _copy(items[index].command),
                 ),
               ],
             ),
           ),
         ),
+    ],
+  );
+
+  Widget _verificationHint() => Row(
+    children: [
+      Icon(Icons.verified_outlined, size: 16, color: AppColors.success),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          'After installation, Harness verifies every required command.',
+          style: TextStyle(color: AppColors.textSoft, fontSize: 11),
+        ),
+      ),
     ],
   );
 
@@ -548,6 +631,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
   Widget _footer(EnvironmentReadiness state) {
     final busy = widget.notifier.environmentSetupInFlight;
     final mode = state.mode ?? EnvironmentSetupMode.automatic;
+    final missingCount = _installItems(state).length;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
       decoration: BoxDecoration(
@@ -590,7 +674,9 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
               ),
               label: Text(
                 mode == EnvironmentSetupMode.automatic
-                    ? 'Install missing tools'
+                    ? missingCount == 0
+                          ? 'Verify and continue'
+                          : 'Install $missingCount ${missingCount == 1 ? 'tool' : 'tools'}'
                     : 'I ran these · Recheck',
               ),
             ),
@@ -637,6 +723,20 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
       ),
     );
   }
+}
+
+class _InstallItem {
+  final String title;
+  final String detail;
+  final String command;
+  final bool requiresTerminal;
+
+  const _InstallItem({
+    required this.title,
+    required this.detail,
+    required this.command,
+    this.requiresTerminal = false,
+  });
 }
 
 class _Rail extends StatelessWidget {
