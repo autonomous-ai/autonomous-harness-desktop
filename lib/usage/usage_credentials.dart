@@ -79,6 +79,16 @@ class UsageCredentials {
     return id is String && id.isNotEmpty ? id : null;
   }
 
+  /// The account Claude Code is signed in as: `oauthAccount.accountUuid` in
+  /// `~/.claude.json`, which is where it records who it is on every platform.
+  /// The token store — Keychain or `.credentials.json` — does not carry it.
+  Future<String?> claudeAccountId() async {
+    final profile = _decode(_readFile('.claude.json'))?['oauthAccount'];
+    if (profile is! Map) return null;
+    final id = profile['accountUuid'];
+    return id is String && id.isNotEmpty ? id : null;
+  }
+
   UsageToken? _parseClaude(String? raw) {
     if (raw == null) return null;
     final oauth = _decode(raw)?['claudeAiOauth'];

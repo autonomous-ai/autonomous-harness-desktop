@@ -40,7 +40,13 @@ class _HomeScreenState extends State<HomeScreen> {
   /// controllers would be two pollers hitting the same two vendors a minute
   /// apart, and a card that could name a percentage the rail underneath it
   /// disagreed with.
-  final UsageController _usage = UsageController();
+  ///
+  /// It also asks every connected REMOTE machine for its own accounts
+  /// (`AppNotifier.readRemoteUsage`), because a machine elsewhere may be signed
+  /// in to a different subscription — one this computer cannot read itself.
+  late final UsageController _usage = UsageController(
+    remote: widget.notifier.readRemoteUsage,
+  );
 
   /// Spoken tasks from the dial, waiting for a palette. Subscribed here because this is the lowest
   /// place that has both a [BuildContext] to open a dialog on and a lifetime to cancel with.

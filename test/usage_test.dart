@@ -10,6 +10,7 @@ import 'package:harness/usage/codex_usage_source.dart';
 import 'package:harness/usage/usage_credentials.dart';
 import 'package:harness/usage/usage_controller.dart';
 import 'package:harness/usage/usage_source.dart';
+import 'package:harness/usage/usage_accounts.dart';
 import 'package:harness/usage/usage_window.dart';
 
 /// A Dio that answers every request with one canned payload, so a source can be
@@ -327,14 +328,19 @@ void main() {
                 // The width the rail actually opens this panel at.
                 width: 248,
                 child: UsagePanelContent(
-                  reading: ProviderUsage(
-                    provider: UsageProvider.claude,
-                    status: UsageStatus.ok,
-                    windows: [
-                      UsageWindow(label: 'Session', usedPercent: percent),
-                    ],
-                    fetchedAt: DateTime.now(),
-                  ),
+                  accounts: [
+                    UsageAccount(
+                      isLocal: true,
+                      reading: ProviderUsage(
+                        provider: UsageProvider.claude,
+                        status: UsageStatus.ok,
+                        windows: [
+                          UsageWindow(label: 'Session', usedPercent: percent),
+                        ],
+                        fetchedAt: DateTime.now(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

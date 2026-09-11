@@ -33,6 +33,8 @@ import '../ws/local_cli_discovery.dart';
 import '../ws/ws_pool.dart';
 import 'pane_preset.dart';
 import 'pending_question.dart';
+import '../usage/remote_usage.dart';
+import '../usage/usage_accounts.dart';
 
 enum AppStatus {
   bootstrapping,
@@ -2384,6 +2386,49 @@ class AppNotifier extends ChangeNotifier {
     if (machine == null) return;
     _connectMachine(machine);
     await _loadMachineData(machine, force: true);
+  }
+
+  /// What every connected REMOTE machine's agent accounts have spent, asked in
+  /// parallel and read there with that machine's own credentials (`usage_read`).
+  ///
+  /// This computer's own accounts are not asked here — the app reads those
+  /// directly, the Keychain included. A remote machine may be signed in to a
+  /// different subscription, and a rate limit belongs to an account rather than
+  /// a computer, so the only honest way to show that one is to ask the machine
+  /// that holds it.
+  ///
+  /// ⚠️ **A machine whose CLI predates `usage_read` does not refuse it — it goes
+  /// silent.** The frame reaches it as an E2EE envelope it does not know to
+  /// open, so the requestId inside is never read and nothing replies. That is a
+  /// timeout, not an `UNSUPPORTED`, which is why this asks with a short one and
+  /// treats every failure alike: a machine that cannot say has nothing to add,
+  /// and it must never hold up the figures of the ones that can.
+  Future<List<MachineUsage>> readRemoteUsage() async {
+    final remotes = [
+      for (final machine in machineStates.values)
+        if (!machine.isLocalMachine &&
+            machine.connectionStatus == ConnectionStatus.connected)
+          machine,
+    ];
+    final answers = await Future.wait([
+      for (final machine in remotes) _readMachineUsage(machine),
+    ]);
+    return [for (final answer in answers) ?answer];
+  }
+
+  Future<MachineUsage?> _readMachineUsage(MachineState machine) async {
+    try {
+      final reply = await _conn(machine.machine.machineId)
+          .request('usage_read', timeout: const Duration(seconds: 10));
+      final readings = parseUsageReadResult(reply);
+      if (readings.isEmpty) return null;
+      return MachineUsage(
+        machineName: machine.machine.displayName,
+        readings: readings,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// One-level directory listing on the remote machine, for the New Agent folder browser.

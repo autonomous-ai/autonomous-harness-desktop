@@ -94,6 +94,7 @@ class ProviderUsage {
     this.windows = const [],
     this.message,
     this.fetchedAt,
+    this.account,
   });
 
   /// The state a provider is in before it has ever answered.
@@ -101,7 +102,8 @@ class ProviderUsage {
     : status = UsageStatus.loading,
       windows = const [],
       message = null,
-      fetchedAt = null;
+      fetchedAt = null,
+      account = null;
 
   final UsageProvider provider;
   final UsageStatus status;
@@ -116,6 +118,16 @@ class ProviderUsage {
 
   /// When these figures were read. Null until the first answer lands.
   final DateTime? fetchedAt;
+
+  /// Which account these figures belong to — `usageAccountKey`, never the id
+  /// itself — or null when the machine that read them could not say.
+  ///
+  /// It is what lets the strip show one figure per ACCOUNT rather than one per
+  /// machine: a remote machine signed in to this same subscription is this
+  /// figure again, and one signed in to another is a figure of its own. **Null
+  /// never matches anything**, itself included — two readings nobody can name
+  /// are not provably one account, and merging them could hide a subscription.
+  final String? account;
 
   bool get hasFigures => status == UsageStatus.ok && windows.isNotEmpty;
 

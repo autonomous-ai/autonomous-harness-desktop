@@ -439,9 +439,28 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   provider reporting no weekly window falls back to it — one figure is the rule, and a blank strip
   is a worse answer than the wrong window. `kWeeklyWindowLabel` is written down once because the
   rail MATCHES on it and the two sources spell it separately; the panel behind the figure still
-  shows every window. The block sits at the RIGHT of the strip, against the version mark: the pill
-  at the other end is what you press, and furniture you only read belongs at the edge you are not
-  reaching for. It replaced the words "No grid chosen", a sentence that
+  shows every window. The block sits at the RIGHT end of the strip: the pill at the other end is
+  what you press, and furniture you only read belongs at the edge you are not reaching for.
+  **Remote machines' accounts arrive through `usage_read`** (`AppNotifier.readRemoteUsage`,
+  `usage/remote_usage.dart`, `usage/usage_accounts.dart`; CLI side `cli/src/lib/accountUsage.ts`).
+  A remote machine may be signed in to a DIFFERENT subscription, and the only honest way to read
+  that one is to ask the machine holding it — so its CLI calls the vendors with ITS OWN token and
+  hands back their HTTP status and body untouched, and this app reads them with the SAME
+  `claudeUsageFromAnswer`/`codexUsageFromAnswer` it reads its own with. The credential never
+  crosses the relay, and the window-naming rules live in one language. Readings are grouped ONE
+  PER ACCOUNT (`groupUsageAccounts`): an account key — the first 16 hex of
+  sha256(`<provider>:<id>`), `usageAccountKey` here and `accountKey` there, both suites pinning one
+  vector — decides whether a remote subscription is this one again (folded in, unlabelled) or
+  another (its own figure, labelled with the machine). Hashed because RPC replies are logged.
+  ⚠️ A null key never matches, itself included, and a remote reading folds into this computer's
+  only when this computer HAS figures — otherwise a token that expired here would swallow a live
+  reading of the same account taken there. `readings` stays this computer's alone and `accounts`
+  is the grouped view: the notice and the offer read `readings`, because a remote account at 95%
+  is no reason to move this Mac's agents. ⚠️ **`usage_read` is in the E2EE type sets** (`core.ts`),
+  which re-pinned the interop keystone the browser client and the paired device share. And a
+  remote CLI that predates it does not refuse the frame — it cannot open the envelope, loses the
+  requestId and goes silent — so this asks with a 10s timeout and treats every failure as nothing
+  to add, never holding up this computer's own figures. It replaced the words "No grid chosen", a sentence that
   tells someone what they already know and hands a riddle to anyone whose build has no picker.
   **This is the SECOND exception to "the app talks only to the local CLI"**, after Grid, and it is a
   narrower one: nothing here is dialled on the app's own behalf. `UsageCredentials` reads the tokens

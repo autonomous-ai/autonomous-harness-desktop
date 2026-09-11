@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart' as grid;
+import '../../usage/usage_accounts.dart';
 import '../../usage/usage_offer.dart';
 import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
@@ -20,15 +21,20 @@ import 'usage_ink.dart';
 class UsagePanelContent extends StatelessWidget {
   const UsagePanelContent({
     super.key,
-    required this.reading,
+    required this.accounts,
     this.offer,
     this.onAct,
   });
 
-  final ProviderUsage reading;
+  /// Every account of ONE provider, this computer's first
+  /// (`groupUsageAccounts`). With a single account — the common case, and every
+  /// case where the remote machines share this computer's subscription — the
+  /// panel is exactly the one it always was: captions appear only once there is
+  /// something to tell apart.
+  final List<UsageAccount> accounts;
 
-  /// What this account's nearly-spent window is worth doing about, or null when
-  /// there is nothing worth pressing — see `resolveUsageOffer`.
+  /// What this computer's nearly-spent window is worth doing about, or null
+  /// when there is nothing worth pressing — see `resolveUsageOffer`.
   final UsageOffer? offer;
 
   /// Runs [offer]. Null drops the footer entirely rather than drawing a button
@@ -38,38 +44,18 @@ class UsagePanelContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final captioned = accounts.length > 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Header(reading: reading),
-        if (reading.provider == UsageProvider.codex) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Default profile · ~/.codex',
-            style: TextStyle(color: grid.AppPalette.textFaint, fontSize: 11.5),
-          ),
-        ],
-        if (reading.hasFigures)
-          for (final window in reading.windows) ...[
-            const SizedBox(height: 12),
-            _WindowRow(
-              window: window,
-              color: engineIdentity(reading.provider.engineId).color,
-            ),
-          ]
-        else ...[
-          const SizedBox(height: 10),
-          Text(
-            // The source wrote this sentence, because the source is what knows
-            // whether signing in or retrying is the way out of it.
-            reading.message ?? 'No usage to show',
-            style: TextStyle(
-              color: grid.AppPalette.textFaint,
-              fontSize: 11.5,
-              height: 1.35,
-            ),
-          ),
+        _Header(reading: accounts.first.reading),
+        for (final (index, account) in accounts.indexed) ...[
+          if (captioned) ...[
+            SizedBox(height: index == 0 ? 12 : 16),
+            _AccountCaption(account: account),
+          ],
+          ..._accountBody(account.reading),
         ],
         if (offer case final offer? when onAct != null) ...[
           const SizedBox(height: 12),
@@ -77,6 +63,60 @@ class UsagePanelContent extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  /// One account's windows — or, when it has none, the sentence its source
+  /// wrote about why, because the source is what knows whether signing in or
+  /// retrying is the way out.
+  static List<Widget> _accountBody(ProviderUsage reading) {
+    if (!reading.hasFigures) {
+      return [
+        const SizedBox(height: 10),
+        Text(
+          reading.message ?? 'No usage to show',
+          style: TextStyle(
+            color: grid.AppPalette.textFaint,
+            fontSize: 11.5,
+            height: 1.35,
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final window in reading.windows) ...[
+        const SizedBox(height: 12),
+        _WindowRow(
+          window: window,
+          color: engineIdentity(reading.provider.engineId).color,
+        ),
+      ],
+    ];
+  }
+}
+
+/// Whose subscription a block of windows is, once a provider has more than one.
+class _AccountCaption extends StatelessWidget {
+  const _AccountCaption({required this.account});
+
+  final UsageAccount account;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    _caption,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: grid.AppPalette.textSecondary,
+      fontSize: 11,
+      fontWeight: grid.AppFont.medium,
+    ),
+  );
+
+  String get _caption {
+    if (!account.isLocal) return account.machines.join(', ');
+    return account.machines.isEmpty
+        ? 'This computer'
+        : 'This computer · also ${account.machines.join(', ')}';
   }
 }
 
