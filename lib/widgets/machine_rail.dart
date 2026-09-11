@@ -583,6 +583,11 @@ class _MachineNodeState extends State<_MachineNode> {
                           ),
                         ),
                       ),
+                      // A computer that is not answering, said once, where the
+                      // computer is named. It replaces two lines of red further
+                      // down: a machine being off is a STATE, and red is for
+                      // something that went wrong.
+                      if (state.nodeOnline == false) const _OfflineChip(),
                       // How many agents are inside something you have closed.
                       // Only when closed: with the list open you can count
                       // them, and a number beside a list you can see is noise.
@@ -753,6 +758,13 @@ class _AgentTree extends StatelessWidget {
           // everything under the machine dropped when the real rows arrived.
           return const _AgentRowsSkeleton(key: ValueKey('agents-loading'));
         case AgentLoadStatus.error:
+          // A machine with no agents AND no connection fails HERE, not on the
+          // branch below — that one only runs once some agents are known. This
+          // is the path the rail actually took for an offline computer, and the
+          // reason the red block outlived the first attempt to replace it.
+          if (state.nodeOnline == false) {
+            return _MachineOfflineNote(state: state);
+          }
           return _AgentLoadError(notifier: notifier, state: state);
         case AgentLoadStatus.loaded:
           return _EmptyAgents(notifier: notifier, state: state);
@@ -804,7 +816,16 @@ class _AgentTree extends StatelessWidget {
             onTap: () =>
                 notifier.selectMachineForSetup(state.machine.machineId),
           ),
-        if (state.agentsLoadError != null)
+        // OFFLINE IS NOT AN ERROR, so it does not get the error's treatment.
+        //
+        // The red row told an app user to "run harness start on that machine" —
+        // an instruction for a terminal, given to somebody who opened a window,
+        // about a computer they may not be sitting at. The chip on the row above
+        // already says the machine is off; this says why its agents are missing,
+        // in the rail's ordinary grey, once.
+        if (state.nodeOnline == false)
+          _MachineOfflineNote(state: state)
+        else if (state.agentsLoadError != null)
           _AgentLoadError(notifier: notifier, state: state),
         if (state.terminalCapabilityLoaded &&
             !state.terminalCapabilityAvailable)
@@ -1405,6 +1426,73 @@ class _AgentStatusRow extends StatelessWidget {
                 color: grid.AppPalette.textFaint,
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The word for a machine that is not answering, on the machine's own row.
+class _OfflineChip extends StatelessWidget {
+  const _OfflineChip();
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: grid.AppGlass.hair,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          child: Text(
+            'Offline',
+            style: TextStyle(
+              color: grid.AppPalette.textFaint,
+              fontFamily: grid.AppFont.sans,
+              fontSize: 10,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Why an offline machine has no agents under it.
+///
+/// One sentence, in the colour every other quiet line in the rail uses. No icon,
+/// because the chip beside the machine name is already the marker; no command,
+/// because the person reading it opened an application.
+class _MachineOfflineNote extends StatelessWidget {
+  const _MachineOfflineNote({required this.state});
+
+  final MachineState state;
+
+  @override
+  Widget build(BuildContext context) {
+    grid.AppTheme.watch(context);
+    // Named, for a machine that is not the one in front of them. "this computer"
+    // is wrong for a remote row and unhelpfully vague for the local one when the
+    // rail holds four.
+    final where = state.isLocalMachine
+        ? 'this computer'
+        : state.machine.displayName;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(38, 0, 12, 8),
+      child: Text(
+        "Harness isn't running on $where.",
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: grid.AppPalette.textFaint,
+          fontFamily: grid.AppFont.sans,
+          fontSize: 11.2,
+          height: 1.4,
         ),
       ),
     );
