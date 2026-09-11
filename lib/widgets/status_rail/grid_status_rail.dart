@@ -26,6 +26,7 @@ import '../usage_offer_actions.dart';
 import 'grid_models_panel.dart';
 import 'grid_power_panel.dart';
 import 'grid_stat_panels.dart';
+import 'key_hints.dart';
 import 'memory_ring.dart';
 import 'rail_figure.dart';
 import 'rail_provider_pill.dart';
@@ -158,6 +159,10 @@ class _GridStatusRailState extends State<GridStatusRail> {
                 ),
               ),
             ),
+            // The right half of the strip was empty, and the keys had nowhere
+            // to live that was not a modal. See [KeyHints] for why a strip beats
+            // a sheet for the ones nobody knows to go looking for.
+            KeyHints(notifier: widget.notifier),
           ],
         ),
       ),

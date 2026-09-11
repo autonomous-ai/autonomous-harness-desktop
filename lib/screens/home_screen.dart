@@ -16,6 +16,7 @@ import '../widgets/machine_rail_mini.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_section.dart';
 import '../shortcuts/app_shortcuts.dart';
+import '../widgets/agent_switcher.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/task_palette.dart';
 import '../widgets/pane_grid.dart';
@@ -252,14 +253,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() => _collapsed = !_collapsed),
               ShortcutAction.nextAgent: () => _stepAgent(1),
               ShortcutAction.previousAgent: () => _stepAgent(-1),
-              ShortcutAction.focusNextPane: () => notifier.focusPaneBy(1),
-              ShortcutAction.focusPreviousPane: () => notifier.focusPaneBy(-1),
+              // All four directions read the GEOMETRY now. Left and right used
+              // to walk the list while up and down read the layout, so half the
+              // compass meant "the next one" and half meant "the one over
+              // there" — a scheme nobody can hold in their head, and the reason
+              // hjkl could not simply be aliased onto the old keys.
+              ShortcutAction.focusPaneLeft: () =>
+                  notifier.focusPaneHorizontally(-1),
+              ShortcutAction.focusPaneRight: () {
+                // Out of the rail first. ⌘l is "go right", and from inside the
+                // sidebar the thing on the right is the grid.
+                if (notifier.railFocused) {
+                  notifier.unfocusRail();
+                  return;
+                }
+                notifier.focusPaneHorizontally(1);
+              },
               ShortcutAction.focusPaneAbove: () =>
                   notifier.focusPaneVertically(-1),
               ShortcutAction.focusPaneBelow: () =>
                   notifier.focusPaneVertically(1),
-              ShortcutAction.movePaneForward: () => notifier.movePaneBy(1),
-              ShortcutAction.movePaneBackward: () => notifier.movePaneBy(-1),
+              ShortcutAction.movePaneLeft: () =>
+                  notifier.movePaneDirection(dx: -1, dy: 0),
+              ShortcutAction.movePaneRight: () =>
+                  notifier.movePaneDirection(dx: 1, dy: 0),
+              ShortcutAction.movePaneUp: () =>
+                  notifier.movePaneDirection(dx: 0, dy: -1),
+              ShortcutAction.movePaneDown: () =>
+                  notifier.movePaneDirection(dx: 0, dy: 1),
+              ShortcutAction.lastPane: notifier.focusLastPane,
+              ShortcutAction.zoomPane: notifier.toggleZoomPane,
+              ShortcutAction.switchAgent: () =>
+                  unawaited(showAgentSwitcher(context, notifier)),
 
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
