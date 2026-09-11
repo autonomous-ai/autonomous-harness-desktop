@@ -3402,8 +3402,43 @@ class AppNotifier extends ChangeNotifier {
   /// it is: an arrow that wraps to the far side of the screen reads as a jump,
   /// not as a step.
   void focusPaneVertically(int delta) {
-    final to = _neighbour(dx: 0, dy: delta);
+    final to = _neighbour(dx: 0, dy: delta) ?? _wrapVertically(delta);
     if (to != null) focusPane(panes[to].id);
+  }
+
+  /// The tile at the far end of this column — ⌘j off the bottom row, ⌘k off the
+  /// top.
+  ///
+  /// IN COLUMN, not in list order. Wrapping to `panes.first` from the bottom
+  /// right of a 2x2 would jump a column as well as a row, which reads as the key
+  /// having misfired rather than as having come round. This finds the tile that
+  /// still overlaps ours horizontally and sits furthest in the direction pressed
+  /// — the one directly above or below, as far as it goes.
+  int? _wrapVertically(int delta) {
+    final count = panes.length;
+    if (count < 2) return null;
+    final shape = presetFor(count)?.tilesFor(count, columns: gridColumns);
+    if (shape == null || shape.length != count) return null;
+    final at = panes.indexWhere((pane) => pane.id == focusedPaneId);
+    if (at < 0) return null;
+
+    final from = shape[at];
+    int? best;
+    double bestEdge = 0;
+    for (var i = 0; i < count; i++) {
+      if (i == at) continue;
+      final to = shape[i];
+      if ((from.right < to.left + 0.001) || (to.right < from.left + 0.001)) {
+        continue;
+      }
+      // Going DOWN wraps to the topmost; going up, to the bottom-most.
+      final edge = delta > 0 ? -to.top : to.top;
+      if (best == null || edge > bestEdge) {
+        bestEdge = edge;
+        best = i;
+      }
+    }
+    return best;
   }
 
   /// ⌘h / ⌘l, and ⌘← / ⌘→ — the tile beside this one, by POSITION.
@@ -3414,19 +3449,38 @@ class AppNotifier extends ChangeNotifier {
   /// there". A vim user pressing `l` means the window to their right, and a
   /// scheme that means it in two directions out of four is one nobody can hold.
   void focusPaneHorizontally(int delta) {
+    // THE RAIL IS A SEAT IN THE RING, not a wall at one end of it.
+    //
+    // No new key for "go to the sidebar": the sidebar is what is to the left of
+    // the leftmost tile, so the key that means left already says it — the motion
+    // vim users have, where `Ctrl-w h` out of the last split does not stop, it
+    // reaches the next thing.
+    //
+    // And the ring CLOSES. Walking off either edge seats you in the rail, and
+    // walking out of the rail continues round to the far side: left out of it
+    // lands on the last tile, right onto the first. A ring that stopped dead at
+    // one end would make the same key mean "go left" in the middle of the grid
+    // and "do nothing" at its edge, which is a key people stop trusting.
+    if (railFocused) {
+      if (panes.isEmpty) return;
+      unfocusRail();
+      focusPane(delta < 0 ? panes.last.id : panes.first.id);
+      return;
+    }
     final to = _neighbour(dx: delta, dy: 0);
     if (to != null) {
       focusPane(panes[to].id);
       return;
     }
-    // WALKING OFF THE LEFT EDGE LANDS IN THE RAIL, and walking right comes back.
-    //
-    // No new key for "go to the sidebar": the sidebar is what is to the left of
-    // the leftmost tile, so the key that means left already says it. This is the
-    // motion vim users have — `Ctrl-w h` out of the last split does not stop,
-    // it reaches the next thing — and it is the difference between a rail that
-    // is keyboard-reachable and one that has a shortcut nobody remembers.
-    if (delta < 0 && !railFocused) focusRail();
+    focusRail();
+    // An EMPTY rail is not a seat, so the ring skips it rather than stopping on
+    // it. focusRail refuses when there is nothing to put a cursor on — no
+    // machines yet, or a list that has not loaded — and without this the key
+    // would simply do nothing at the edge, which is the exact behaviour the ring
+    // exists to remove.
+    if (!railFocused && panes.isNotEmpty) {
+      focusPane(delta < 0 ? panes.last.id : panes.first.id);
+    }
   }
 
   /// ⇧⌘h j k l — put this pane where its neighbour is, and that one here.
