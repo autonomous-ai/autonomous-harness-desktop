@@ -58,16 +58,16 @@ class FakeHub {
               'payload': {'machineId': machineId},
             }),
           );
-        } else if (frame['type'] == 'agent_retarget') {
+        } else if (frame['type'] == 'agent_create') {
           // A REFUSAL — the shape every CLI-side "no" arrives in: a `<type>_result` frame carrying
           // an error code, never a returned map with an `error` key. See WsRequestFailure.
           ws.add(
             jsonEncode({
-              'type': 'agent_retarget_result',
+              'type': 'agent_create_result',
               'payload': {
                 'requestId': (frame['payload'] as Map)['requestId'],
-                'error': 'AGENT_BUSY',
-                'detail': 'the agent is mid-turn',
+                'error': 'UNSUPPORTED_ON_REMOTE',
+                'detail': 'this machine cannot create agents',
               },
             }),
           );
@@ -123,11 +123,10 @@ void main() {
     },
   );
 
-  // The regression this guards: `AppNotifier.moveAgentToGrid` and `createAgent` both used to map the
-  // CLI's refusal codes to sentences in a branch reading `result['error']` — on a reply that had
-  // already thrown, so the branch could never run and the user got the wire code in a snackbar
-  // ("Move failed: Exception: agent_retarget_result: UNSUPPORTED"). The code has to survive the
-  // throw for those call sites to have anything to map.
+  // The regression this guards: `AppNotifier.createAgent` used to map the CLI's refusal codes to
+  // sentences in a branch reading `result['error']` — on a reply that had already thrown, so the
+  // branch could never run and the user got the wire code instead of the sentence. The code has to
+  // survive the throw for that call site to have anything to map.
   test('a refusal reply throws WsRequestFailure carrying the code', () async {
     hub = await FakeHub.start();
     conn = WsConn(
@@ -141,15 +140,15 @@ void main() {
     );
     await conn!.connect();
     await expectLater(
-      conn!.request('agent_retarget', payload: {'agentId': 'a1'}),
+      conn!.request('agent_create', payload: {'engine': 'codex'}),
       throwsA(
         isA<WsRequestFailure>()
-            .having((f) => f.code, 'code', 'AGENT_BUSY')
-            .having((f) => f.detail, 'detail', 'the agent is mid-turn')
+            .having((f) => f.code, 'code', 'UNSUPPORTED_ON_REMOTE')
+            .having((f) => f.detail, 'detail', 'this machine cannot create agents')
             .having(
               (f) => f.responseType,
               'responseType',
-              'agent_retarget_result',
+              'agent_create_result',
             ),
       ),
     );
@@ -187,42 +186,39 @@ void main() {
     },
   );
 
-  test(
-    'forceReconnect() sends forceReconnect:true on the next machine_select, only for local transport',
-    () async {
-      hub = await FakeHub.start();
-      conn = WsConn(
-        wsBaseUrl: 'wss://unused.example',
-        autonomousEnv: 'prod',
-        machineId: 'm1',
-        accessTokenProvider: (_, _) async => 'sso-token',
-        onAuthFailure: (_) {},
-        onEvent: (_) {},
-        onStatus: (_) {},
-        transportKind: WsTransportKind.localPlaintext,
-        localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
-      );
-      await conn!.connect();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      final selects = hub.frames
-          .where((frame) => frame['type'] == 'machine_select')
-          .toList();
-      expect(selects, hasLength(1));
-      expect(
-        (selects.first['payload'] as Map).containsKey('forceReconnect'),
-        isFalse,
-      );
+  test('forceReconnect() sends forceReconnect:true on the next machine_select, only for local transport', () async {
+    hub = await FakeHub.start();
+    conn = WsConn(
+      wsBaseUrl: 'wss://unused.example',
+      autonomousEnv: 'prod',
+      machineId: 'm1',
+      accessTokenProvider: (_, _) async => 'sso-token',
+      onAuthFailure: (_) {},
+      onEvent: (_) {},
+      onStatus: (_) {},
+      transportKind: WsTransportKind.localPlaintext,
+      localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
+    );
+    await conn!.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final selects = hub.frames
+        .where((frame) => frame['type'] == 'machine_select')
+        .toList();
+    expect(selects, hasLength(1));
+    expect(
+      (selects.first['payload'] as Map).containsKey('forceReconnect'),
+      isFalse,
+    );
 
-      await conn!.forceReconnect();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      final selectsAfter = hub.frames
-          .where((frame) => frame['type'] == 'machine_select')
-          .toList();
-      expect(selectsAfter, hasLength(2));
-      expect((selectsAfter[1]['payload'] as Map)['forceReconnect'], isTrue);
-      expect(conn!.isReady, isTrue);
-    },
-  );
+    await conn!.forceReconnect();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final selectsAfter = hub.frames
+        .where((frame) => frame['type'] == 'machine_select')
+        .toList();
+    expect(selectsAfter, hasLength(2));
+    expect((selectsAfter[1]['payload'] as Map)['forceReconnect'], isTrue);
+    expect(conn!.isReady, isTrue);
+  });
 
   test('blocked encrypted RPC fails immediately and is never sent', () async {
     hub = await FakeHub.start();
@@ -268,6 +264,36 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(hub.protocols, hasLength(1));
     expect(failures.single, contains('environment'));
+  });
+
+  // AppNotifier's onStatus handler reads machine.needsLink to decide whether a
+  // disconnect should be treated as the node going offline — it only sees the
+  // right value if onLocalFailure (which sets needsLink) has already run.
+  test('4404 reports onLocalFailure before onStatus(disconnected)', () async {
+    hub = await FakeHub.start(closeCodeOnSelect: 4404);
+    final calls = <String>[];
+    conn = WsConn(
+      wsBaseUrl: 'wss://unused.example',
+      autonomousEnv: 'prod',
+      machineId: 'm1',
+      accessTokenProvider: (_, _) async => 'sso-token',
+      onAuthFailure: (_) {},
+      onLocalFailure: (code, reason) => calls.add('onLocalFailure'),
+      onEvent: (_) {},
+      onStatus: (status) => calls.add('onStatus:$status'),
+      transportKind: WsTransportKind.localPlaintext,
+      localWsUri: Uri.parse('ws://127.0.0.1:${hub.port}/api/local-ws'),
+    );
+    await conn!.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(
+      calls,
+      containsAllInOrder([
+        'onLocalFailure',
+        'onStatus:ConnectionStatus.disconnected',
+      ]),
+    );
+    expect(conn!.isClosed, isTrue);
   });
 
   test(

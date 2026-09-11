@@ -15,12 +15,10 @@ import '../auth/sign_in_client.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/engine_availability.dart';
+import '../core/local_hostname.dart';
 import '../core/models.dart';
 import '../core/retry.dart';
 import '../core/viewer_mode.dart';
-import '../grid/grid_agent_override.dart';
-import '../grid/grid_session.dart';
-import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
@@ -42,6 +40,7 @@ import '../usage/usage_accounts.dart';
 
 enum AppStatus {
   bootstrapping,
+  checkingEnvironment,
   preparingEnvironment,
   unauthenticated,
   authenticated,
@@ -195,6 +194,30 @@ class SpokenTaskRequest {
   final String cmd;
 }
 
+/// One line in the rail: a machine, or an agent under one.
+///
+/// A record rather than a widget key, because the cursor has to survive a
+/// rebuild that changes what is on screen — an agent finishing, a machine going
+/// offline — and an index into a list of widgets does not.
+@immutable
+class RailRow {
+  const RailRow({required this.machineId, this.agentId});
+
+  final String machineId;
+
+  /// Null for the machine's own row.
+  final String? agentId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RailRow &&
+      other.machineId == machineId &&
+      other.agentId == agentId;
+
+  @override
+  int get hashCode => Object.hash(machineId, agentId);
+}
+
 class AppNotifier extends ChangeNotifier {
   final AuthSession session;
   AppConfig config;
@@ -257,10 +280,6 @@ class AppNotifier extends ChangeNotifier {
   // still be able to replace a broken desktop build from the login screen.
   Timer? _updateCheckTimer;
   String? _skippedDesktopUpdateVersion;
-  // Set from the store on every `bootstrap()` (see `_prepareEnvironment`), never mutated except
-  // there or on the first successful environment check — a machine already on the current
-  // `kEnvironmentSetupVersion` skips re-probing CLI/tmux/Grid presence on every later launch.
-  int? _environmentSetupVersion;
   UpdateInfo? availableUpdate;
   bool isCheckingForUpdate = false;
   bool isInstallingUpdate = false;
@@ -465,7 +484,146 @@ class AppNotifier extends ChangeNotifier {
   bool isAgentInPane(String machineId, String agentId) =>
       paneOfAgent(machineId, agentId) != null;
 
-  bool isPaneFocused(int paneId) => focusedPaneId == paneId;
+  /// True while the KEYBOARD is in the rail rather than on the grid.
+  ///
+  /// Folded into [isPaneFocused] on purpose, and it does two jobs at once. The
+  /// terminal re-claims the native input connection when `focused` goes false →
+  /// true (TerminalPanel.didUpdateWidget), so flipping this is what hands the
+  /// keys over and what takes them back. And the focus ring leaves the tile
+  /// while the rail has the cursor, which is the honest thing to draw: a ring on
+  /// a pane that is not receiving keys is a lie the whole feature would rest on.
+  bool railFocused = false;
+
+  /// Which row the rail's cursor is on, indexing [railRows].
+  int railCursor = 0;
+
+  bool isPaneFocused(int paneId) => !railFocused && focusedPaneId == paneId;
+
+  /// The rail as a flat list of rows, in the order it is drawn.
+  ///
+  /// ONE source for the cursor and for the highlight. The rail builds its own
+  /// tree from the same pieces, and a second traversal that "should" agree is
+  /// exactly how an arrow key ends up selecting a different row than the one
+  /// lit up — so the widget reads its highlight from this list too.
+  ///
+  /// Local machine first, then the backend's order, which is what the rail has
+  /// always drawn; a machine that is collapsed contributes its own row and none
+  /// of its agents, because a cursor cannot rest on something not on screen.
+  List<RailRow> railRows() {
+    final rows = <RailRow>[];
+    final ordered = <Machine>[
+      ...machines.where((m) => stateOf(m.machineId)?.isLocalMachine == true),
+      ...machines.where((m) => stateOf(m.machineId)?.isLocalMachine != true),
+    ];
+    for (final machine in ordered) {
+      rows.add(RailRow(machineId: machine.machineId));
+      if (!expandedMachines.contains(machine.machineId)) continue;
+      for (final agent
+          in stateOf(machine.machineId)?.agents ?? const <Agent>[]) {
+        rows.add(RailRow(machineId: machine.machineId, agentId: agent.id));
+      }
+    }
+    return rows;
+  }
+
+  /// Hand the keyboard to the rail — ⌘h off the left edge of the grid.
+  ///
+  /// The cursor starts on the agent the window is already looking at, so the
+  /// first press of `j` steps off it rather than jumping to the top of a list
+  /// of thirty. Same reasoning as the layout palette's cursor.
+  void focusRail() {
+    final rows = railRows();
+    if (rows.isEmpty) return;
+    final pane = panes.where((p) => p.id == focusedPaneId).firstOrNull;
+    var at = 0;
+    if (pane?.agentId != null) {
+      final found = rows.indexWhere(
+        (row) =>
+            row.agentId == pane!.agentId && row.machineId == pane.machineId,
+      );
+      if (found >= 0) at = found;
+    }
+    railFocused = true;
+    railCursor = at;
+    notifyListeners();
+  }
+
+  /// Give it back. The focused tile re-claims the keys on the next frame.
+  void unfocusRail() {
+    if (!railFocused) return;
+    railFocused = false;
+    notifyListeners();
+  }
+
+  /// The row the cursor is on, or null when the rail has changed under it.
+  ///
+  /// Bounds-checked rather than clamped, and that distinction is the point: an
+  /// agent finishing or a machine collapsing can shorten the list between a
+  /// keypress and the frame that draws it, and clamping would silently light up
+  /// a DIFFERENT row than the one the cursor was on. Null draws nothing, which
+  /// is the honest answer for one frame.
+  RailRow? railRowAt(int index) {
+    final rows = railRows();
+    if (index < 0 || index >= rows.length) return null;
+    return rows[index];
+  }
+
+  void moveRailCursor(int delta) {
+    final rows = railRows();
+    if (rows.isEmpty) return;
+    // Clamped, not wrapped: the rail is a column you can see the ends of, and a
+    // cursor that leaps from the last machine back to the first reads as a
+    // mis-key. The grid's own focus wraps because it is a loop of tiles.
+    railCursor = (railCursor + delta).clamp(0, rows.length - 1);
+    notifyListeners();
+  }
+
+  /// Enter on the cursor's row.
+  ///
+  /// A machine row toggles; an agent row opens and gives the keyboard back —
+  /// because "go to this agent" is a request to work in it, and leaving the
+  /// keys in the sidebar would make every open a two-step.
+  Future<void> activateRailRow() async {
+    final rows = railRows();
+    if (railCursor < 0 || railCursor >= rows.length) return;
+    final row = rows[railCursor];
+    if (row.agentId == null) {
+      toggleExpand(row.machineId);
+      return;
+    }
+    railFocused = false;
+    notifyListeners();
+    await selectAgent(row.machineId, row.agentId!);
+  }
+
+  /// `h` in the rail — out of an agent list, then out of the rail.
+  ///
+  /// Two steps rather than one, and that is the vim shape: `h` at the top level
+  /// leaves, `h` inside something closes it first. Pressed on an agent it jumps
+  /// to that agent's machine row and folds it, which is where the eye already
+  /// is; pressed on a machine row it hands the keyboard back to the grid.
+  void railCollapseOrExit() {
+    final rows = railRows();
+    if (railCursor < 0 || railCursor >= rows.length) {
+      unfocusRail();
+      return;
+    }
+    final row = rows[railCursor];
+    if (row.agentId != null) {
+      final head = rows.indexWhere(
+        (r) => r.machineId == row.machineId && r.agentId == null,
+      );
+      if (head >= 0) railCursor = head;
+      toggleExpand(row.machineId);
+      notifyListeners();
+      return;
+    }
+    if (expandedMachines.contains(row.machineId)) {
+      toggleExpand(row.machineId);
+      return;
+    }
+    unfocusRail();
+  }
 
   /// Show or hide one tile's composer textbox, and remember the choice.
   void toggleComposer(int paneId) {
@@ -481,6 +639,11 @@ class AppNotifier extends ChangeNotifier {
   void focusPane(int paneId) {
     if (!panes.any((pane) => pane.id == paneId)) return;
     final moved = focusedPaneId != paneId;
+    // Remembered only on a REAL move. Re-focusing the tile you are already on
+    // happens constantly — see the note below about why it is announced anyway
+    // — and recording it would make ⌘; a key that returns you to where you
+    // already are, which is the same as a key that does nothing.
+    if (moved) _previousPaneId = focusedPaneId;
     focusedPaneId = paneId;
     // Announced even when this tile was ALREADY focused.
     //
@@ -597,8 +760,9 @@ class AppNotifier extends ChangeNotifier {
   /// registry and the recap mirror it reads are all on this computer.
   MachineState? get localMachineState {
     for (final state in machineStates.values) {
-      if (state.isLocalMachine)
+      if (state.isLocalMachine) {
         return state; // the flag is the STATE's, not the machine row's
+      }
     }
     return null;
   }
@@ -773,7 +937,6 @@ class AppNotifier extends ChangeNotifier {
         _autonomousEnv = 'prod';
         api = _newApiClient();
         _skippedDesktopUpdateVersion = _store.skippedDesktopUpdateVersion;
-        _environmentSetupVersion = _store.environmentSetupVersion;
       }
       // A viewer installs nothing and is updated by its store: provisioning and the updater both
       // serve a computer that runs the harness CLI.
@@ -819,34 +982,19 @@ class AppNotifier extends ChangeNotifier {
   /// first-run phase instead.
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
-    if (_environmentSetupVersion != null &&
-        _environmentSetupVersion! >= kEnvironmentSetupVersion) {
-      // CLI, tmux and Grid were all found ready on this machine before, and none of the three
-      // uninstall themselves — skip the three subprocess probes (and the screen they'd otherwise
-      // flash onto) on every later launch rather than re-verifying something already proven.
-      environmentReadiness = EnvironmentReadiness(
-        steps: {
-          for (final step in EnvironmentStep.values)
-            step: EnvironmentStepStatus.ready,
-        },
-      );
-      return true;
-    }
     _environmentSetupInFlight = true;
-    status = AppStatus.preparingEnvironment;
+    status = AppStatus.checkingEnvironment;
     environmentReadiness = EnvironmentReadiness.initial();
     notifyListeners();
     try {
-      final result = await _runProvisioner();
+      // Always read-only here. Installation starts only after explicit confirmation in the wizard.
+      final result = await _runProvisioner(install: false);
       if (!result.isReady) {
         status = AppStatus.preparingEnvironment;
-        _scheduleEnvironmentRecheck();
         notifyListeners();
         return false;
       }
       _cancelEnvironmentRecheckTimer();
-      _environmentSetupVersion = kEnvironmentSetupVersion;
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -857,20 +1005,46 @@ class AppNotifier extends ChangeNotifier {
   /// [environmentReadiness] as it streams progress, and reports the outcome.
   Future<EnvironmentReadiness> _runProvisioner({
     EnvironmentReadiness? resumeFrom,
+    bool install = false,
+    EnvironmentSetupMode? mode,
+    bool quiet = false,
   }) async {
     final provisioner = environmentProvisioner ?? EnvironmentProvisioner();
     final result = await provisioner.ensureReady(
       onProgress: (value) {
-        environmentReadiness = value;
+        if (quiet &&
+            value.phase != EnvironmentSetupPhase.ready &&
+            value.phase != EnvironmentSetupPhase.failed) {
+          // A 5-second Terminal poll must not repaint the wizard through
+          // preflight -> review -> waiting. Keep the stable handoff surface
+          // and only stream its diagnostics until there is a real terminal
+          // outcome or installation can continue.
+          environmentReadiness = environmentReadiness.copyWith(
+            output: value.output,
+            terminalLogPath: value.terminalLogPath,
+            terminalResultPath: value.terminalResultPath,
+            terminalSetup: value.terminalSetup,
+            systemReady: value.systemReady,
+          );
+        } else {
+          environmentReadiness = value;
+        }
+        // A successful probe belongs to the quiet pre-flight surface, never
+        // the installation wizard. This also prevents the setup screen from
+        // flashing its own ready phase for one frame after an install/recheck.
+        if (value.isReady) status = AppStatus.checkingEnvironment;
         notifyListeners();
       },
       resumeFrom: resumeFrom,
+      install: install,
+      mode: mode,
     );
     environmentReadiness = result;
-    analytics.environmentPrepared(
-      ready: result.isReady,
-      grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
-    );
+    if (!quiet ||
+        result.isReady ||
+        result.phase == EnvironmentSetupPhase.failed) {
+      analytics.environmentPrepared(ready: result.isReady);
+    }
     return result;
   }
 
@@ -878,23 +1052,105 @@ class AppNotifier extends ChangeNotifier {
   /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
   /// load and update-check startup, which already ran on the launch that got stuck here.
   Future<void> _continueAfterEnvironmentReady() async {
+    _cancelEnvironmentRecheckTimer();
+    // A viewer skipped the preflight (see [bootstrap]), so there is no preflight screen to hold
+    // while the sign-in is checked — it stays on the boot spinner instead.
+    status = viewer == null
+        ? AppStatus.checkingEnvironment
+        : AppStatus.bootstrapping;
+    notifyListeners();
     // Auth lives with the local `harness` CLI — it owns the SSO session on disk and refreshes it
     // itself, and this app just asks it whether this computer is signed in. The exception is a
     // viewer build, which has no CLI: there `cliLogin` is the session the app holds itself.
-    final authStatus = await cliLogin.checkStatus();
-    if (!authStatus.loggedIn) {
+    try {
+      final authStatus = await cliLogin.checkStatus();
+      if (!authStatus.loggedIn) {
+        currentUser = null;
+        status = AppStatus.unauthenticated;
+        notifyListeners();
+        return;
+      }
+      status = AppStatus.bootstrapping;
+      notifyListeners();
+      await _finishBootstrapSignedIn();
+    } catch (error, stack) {
+      debugPrint(
+        'continueAfterEnvironmentReady: fallback to login after error: '
+        '$error\n$stack',
+      );
       currentUser = null;
       status = AppStatus.unauthenticated;
       notifyListeners();
-      return;
     }
-    await _finishBootstrapSignedIn();
   }
 
-  /// Full reset: re-runs first-run provisioning end to end, same as a relaunch. Kept as an escape
-  /// hatch alongside the per-step [recheckEnvironmentStep] — Node and Harness checks are idempotent,
-  /// so this is safe even when only one step is actually stuck.
-  Future<void> retryEnvironmentSetup() => bootstrap();
+  void showEnvironmentReview() {
+    environmentReadiness = environmentReadiness.copyWith(
+      phase: EnvironmentSetupPhase.review,
+    );
+    notifyListeners();
+  }
+
+  void showEnvironmentMethodChoice() {
+    environmentReadiness = environmentReadiness.copyWith(
+      phase: EnvironmentSetupPhase.chooseMethod,
+    );
+    notifyListeners();
+  }
+
+  void selectEnvironmentSetupMode(EnvironmentSetupMode mode) {
+    environmentReadiness = environmentReadiness.copyWith(mode: mode);
+    notifyListeners();
+  }
+
+  Future<void> startEnvironmentSetup() async {
+    if (_environmentSetupInFlight) return;
+    _cancelEnvironmentRecheckTimer();
+    final mode = environmentReadiness.mode ?? EnvironmentSetupMode.automatic;
+    if (mode == EnvironmentSetupMode.manual) {
+      notifyListeners();
+      return;
+    }
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(
+        resumeFrom: environmentReadiness,
+        install: true,
+        mode: mode,
+      );
+      if (!result.isReady) {
+        _scheduleEnvironmentRecheck();
+        return;
+      }
+      await _continueAfterEnvironmentReady();
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> continueAfterEnvironmentSetup() async {
+    if (!environmentReadiness.isReady) return;
+    await _continueAfterEnvironmentReady();
+  }
+
+  /// A manual repair always returns to a read-only probe.
+  Future<void> retryEnvironmentSetup() async {
+    if (_environmentSetupInFlight) return;
+    _environmentSetupInFlight = true;
+    notifyListeners();
+    try {
+      final result = await _runProvisioner(
+        install: false,
+        mode: environmentReadiness.mode,
+      );
+      if (result.isReady) await _continueAfterEnvironmentReady();
+    } finally {
+      _environmentSetupInFlight = false;
+      notifyListeners();
+    }
+  }
 
   /// Rechecks a single stuck step (`failed`/`needsTerminal`) without re-running steps already
   /// `ready` — the user fixed it by hand (see `environment_step_guidance.dart`'s command) and this
@@ -908,13 +1164,47 @@ class AppNotifier extends ChangeNotifier {
     _environmentSetupInFlight = true;
     notifyListeners();
     try {
-      final result = await _runProvisioner(resumeFrom: environmentReadiness);
+      final visibleBeforeProbe = environmentReadiness;
+      final mode = environmentReadiness.mode;
+      var result = await _runProvisioner(
+        resumeFrom: environmentReadiness,
+        install: false,
+        mode: mode,
+        quiet:
+            mode == EnvironmentSetupMode.automatic &&
+            environmentReadiness.phase ==
+                EnvironmentSetupPhase.waitingForTerminal,
+      );
+      if (!result.isReady &&
+          mode == EnvironmentSetupMode.automatic &&
+          result.phase != EnvironmentSetupPhase.waitingForTerminal &&
+          result.systemReady &&
+          result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready &&
+          (result.steps[EnvironmentStep.clipboard] ==
+                  EnvironmentStepStatus.ready ||
+              result.steps[EnvironmentStep.clipboard] ==
+                  EnvironmentStepStatus.notApplicable)) {
+        result = await _runProvisioner(
+          resumeFrom: result,
+          install: true,
+          mode: mode,
+        );
+      }
       if (!result.isReady) {
+        if (mode == EnvironmentSetupMode.automatic &&
+            result.phase != EnvironmentSetupPhase.failed) {
+          environmentReadiness = visibleBeforeProbe.copyWith(
+            phase: EnvironmentSetupPhase.waitingForTerminal,
+            output: result.output,
+            terminalLogPath: result.terminalLogPath,
+            terminalResultPath: result.terminalResultPath,
+            terminalSetup: result.terminalSetup,
+            systemReady: result.systemReady,
+          );
+        }
         _scheduleEnvironmentRecheck();
         return;
       }
-      _environmentSetupVersion = kEnvironmentSetupVersion;
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint(
@@ -931,9 +1221,14 @@ class AppNotifier extends ChangeNotifier {
 
   /// Polls the currently-stuck required step every 5s (see `_environmentRecheckTimer`'s doc) so
   /// fixing it in another window and forgetting to click Recheck still moves the app forward.
-  /// A no-op once nothing required is stuck (grid failures never qualify — see `EnvironmentStep.isRequired`).
+  /// A no-op unless automatic setup is waiting on the real Terminal window.
   void _scheduleEnvironmentRecheck() {
     _environmentRecheckTimer?.cancel();
+    if (environmentReadiness.phase !=
+            EnvironmentSetupPhase.waitingForTerminal ||
+        environmentReadiness.mode != EnvironmentSetupMode.automatic) {
+      return;
+    }
     EnvironmentStep? stuck;
     for (final entry in environmentReadiness.steps.entries) {
       if (!entry.key.isRequired) continue;
@@ -943,8 +1238,11 @@ class AppNotifier extends ChangeNotifier {
         break;
       }
     }
-    if (stuck == null) return;
-    final step = stuck;
+    if (stuck == null && environmentReadiness.terminalSetup == null) return;
+    // Base system setup has no EnvironmentStep row of its own. The callback
+    // argument is only a UI trigger; the provisioner rechecks the complete
+    // environment and uses terminalSetup to attribute any failure.
+    final step = stuck ?? EnvironmentStep.tmux;
     _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
       unawaited(recheckEnvironmentStep(step));
     });
@@ -1028,9 +1326,6 @@ class AppNotifier extends ChangeNotifier {
     } catch (error) {
       debugPrint('bootstrap: profile unavailable: $error');
     }
-    // Not awaited: the Grid sign-in is a child process on a network, and the
-    // machine list is what the window is waiting to draw.
-    unawaited(_ensureGridSession());
     try {
       await refreshMachines();
     } catch (error) {
@@ -1038,52 +1333,6 @@ class AppNotifier extends ChangeNotifier {
       _lastErrorRetryable = true;
     }
     notifyListeners();
-  }
-
-  /// Signs this computer in to Grid once the Harness sign-in has resolved — but
-  /// ONLY when it has no Grid session at all.
-  ///
-  /// The two accounts are one person, and `harness grid login` needs no browser
-  /// and about a second, so making somebody go and ask for a second sign-in is
-  /// asking them to care about a split they did not create.
-  ///
-  /// **Only when there is none, or when the one there belongs to a DIFFERENT
-  /// account, and that guard is the whole design.** Every run mints a fresh
-  /// 365-day session and revokes nothing, so a sign-in on every launch would
-  /// pile sessions onto the account forever — and the only cleanup is
-  /// `grid logout --everywhere`, which is all-or-nothing and signs out every
-  /// other machine too. A session that matches this Harness account is
-  /// therefore left exactly alone.
-  ///
-  /// The mismatch case is not an exception to that rule but the reason it needs
-  /// one. `harness logout` deliberately never deletes `~/.grid/credentials.toml`
-  /// (no cascade, in either direction), so signing out and back in as somebody
-  /// else left the previous person's session on disk — and this app went on
-  /// listing THEIR grids, with no action anywhere in the UI that could correct
-  /// it. Replacing then is what earns the new session; Settings ▸ Grid still
-  /// says the mismatch out loud for the window between the two.
-  ///
-  /// Silent either way. This is a convenience on top of a Harness sign-in that
-  /// already succeeded, and a machine with no `grid` on PATH (or no network)
-  /// must not have its login reported as a failure over it — the Grid pane
-  /// still has its own button, and says why when it cannot.
-  Future<void> _ensureGridSession() async {
-    // Grid's sign-in runs `harness grid login`, and a viewer has no harness CLI to run it with.
-    if (viewer != null) return;
-    try {
-      // `signIn` is "make sure there is one FOR THIS ACCOUNT" — it re-reads and
-      // returns early on a machine already signed in as `account`, so the guard
-      // lives in one place rather than once here and once in the pane's button.
-      // The address comes from the profile fetched a few lines above this
-      // call's site; null while that call failed, which reads as "leave
-      // whatever is there alone" rather than as a mismatch.
-      final failure = await gridSessionStore.signIn(
-        account: currentUser?.email,
-      );
-      if (failure != null) debugPrint('grid sign-in skipped: $failure');
-    } catch (error) {
-      debugPrint('grid sign-in skipped: $error');
-    }
   }
 
   /// The local daemon (`harness start`) must be up before any local REST/WS call can work — unlike
@@ -1131,8 +1380,9 @@ class AppNotifier extends ChangeNotifier {
   /// fills is the app that was ALREADY authenticated when the session disappeared underneath it,
   /// where nothing re-checked and the daemon supervisor simply respawned `harness start` forever.
   void _signedOutAtRuntime(String message) {
-    if (status == AppStatus.unauthenticated)
+    if (status == AppStatus.unauthenticated) {
       return; // idempotent: several sources can race here
+    }
     _daemonSupervisionTimer?.cancel();
     _daemonSupervisionTimer = null;
     _cliEndpoint = null;
@@ -1285,24 +1535,6 @@ class AppNotifier extends ChangeNotifier {
     // process could be reached, but a real `harness logout` clears its saved session so the NEXT
     // launch doesn't silently sign back in without ever showing the login screen.
     unawaited(cliLogin.logout());
-    // Grid goes with it. `harness logout` itself never touches
-    // `~/.grid/credentials.toml` — there is no cascade inside the CLI, in
-    // either direction — so without this a sign-out left a live 365-day Grid
-    // token on the machine, and the next person to sign in inherited the
-    // previous one's grids.
-    //
-    // Not awaited, and its failure never stops the sign-out: refusing to sign
-    // somebody out of Harness because a Grid command failed would trap them in
-    // the account they asked to leave. Said out loud rather than swallowed —
-    // when it fails the credential is still there, which is exactly the thing
-    // the user needs to know.
-    if (viewer == null) {
-      unawaited(
-        gridSessionStore.signOut().then((failure) {
-          if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
-        }),
-      );
-    }
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();
@@ -1411,7 +1643,15 @@ class AppNotifier extends ChangeNotifier {
           // terminal (if any) so the connected branch above can reattach it, for every machine — this
           // used to be local-only, which is why a remote machine's terminal never came back on its own
           // after `harness start` on that machine, even though the guide screen promised it would.
-          unawaited(_applyNodeStatus(machine, false));
+          //
+          // NOT when this disconnect IS the machine's own NO_PEER_LINK: needsLink is only ever set by
+          // onLocalFailure, which now runs before this branch for close code 4404 (see WsConn._onDone) —
+          // a NO_PEER_LINK rejection is proof the relay/daemon answered. Forcing nodeOnline false here
+          // would fight the REST status and node_status push, the only signals honest about real
+          // reachability; a machine merely unlinked from THIS app instance is not offline.
+          if (!machine.needsLink) {
+            unawaited(_applyNodeStatus(machine, false));
+          }
         }
         notifyListeners();
       },
@@ -1634,10 +1874,7 @@ class AppNotifier extends ChangeNotifier {
   /// ⚠️ Every field of [Agent] that the UI reads belongs here. This list is hand-maintained, and the
   /// cost of forgetting one is silent: the poll fetches the truth, compares it, decides nothing
   /// happened, and throws it away — so the field stays frozen at whatever it was for as long as the
-  /// app runs. That is exactly what `grid` did. An agent moved onto another grid by anything other
-  /// than this app's own foreground path kept its old assignment on screen, and every control that
-  /// reads `agent.grid` — the header's model menu included — went on describing an agent as still
-  /// where it started. Add the field here in the same commit you add it to [Agent].
+  /// app runs. Add the field here in the same commit you add it to [Agent].
   @visibleForTesting
   static bool agentsEqual(List<Agent> a, List<Agent> b) {
     if (a.length != b.length) return false;
@@ -1654,8 +1891,7 @@ class AppNotifier extends ChangeNotifier {
           prev.parentAgentId != agent.parentAgentId ||
           prev.status != agent.status ||
           prev.terminalAvailable != agent.terminalAvailable ||
-          prev.terminalUnavailableReason != agent.terminalUnavailableReason ||
-          prev.grid != agent.grid) {
+          prev.terminalUnavailableReason != agent.terminalUnavailableReason) {
         return false;
       }
     }
@@ -2478,6 +2714,24 @@ class AppNotifier extends ChangeNotifier {
     return [for (final answer in answers) ?answer];
   }
 
+  /// What to call THIS computer wherever a usage figure has to say whose it is.
+  ///
+  /// The same `displayName` the sidebar prints and `_readMachineUsage` labels
+  /// every remote machine with, so a panel listing one local and one remote
+  /// account names them in one vocabulary rather than setting a hostname
+  /// beside the words "this computer".
+  ///
+  /// Falls back to the OS hostname when the local machine has not been fetched
+  /// yet — the rail can open before `refreshMachines` lands — and to null when
+  /// even that is empty, which the caller renders by dropping the caption
+  /// rather than printing a blank one.
+  String? get thisMachineName {
+    for (final state in machineStates.values) {
+      if (state.isLocalMachine) return state.machine.displayName;
+    }
+    return localHostnameOrNull();
+  }
+
   Future<MachineUsage?> _readMachineUsage(MachineState machine) async {
     try {
       final reply = await _conn(machine.machine.machineId)
@@ -2558,14 +2812,13 @@ class AppNotifier extends ChangeNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
-    GridAgentOverride? grid,
     String? codexHome,
   }) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
     if (codexHome != null) {
-      if (engine != 'codex' || grid != null) {
-        return 'Choose a Codex profile only for Codex, without a provider selected';
+      if (engine != 'codex') {
+        return 'Choose a Codex profile only for Codex';
       }
       if (machine.engines['codex']?.supportsCodexHome != true) {
         return 'Update the harness CLI on this machine to choose a Codex profile';
@@ -2580,10 +2833,6 @@ class AppNotifier extends ChangeNotifier {
           'engine': engine,
           'cwd': folder,
           'bypassPermission': bypassPermission,
-          // Only when the user picked a grid, so a build with no selection
-          // sends byte for byte the frame it sent before this existed — see
-          // GridAgentOverride for what the CLI still has to do with it.
-          if (grid != null) 'grid': grid.toJson(),
           'codexHome': ?codexHome,
         },
         timeout: const Duration(seconds: 20),
@@ -2609,132 +2858,9 @@ class AppNotifier extends ChangeNotifier {
     // agents another client made on the same machine. "Agents spawned" is a
     // count of what this app launched.
     harnessStats.onAgentSpawned();
-    // Only when a grid was actually picked: an agent on the engine's own login
-    // is the old behaviour, and counting it here would make the grid funnel
-    // report every agent this app has ever created.
-    if (grid != null) {
-      analytics.gridAgentLaunched(
-        engine: engine,
-        model: grid.model,
-        networkId: grid.networkId,
-      );
-    }
     notifyListeners();
     await selectAgent(machineId, agent.id);
     return null;
-  }
-
-  /// Moves an already-running agent onto [grid], or — when [grid] is null — back onto the engine's
-  /// own login.
-  ///
-  /// This RESTARTS the agent. A process's environment is fixed when it is exec'd, so a live engine
-  /// cannot be re-pointed — the CLI respawns the pane in place (same pane, same agent id, same
-  /// scrollback) with the grid's environment and `--resume`, which brings the conversation back but
-  /// not a turn that was in flight. That is why the CLI refuses a busy agent rather than deciding for
-  /// the user, and why nothing here is automatic.
-  ///
-  /// Returns null on success, or a message to show the user.
-  Future<String?> moveAgentToGrid(
-    String machineId,
-    String agentId,
-    GridAgentOverride? grid,
-  ) async {
-    final machine = machineStates[machineId];
-    if (machine == null) return 'Machine not found';
-    // Read before the move: on success the agent list is reloaded, and a lookup
-    // afterwards would be racing the answer it depends on.
-    final engine = machine.agents
-        .where((agent) => agent.id == agentId)
-        .map((agent) => agent.engine)
-        .firstOrNull;
-    try {
-      // The reply's body says only `{retargeted: true}`; a refusal throws. Nothing here reads it.
-      await _conn(machineId).request(
-        'agent_retarget',
-        payload: retargetPayload(agentId, grid),
-        timeout: const Duration(seconds: 20),
-      );
-    } on WsRequestFailure catch (failure) {
-      // The CLI's own code, not the sentence built from it: `UNSUPPORTED` (a
-      // published CLI that predates agent_retarget) and a genuine refusal have
-      // to stop looking like one number.
-      analytics.gridAgentRetargeted(
-        outcome: failure.code,
-        engine: engine,
-        model: grid?.model,
-      );
-      return retargetMessage(failure.code, failure.detail);
-    } catch (error) {
-      analytics.gridAgentRetargeted(
-        outcome: 'error',
-        engine: engine,
-        model: grid?.model,
-      );
-      return 'Move failed: $error';
-    }
-    analytics.gridAgentRetargeted(
-      outcome: 'ok',
-      engine: engine,
-      model: grid?.model,
-    );
-    // The pane now runs a different process, and its grid is re-read by the CLI's next discovery
-    // pass. Ask for the list rather than guessing here: this method must not be the second place
-    // that has an opinion about which grid an agent is on.
-    await _loadMachineData(machine, force: true);
-    return null;
-  }
-
-  /// The `agent_retarget` payload for moving [agentId] onto [grid] — or, when [grid] is null, back
-  /// onto its own login.
-  ///
-  /// Pulled out of [moveAgentToGrid] so the one constraint this wire change exists to protect —
-  /// `grid` and `clearGrid` are mutually exclusive, and the CLI's parser reads an absent `grid` and
-  /// a null one the same way, so own login has to say so in its own field — is guaranteed by a
-  /// function under test rather than only by reading the code.
-  @visibleForTesting
-  static Map<String, dynamic> retargetPayload(
-    String agentId,
-    GridAgentOverride? grid,
-  ) => {
-    'agentId': agentId,
-    if (grid != null) 'grid': grid.toJson() else 'clearGrid': true,
-  };
-
-  /// [moveAgentToGrid]'s answer when the agent was already gone.
-  ///
-  /// A sentinel rather than an error string because nobody can act on it, and rather than null
-  /// because it did not move either — the caller must be able to leave it out of both tallies.
-  static const String agentVanished = 'AGENT_GONE';
-
-  /// Turns a retarget refusal into something the user can act on.
-  ///
-  /// Every one of these is a deliberate refusal in the CLI, not a crash, so each has a way out worth
-  /// naming. `detail`, when present, already reads as a sentence and is preferred to anything
-  /// rewritten here.
-  @visibleForTesting
-  static String retargetMessage(String error, Object? detail) {
-    if (error == 'AGENT_NOT_FOUND') return agentVanished;
-    if (error == 'AGENT_BUSY') {
-      return 'It is running a turn. Move it when the turn finishes.';
-    }
-    const update =
-        'Update the harness CLI on this machine to move running agents.';
-    // UNSUPPORTED_ON_REMOTE is the handler being unwired; a bare UNSUPPORTED is the CLI not knowing
-    // the frame AT ALL — a build that predates agent_retarget, which is what a stock release still is.
-    // Same sentence: the way out of both is the same update.
-    if (error == 'UNSUPPORTED_ON_REMOTE' || error == 'UNSUPPORTED') {
-      return update;
-    }
-    // A CLI old enough to know agent_retarget but not `clearGrid` reads "own login" (no `grid` field
-    // on the wire) as a forgotten one and answers this exact sentence — see backendSocket.ts's
-    // `!clear && target.state !== 'ok'` branch on the CLI side. The app and the CLI ship separately,
-    // so this is the one user-visible shape a mixed deployment takes; any other INVALID_GRID detail
-    // is a real refusal and falls through to the generic case below.
-    if (error == 'INVALID_GRID' && detail == 'grid is required') {
-      return update;
-    }
-    if (detail is String && detail.isNotEmpty) return detail;
-    return 'Move failed: $error';
   }
 
   /// Renames a machine via `PATCH /api/machines/:machineId` (control-plane REST — the machine's
@@ -3300,12 +3426,66 @@ class AppNotifier extends ChangeNotifier {
   /// it is: an arrow that wraps to the far side of the screen reads as a jump,
   /// not as a step.
   void focusPaneVertically(int delta) {
+    final to = _neighbour(dx: 0, dy: delta);
+    if (to != null) focusPane(panes[to].id);
+  }
+
+  /// ⌘h / ⌘l, and ⌘← / ⌘→ — the tile beside this one, by POSITION.
+  ///
+  /// Spatial, like its vertical twin, and that is a change: left and right used
+  /// to walk the panes in list order while up and down read the geometry, so
+  /// half the compass answered "the next one" and half answered "the one over
+  /// there". A vim user pressing `l` means the window to their right, and a
+  /// scheme that means it in two directions out of four is one nobody can hold.
+  void focusPaneHorizontally(int delta) {
+    final to = _neighbour(dx: delta, dy: 0);
+    if (to != null) {
+      focusPane(panes[to].id);
+      return;
+    }
+    // WALKING OFF THE LEFT EDGE LANDS IN THE RAIL, and walking right comes back.
+    //
+    // No new key for "go to the sidebar": the sidebar is what is to the left of
+    // the leftmost tile, so the key that means left already says it. This is the
+    // motion vim users have — `Ctrl-w h` out of the last split does not stop,
+    // it reaches the next thing — and it is the difference between a rail that
+    // is keyboard-reachable and one that has a shortcut nobody remembers.
+    if (delta < 0 && !railFocused) focusRail();
+  }
+
+  /// ⇧⌘h j k l — put this pane where its neighbour is, and that one here.
+  ///
+  /// A SWAP, not an insert. vim's `Ctrl-w H/J/K/L` — the capitals this mirrors —
+  /// moves a window to the far edge, which needs a tree of splits to mean
+  /// anything; this grid is a list of slots rendered into a shape, so the honest
+  /// equivalent is to trade places with whoever is in the direction pressed.
+  void movePaneDirection({required int dx, required int dy}) {
+    final id = focusedPaneId;
+    if (id == null) return;
+    final at = panes.indexWhere((pane) => pane.id == id);
+    final to = _neighbour(dx: dx, dy: dy);
+    if (at < 0 || to == null) return;
+    final moved = panes.removeAt(at);
+    panes.insert(to, moved);
+    _persistLayout();
+    notifyListeners();
+  }
+
+  /// The index of the tile in the given direction, or null at the edge.
+  ///
+  /// Reads the laid-out RECTANGLES rather than the list, so "left" means left on
+  /// screen whatever order the panes happen to be in. The two rules that make it
+  /// honest: the neighbour has to actually be on that side (a tile whose edge is
+  /// level with ours is not beside us), and the two have to OVERLAP on the other
+  /// axis — otherwise the tile diagonally across counts as "down", which is how
+  /// a 2x2 ends up with a key that moves like a knight.
+  int? _neighbour({required int dx, required int dy}) {
     final count = panes.length;
-    if (count < 2) return;
+    if (count < 2) return null;
     final shape = presetFor(count)?.tilesFor(count, columns: gridColumns);
-    if (shape == null || shape.length != count) return;
+    if (shape == null || shape.length != count) return null;
     final at = panes.indexWhere((pane) => pane.id == focusedPaneId);
-    if (at < 0) return;
+    if (at < 0) return null;
 
     final from = shape[at];
     int? best;
@@ -3313,19 +3493,59 @@ class AppNotifier extends ChangeNotifier {
     for (var i = 0; i < count; i++) {
       if (i == at) continue;
       final to = shape[i];
-      // Below means below: its top edge is at or past ours, and the two overlap
-      // horizontally, so a tile in the next COLUMN is never "down".
-      final vertical = delta > 0 ? to.top - from.top : from.top - to.top;
-      if (vertical <= 0.001) continue;
-      final overlap =
-          (from.right < to.left + 0.001) || (to.right < from.left + 0.001);
-      if (overlap) continue;
-      if (vertical < bestGap) {
-        bestGap = vertical;
+      final double gap;
+      final bool apart;
+      if (dy != 0) {
+        gap = dy > 0 ? to.top - from.top : from.top - to.top;
+        apart =
+            (from.right < to.left + 0.001) || (to.right < from.left + 0.001);
+      } else {
+        gap = dx > 0 ? to.left - from.left : from.left - to.left;
+        apart =
+            (from.bottom < to.top + 0.001) || (to.bottom < from.top + 0.001);
+      }
+      if (gap <= 0.001 || apart) continue;
+      if (gap < bestGap) {
+        bestGap = gap;
         best = i;
       }
     }
-    if (best != null) focusPane(panes[best].id);
+    return best;
+  }
+
+  /// ⌘; — the pane focused before this one.
+  ///
+  /// tmux spells it the same way, and the reason it earns a key is that two
+  /// agents at a time is the shape most work actually has: a thing being built
+  /// and a thing being watched. Walking a list to get back to the other one is
+  /// the wrong motion, and it gets longer as the grid fills.
+  int? _previousPaneId;
+
+  void focusLastPane() {
+    final back = _previousPaneId;
+    if (back == null) return;
+    if (!panes.any((pane) => pane.id == back)) {
+      // It was closed while we were away. Say nothing and stay put — jumping
+      // somewhere arbitrary is worse than a key that did not fire.
+      _previousPaneId = null;
+      return;
+    }
+    focusPane(back);
+  }
+
+  /// ⌘⏎ — one pane filling the grid, and back.
+  ///
+  /// The id is held rather than a flag, so a zoom SURVIVES the thing that
+  /// usually breaks this: focus moving. Zoomed on tile 3 and then jumping to
+  /// tile 5 shows tile 5 zoomed, which is what tmux does and what the eye
+  /// expects; a boolean would have shown tile 3 while the focus was elsewhere.
+  int? zoomedPaneId;
+
+  void toggleZoomPane() {
+    final id = focusedPaneId;
+    if (id == null || panes.length < 2) return;
+    zoomedPaneId = zoomedPaneId == id ? null : id;
+    notifyListeners();
   }
 
   /// Focus the nth tile on the grid — ⌘1…⌘9.
@@ -3408,6 +3628,11 @@ class AppNotifier extends ChangeNotifier {
     final index = panes.indexWhere((pane) => pane.id == paneId);
     if (index == -1) return;
     final pane = panes.removeAt(index);
+    // A zoom belongs to a tile, so closing that tile ends it. Left set, the grid
+    // would try to fill itself with a pane that is no longer in the list and
+    // draw nothing at all.
+    if (zoomedPaneId == paneId) zoomedPaneId = null;
+    if (_previousPaneId == paneId) _previousPaneId = null;
     _settlePins();
     await _detachSession(pane, sendClose: true);
     if (focusedPaneId == paneId) {

@@ -137,8 +137,8 @@ class _TrackingSectionState extends State<TrackingSection> {
         icon: LucideIcons.activity300,
         title: 'No events yet',
         message:
-            'Move around the app — opening a screen or picking a grid reports '
-            'an event, and each one shows up here with what it sent.',
+            'Move around the app — opening a screen or creating an agent '
+            'reports an event, and each one shows up here with what it sent.',
       );
     }
     return const EmptyState.noMatches(message: 'No event matches this filter.');

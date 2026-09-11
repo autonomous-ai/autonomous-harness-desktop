@@ -4,10 +4,8 @@
 // the only way to see a drop at all.
 //
 // What is pinned here is the part that is easy to get subtly wrong: which door
-// a dialog says it was opened by, the difference between Auto and the engine's
-// own login (both reach the notifier as a null override), and that the first
-// message is reported once per SESSION rather than per agent, and never with
-// any of what was typed.
+// a dialog says it was opened by, and that the first message is reported once
+// per SESSION rather than per agent, and never with any of what was typed.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/analytics/analytics.dart';
@@ -15,12 +13,8 @@ import 'package:harness/analytics/analytics_sink.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/core/models.dart';
-import 'package:harness/grid/grid_agent_override.dart';
-import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
-
-import 'support/fake_grid_api.dart';
 
 /// Keeps every tracked event, so a test can assert on the name AND the params
 /// — a stream is only as good as what its params carry.
@@ -64,7 +58,6 @@ class FakeCreateAgentNotifier extends AppNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
-    GridAgentOverride? grid,
     String? codexHome,
   }) async => null;
 }
@@ -104,7 +97,6 @@ void main() {
                   notifier,
                   'machine-1',
                   source: source,
-                  gridApiClient: FakeGridApi(),
                 ),
                 child: const Text('open'),
               ),
@@ -143,9 +135,6 @@ void main() {
   });
 
   group('agent_created', () {
-    final before = gridSelectionStore.value;
-    tearDown(() => gridSelectionStore.value = before);
-
     Future<void> create(WidgetTester tester) async {
       final notifier = FakeCreateAgentNotifier();
       addTearDown(notifier.dispose);
@@ -160,7 +149,6 @@ void main() {
                   notifier,
                   'machine-1',
                   source: 'machine_row',
-                  gridApiClient: FakeGridApi(),
                 ),
                 child: const Text('open'),
               ),
@@ -181,41 +169,16 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('carries the engine, and Auto as a grid with no model', (
-      tester,
-    ) async {
-      gridSelectionStore.value = const GridSelection(
-        networkId: 'grid-3378218621364f16',
-        networkName: 'autonomous.ai',
-      );
+    testWidgets('carries the engine and the bypass flag', (tester) async {
       await create(tester);
 
-      final params = tracked.paramsOf('agent_created');
-      expect(params['engine'], 'claude');
-      expect(params['on_grid'], isTrue);
-      expect(params['network_id'], 'grid-3378218621364f16');
-      // Auto: on a grid, with the grid choosing. Null here MEANS Auto, which is
-      // why `on_grid` has to be read beside it.
-      expect(params['model'], isNull);
-      expect(params['bypass_permission'], isFalse);
-    });
-
-    testWidgets('own login is a null model that is NOT on a grid', (
-      tester,
-    ) async {
-      // The distinction the notifier cannot see — both arrive there as a null
-      // override — and the reason this event is sent from the dialog.
-      gridSelectionStore.value = GridSelection.none;
-      await create(tester);
-
-      final params = tracked.paramsOf('agent_created');
-      expect(params['on_grid'], isFalse);
-      expect(params['model'], isNull);
-      expect(params['network_id'], isNull);
+      expect(tracked.paramsOf('agent_created'), {
+        'engine': 'claude',
+        'bypass_permission': false,
+      });
     });
 
     testWidgets('the working folder is never sent', (tester) async {
-      gridSelectionStore.value = GridSelection.none;
       await create(tester);
 
       // An absolute path names the person as surely as their email does.

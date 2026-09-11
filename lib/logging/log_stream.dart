@@ -106,7 +106,7 @@ class LogStream extends ChangeNotifier {
   /// is the tail of a session, and the whole day is on disk.
   final int maxEntries;
 
-  /// Per-command output cap. A `grid pull` prints a progress line per second;
+  /// Per-command output cap. An installer prints a progress line per second;
   /// two hundred of those is the app's memory, not a debug aid.
   final int maxOutputLines;
 

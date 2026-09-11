@@ -92,8 +92,7 @@ enum TerminalFontChoice {
 /// The user's chosen terminal typography (family + size), remembered across
 /// launches.
 ///
-/// Same shape as `GridSelectionStore` (`lib/grid/grid_selection_store.dart`) —
-/// a [ValueNotifier] singleton backed by [HarnessFileStore], loaded once in
+/// A [ValueNotifier] singleton backed by [HarnessFileStore], loaded once in
 /// `main()` before `runApp`.
 ///
 /// The notifier's value IS the memoized [TerminalStyle], not a raw font/size
@@ -191,8 +190,7 @@ class TerminalFontStore extends ValueNotifier<TerminalStyle> {
   }
 }
 
-/// The one instance the app reads — same dependency-direction rationale as
-/// `gridSelectionStore` (see `grid_selection_store.dart`): the widgets that
-/// read and write this (the terminal panel, the composer, the Settings
+/// The one instance the app reads. Lives here rather than beside `main()`: the
+/// widgets that read and write this (the terminal panel, the composer, the Settings
 /// dialog, the account menu) must not have to reach into `main.dart` for it.
 final terminalFontStore = TerminalFontStore();

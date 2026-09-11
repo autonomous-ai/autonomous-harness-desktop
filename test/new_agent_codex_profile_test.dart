@@ -7,8 +7,6 @@ import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/core/engine_availability.dart';
 import 'package:harness/core/models.dart';
-import 'package:harness/grid/grid_agent_override.dart';
-import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
 
@@ -85,7 +83,6 @@ class _Notifier extends AppNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
-    GridAgentOverride? grid,
     String? codexHome,
   }) async {
     calls.add({'engine': engine, 'codexHome': codexHome, 'folder': folder});
@@ -95,15 +92,12 @@ class _Notifier extends AppNotifier {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final priorSelection = gridSelectionStore.value;
   late FileSelectorPlatform priorFiles;
   setUp(() {
-    gridSelectionStore.value = GridSelection.none;
     priorFiles = FileSelectorPlatform.instance;
     FileSelectorPlatform.instance = _Folders();
   });
   tearDown(() {
-    gridSelectionStore.value = priorSelection;
     FileSelectorPlatform.instance = priorFiles;
   });
 

@@ -1,15 +1,13 @@
 /// Turning a WS frame into one log line, with credentials removed.
 ///
-/// This exists because the frames worth logging are exactly the ones that carry
-/// secrets: `agent_create`'s payload holds `grid.apiKey`, a live relay key
-/// minted for that launch (see `GridAgentOverride.toJson`). A blind
-/// `payload.toString()` would write it to `~/.harness/logs`, where it long
-/// outlives the short-lived key it was supposed to be.
+/// This exists because the frames worth logging are the ones most likely to
+/// carry secrets — a key, a token, a session — and a blind `payload.toString()`
+/// would write one to `~/.harness/logs`, where it outlives whatever it was
+/// minted for.
 ///
 /// The rule is a DENYLIST on key names rather than an allowlist on purpose. An
 /// allowlist would silently drop the next field somebody adds — and the whole
-/// value of this log is seeing fields nobody thought to anticipate, which is how
-/// the missing `grid` on a created agent would have been spotted. The cost is
+/// value of this log is seeing fields nobody thought to anticipate. The cost is
 /// that a new secret must be named here; [_secretKey] is deliberately broad for
 /// that reason, and [redactValue] is exported so a test can pin it.
 library;
@@ -26,12 +24,12 @@ final RegExp _secretKey = RegExp(
 /// base64 blob buries the fields either side of it.
 const int _maxValue = 120;
 
-/// One frame payload as a log line: `{engine: codex, grid: {model: X, apiKey: <redacted>}}`.
+/// One frame payload as a log line: `{engine: codex, apiKey: <redacted>}`.
 ///
 /// The cap is generous because of what these lines are for. An `agent_create`
 /// reply carries a whole `Agent` — id, name, engine, session, status, cwd — and
-/// `grid` sits near the end of it. A tighter cap reads better and would have cut
-/// off the one field somebody is reading the log to find. Individual values are
+/// a tighter cap reads better but would cut off the last field in it, which is
+/// as likely as any to be the one somebody is reading the log to find. Individual values are
 /// still clipped at [_maxValue], so one blob cannot eat the budget.
 String summariseForLog(Object? value, {int maxLength = 1200}) {
   final text = redactValue(value);
@@ -42,8 +40,8 @@ String summariseForLog(Object? value, {int maxLength = 1200}) {
 
 /// [value] rendered for a log, with any entry whose KEY looks secret replaced.
 ///
-/// Recurses into maps and lists so a secret nested under `grid` is caught too —
-/// which is exactly where the one this was written for lives.
+/// Recurses into maps and lists so a secret nested a level or two down is
+/// caught too.
 String redactValue(Object? value) {
   if (value == null) return 'null';
   if (value is Map) {
@@ -71,8 +69,7 @@ String redactValue(Object? value) {
 ///
 /// [redactValue] above works on a decoded frame, where a secret is identified
 /// by its KEY. A CLI's stdout has no keys: `harness auth status --json` prints
-/// a session, `grid login` prints what it wrote, and both go into the transcript
-/// `cliLog` keeps. This is the same denylist idea applied to text — ported from
+/// a session, and it goes into the transcript `cliLog` keeps. This is the same denylist idea applied to text — ported from
 /// Grid's `redactLogSecrets` (`features/feedback/logic/log_bundle.dart`), so a
 /// log line means the same thing in both products. Keep the two in step.
 ///

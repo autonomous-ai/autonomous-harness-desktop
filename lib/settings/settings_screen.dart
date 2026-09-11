@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../analytics/analytics.dart';
-import '../grid/grid_networks_controller.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../state/app_state.dart';
 import '../widgets/window_chrome.dart';
@@ -9,8 +8,6 @@ import 'sections/about_section.dart';
 import 'sections/appearance_section.dart';
 import 'sections/debug_section.dart';
 import 'sections/devices_section.dart';
-import 'sections/grid_section.dart';
-import 'sections/share_intelligence_section.dart';
 import 'sections/shortcuts_section.dart';
 import 'sections/terminal_section.dart';
 import 'sections/tracking_section.dart';
@@ -22,9 +19,8 @@ import 'settings_section.dart';
 ///
 /// A screen, not a dialog: the sections outgrew a 360px box the moment there
 /// was more than one of them, and a settings *place* is what every desktop app
-/// this one sits beside offers. It takes the whole window for the same reason
-/// Grid's does — none of this is daily work, so it does not belong in the rail
-/// you drive terminals from.
+/// this one sits beside offers. It takes the whole window because none of this
+/// is daily work, so it does not belong in the rail you drive terminals from.
 ///
 /// Pushed as a route rather than switched into the shell: [AppNotifier] carries
 /// no notion of "which screen", and a route needs none — the way back is
@@ -33,12 +29,10 @@ import 'settings_section.dart';
 Future<void> showSettingsScreen(
   BuildContext context,
   AppNotifier notifier, {
-  GridNetworksController? gridNetworks,
   SettingsSection? initialSection,
   // Which door opened Settings — see [AnalyticsEvents.screenView]. `required`,
-  // because a pane reachable six ways is close to meaningless as a bare count,
-  // and the six are not variations on one intention: `usage_offer` arrives from
-  // somebody who has just been told they are nearly out of quota.
+  // because a pane reachable several ways is close to meaningless as a bare
+  // count.
   required String source,
 }) {
   return Navigator.of(context).push<void>(
@@ -47,7 +41,6 @@ Future<void> showSettingsScreen(
       // mean compositing four live terminals under it for nothing.
       pageBuilder: (context, animation, _) => SettingsScreen(
         notifier: notifier,
-        gridNetworks: gridNetworks,
         initialSection: initialSection,
         source: source,
       ),
@@ -67,7 +60,6 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.notifier,
-    this.gridNetworks,
     this.initialSection,
     this.source = 'unknown',
   });
@@ -84,11 +76,6 @@ class SettingsScreen extends StatefulWidget {
   /// does not show as selected.
   final SettingsSection? initialSection;
 
-  /// Injected by tests so the Grid pane reads a fake client instead of the
-  /// live control plane. Null in the app, where the screen makes — and
-  /// disposes — its own.
-  final GridNetworksController? gridNetworks;
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -97,44 +84,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late SettingsSection _section =
       widget.initialSection ?? kDefaultSettingsSection;
 
-  /// Owned here, not by the Grid pane: the rail unmounts a pane the moment you
-  /// leave it, so a controller living in the pane would refetch every time the
-  /// user came back to it.
-  late final GridNetworksController _gridNetworks =
-      widget.gridNetworks ?? GridNetworksController();
-
   @override
   void initState() {
     super.initState();
     // The pane Settings opens on is a screen view like any other — without it
     // the section a user lands on is the one section the stream never sees.
     // This one carries the door that OPENED Settings; every later view in this
-    // visit came from the rail, or from a button that says which it was.
+    // visit came from the rail.
     analytics.screenView(_screenName(_section), source: widget.source);
   }
 
-  @override
-  void dispose() {
-    // Only the one this screen made — an injected controller belongs to whoever
-    // passed it in.
-    if (widget.gridNetworks == null) _gridNetworks.dispose();
-    super.dispose();
-  }
-
-  /// Move to another pane. [source] is `rail` for the rail's own rows and
-  /// names the button otherwise — `add_model` is the only one so far, and it
-  /// is the reason this takes a source at all: landing on Share Intelligence
-  /// because a provider had no models is a different visit from choosing it in
-  /// the rail, and the two must not be one number.
-  void _show(SettingsSection target, {String source = 'rail'}) {
+  /// Move to another pane, from the settings rail.
+  void _show(SettingsSection target) {
     if (target == _section) return;
-    analytics.screenView(_screenName(target), source: source);
+    analytics.screenView(_screenName(target), source: 'rail');
     setState(() => _section = target);
   }
 
   /// The section's stable name, never its label: labels are rewritten and a
-  /// renamed label would read as a new screen. `SettingsSection.grid` becomes
-  /// `settings_grid`, so a settings pane cannot collide with a top-level screen
+  /// renamed label would read as a new screen. `SettingsSection.usage` becomes
+  /// `settings_usage`, so a settings pane cannot collide with a top-level screen
   /// that happens to share a word.
   static String _screenName(SettingsSection section) =>
       'settings_${section.name}';
@@ -165,12 +134,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: _SettingsBody(
                     section: _section,
                     notifier: widget.notifier,
-                    gridNetworks: _gridNetworks,
-                    // The rail's own rows keep the default source (see
-                    // [SettingsNav] above); a pane that sends the reader
-                    // somewhere passes the button that did it.
-                    onShowSection: (target, source) =>
-                        _show(target, source: source),
                   ),
                 ),
               ],
@@ -187,32 +150,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 /// Cross-fades rather than cuts: the rail's own row highlight animates, and a
 /// pane that appears the instant you click reads as a jolt beside it.
 class _SettingsBody extends StatelessWidget {
-  const _SettingsBody({
-    required this.section,
-    required this.notifier,
-    required this.gridNetworks,
-    required this.onShowSection,
-  });
+  const _SettingsBody({required this.section, required this.notifier});
 
   final SettingsSection section;
   final AppNotifier notifier;
-  final GridNetworksController gridNetworks;
-
-  /// How a pane sends the reader to another one — the rail's own `onSelect`,
-  /// handed down. Providers' `Add model` is the only user of it: putting a
-  /// model on a provider happens on Share Intelligence, and the button pins
-  /// that pane to the provider before switching to it.
-  final void Function(SettingsSection section, String source) onShowSection;
 
   @override
   Widget build(BuildContext context) {
     final screen = switch (section) {
-      SettingsSection.grid => GridSection(
-        controller: gridNetworks,
-        harnessEmail: notifier.currentUser?.email,
-        onShowSection: onShowSection,
-      ),
-      SettingsSection.shareIntelligence => const ShareIntelligenceSection(),
       SettingsSection.appearance => const AppearanceSection(),
       SettingsSection.terminal => const TerminalSection(),
       SettingsSection.usage => const UsageSection(),

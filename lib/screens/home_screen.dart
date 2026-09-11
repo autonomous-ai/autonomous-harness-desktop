@@ -10,18 +10,17 @@ import '../theme/app_theme.dart';
 import '../usage/usage_controller.dart';
 import '../widgets/layout_palette.dart';
 import '../widgets/link_machine_screen.dart';
-import '../widgets/agent_model_menu.dart';
 import '../widgets/machine_rail.dart';
 import '../widgets/machine_rail_mini.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_section.dart';
 import '../shortcuts/app_shortcuts.dart';
+import '../widgets/agent_switcher.dart';
 import '../widgets/new_agent_dialog.dart';
 import '../widgets/task_palette.dart';
 import '../widgets/pane_grid.dart';
 import '../widgets/shortcuts_sheet.dart';
-import '../widgets/status_rail/grid_status_rail.dart';
-import '../widgets/usage_limit_notice.dart';
+import '../widgets/status_rail/status_rail.dart';
 import '../widgets/window_chrome.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -35,11 +34,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   /// What the agent accounts on this machine have spent.
   ///
-  /// Owned HERE rather than by the status rail that draws it, because it now
-  /// has two readers: the rail's figures and [UsageLimitNotice] above it. Two
-  /// controllers would be two pollers hitting the same two vendors a minute
-  /// apart, and a card that could name a percentage the rail underneath it
-  /// disagreed with.
+  /// Owned HERE rather than by the status rail that draws it, because the rail
+  /// unmounts whenever the sidebar folds, and a controller living in it would
+  /// restart its poll — and blank its figures — on every unfold.
   ///
   /// It also asks every connected REMOTE machine for its own accounts
   /// (`AppNotifier.readRemoteUsage`), because a machine elsewhere may be signed
@@ -192,37 +189,6 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(widget.notifier.closePane(pane.id));
   }
 
-  /// ⌘⇧M — the pane header's Model pill, without the mouse.
-  ///
-  /// The pill is the same call (`pickAgentModel`), so the refusals, the mint,
-  /// the restart and the Recent entry are one implementation. The engine comes
-  /// from the agent the pane is showing, not from the pane: a pane is an
-  /// intent, and it can be sitting on a machine that has not answered yet.
-  void _changeModel() {
-    final pane = widget.notifier.focusedPane;
-    // A pane is an INTENT: it exists before its machine has answered, and a
-    // tile with no agent yet has no model to change.
-    final agentId = pane?.agentId;
-    if (pane == null || agentId == null) return;
-    final engine = widget.notifier
-        .stateOf(pane.machineId)
-        ?.agents
-        .where((agent) => agent.id == agentId)
-        .map((agent) => agent.engine)
-        .firstOrNull;
-    if (engine == null) return;
-    unawaited(
-      pickAgentModel(
-        context,
-        widget.notifier,
-        machineId: pane.machineId,
-        agentId: agentId,
-        engine: engine,
-        source: 'shortcut',
-      ),
-    );
-  }
-
   void _newAgent() {
     final machineId =
         widget.notifier.focusedPane?.machineId ??
@@ -252,18 +218,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() => _collapsed = !_collapsed),
               ShortcutAction.nextAgent: () => _stepAgent(1),
               ShortcutAction.previousAgent: () => _stepAgent(-1),
-              ShortcutAction.focusNextPane: () => notifier.focusPaneBy(1),
-              ShortcutAction.focusPreviousPane: () => notifier.focusPaneBy(-1),
+              // All four directions read the GEOMETRY now. Left and right used
+              // to walk the list while up and down read the layout, so half the
+              // compass meant "the next one" and half meant "the one over
+              // there" — a scheme nobody can hold in their head, and the reason
+              // hjkl could not simply be aliased onto the old keys.
+              ShortcutAction.focusPaneLeft: () =>
+                  notifier.focusPaneHorizontally(-1),
+              ShortcutAction.focusPaneRight: () {
+                // Out of the rail first. ⌘l is "go right", and from inside the
+                // sidebar the thing on the right is the grid.
+                if (notifier.railFocused) {
+                  notifier.unfocusRail();
+                  return;
+                }
+                notifier.focusPaneHorizontally(1);
+              },
               ShortcutAction.focusPaneAbove: () =>
                   notifier.focusPaneVertically(-1),
               ShortcutAction.focusPaneBelow: () =>
                   notifier.focusPaneVertically(1),
-              ShortcutAction.movePaneForward: () => notifier.movePaneBy(1),
-              ShortcutAction.movePaneBackward: () => notifier.movePaneBy(-1),
+              ShortcutAction.movePaneLeft: () =>
+                  notifier.movePaneDirection(dx: -1, dy: 0),
+              ShortcutAction.movePaneRight: () =>
+                  notifier.movePaneDirection(dx: 1, dy: 0),
+              ShortcutAction.movePaneUp: () =>
+                  notifier.movePaneDirection(dx: 0, dy: -1),
+              ShortcutAction.movePaneDown: () =>
+                  notifier.movePaneDirection(dx: 0, dy: 1),
+              ShortcutAction.lastPane: notifier.focusLastPane,
+              ShortcutAction.zoomPane: notifier.toggleZoomPane,
+              ShortcutAction.switchAgent: () =>
+                  unawaited(showAgentSwitcher(context, notifier)),
 
               ShortcutAction.closePane: _closeFocusedPane,
               ShortcutAction.newAgent: _newAgent,
-              ShortcutAction.changeModel: _changeModel,
               ShortcutAction.routeTask: () =>
                   unawaited(showTaskPalette(context, notifier)),
               ShortcutAction.reload: () => unawaited(notifier.retryMachines()),
@@ -387,19 +376,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               },
                             ),
                           ),
-                          // Floating, not a row in the Column: taking layout
-                          // here would resize every pane — a real SIGWINCH to
-                          // every pty on screen — to deliver a message. Bottom
-                          // left, so it sits directly over the usage figure it
-                          // is about.
-                          Positioned(
-                            left: UsageLimitNotice.inset,
-                            bottom: UsageLimitNotice.inset,
-                            child: UsageLimitNotice(
-                              notifier: notifier,
-                              usage: _usage,
-                            ),
-                          ),
                           if (_collapsed)
                             Positioned(
                               left: 0,
@@ -426,7 +402,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    // What this grid is made of, along the very bottom. Outside
+                    // What the accounts have spent, along the very bottom. Outside
                     // the Expanded above so it is full-bleed under the machine
                     // rail as well as the panes — a strip that started after the
                     // rail would put a step in the window's bottom edge.
@@ -444,25 +420,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       alignment: Alignment.topCenter,
                       child: _collapsed
                           ? const SizedBox(width: double.infinity, height: 0)
-                          : GridStatusRail(
-                              // Two things need it, for one reason: the rail holds no
-                              // `AppNotifier` and both of these open Settings.
+                          : StatusRail(
                               notifier: notifier,
-                              // The shell's, shared with the card above — see [_usage].
+                              // The shell's — see [_usage].
                               usage: _usage,
-                              // The node dashboard's empty state offers to put THIS
-                              // computer on the grid, and the screen that does it is a
-                              // Settings pane — which needs the notifier the shell holds
-                              // and the rail does not.
-                              onShareIntelligence: () => unawaited(
-                                showSettingsScreen(
-                                  context,
-                                  notifier,
-                                  initialSection:
-                                      SettingsSection.shareIntelligence,
-                                  source: 'node_dashboard',
-                                ),
-                              ),
                             ),
                     ),
                   ],

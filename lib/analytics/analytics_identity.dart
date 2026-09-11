@@ -9,8 +9,8 @@ import 'analytics_config.dart';
 /// `~/.harness/desktop-app/analytics.json`.
 ///
 /// Two ids, two lifetimes. The **device id** is minted once and never reset —
-/// it is what ties a person's first launch to the day they finally ran an agent
-/// on a grid, across sign-in and sign-out. The **visit id** rotates after
+/// it is what ties a person's first launch to the day they finally ran an
+/// agent, across sign-in and sign-out. The **visit id** rotates after
 /// `AnalyticsLimits.sessionIdle` of quiet, which is how a session is counted.
 ///
 /// The file also carries the user's own switch: `{"enabled": false}` mutes the

@@ -14,13 +14,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
-import 'package:harness/grid/grid_networks_controller.dart';
 import 'package:harness/settings/settings_screen.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/terminal/terminal_font_store.dart';
-
-import 'support/fake_grid_api.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -41,10 +38,6 @@ void main() {
       configStore: null,
     );
     addTearDown(notifier.dispose);
-    // Settings opens on Grid, whose pane fetches — hand it a fake so no test
-    // here touches the live control plane.
-    final gridNetworks = GridNetworksController(client: FakeGridApi());
-    addTearDown(gridNetworks.dispose);
     // Wide enough that the rail and the pane both have room — the window's own
     // minimum is 880.
     tester.view.physicalSize = const Size(1100 * 2, 760 * 2);
@@ -66,7 +59,6 @@ void main() {
       showSettingsScreen(
         tester.element(find.byType(Placeholder)),
         notifier,
-        gridNetworks: gridNetworks,
         source: 'account_menu',
       ),
     );
@@ -74,35 +66,26 @@ void main() {
     return notifier;
   }
 
-  testWidgets('opens on Grid, with every section in the rail', (tester) async {
+  testWidgets('opens on Appearance, with every section in the rail', (
+    tester,
+  ) async {
     await openSettings(tester);
 
     // The rail: every group caption and every row.
     expect(find.text('Preferences'), findsOneWidget);
     expect(find.text('Help'), findsOneWidget);
-    expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Terminal'), findsOneWidget);
     expect(find.text('Keyboard shortcuts'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
     expect(find.text('Back to app'), findsOneWidget);
 
-    // Providers is the section it opens on, so its name is the group caption,
-    // the rail row AND the pane's title.
-    expect(find.text('Providers'), findsNWidgets(3));
-    // And its pane really loaded, through the injected fake. Twice: the rail
-    // names the provider and the detail panel beside it names it again.
-    expect(find.text('hp-1-1'), findsWidgets);
+    // Appearance is the section it opens on, so its name is both the rail row
+    // and the pane's title.
+    expect(find.text('Appearance'), findsNWidgets(2));
   });
 
-  testWidgets('picking Appearance swaps the pane for the typography controls', (
-    tester,
-  ) async {
+  testWidgets('the Appearance pane is the typography controls', (tester) async {
     await openSettings(tester);
-
-    await tester.tap(find.text('Appearance'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Appearance'), findsNWidgets(2));
 
     // Typography is the whole pane now that there is no theme to choose —
     // Harness Desktop is dark-only.
@@ -110,9 +93,6 @@ void main() {
     expect(find.text('UI font'), findsOneWidget);
     expect(find.text('UI font size'), findsOneWidget);
     expect(find.byKey(const Key('appearance-ui-size-field')), findsOneWidget);
-
-    // The Grid pane is gone with its section.
-    expect(find.text('hp-1-1'), findsNothing);
   });
 
   testWidgets('picking Terminal swaps the pane for the font controls', (
@@ -145,8 +125,6 @@ void main() {
       find.byKey(const Key('terminal-settings-reset-button')),
       findsOneWidget,
     );
-    // The Grid pane is gone with its section.
-    expect(find.text('hp-1-1'), findsNothing);
     // The Appearance controls are gone with their pane.
     expect(find.byKey(const Key('appearance-ui-size-field')), findsNothing);
   });
@@ -180,9 +158,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Keyboard shortcuts'), findsOneWidget);
-    // Rail rows gone; the open pane's own title is what remains of 'Providers'.
-    expect(find.text('Providers'), findsOneWidget);
-    expect(find.text('Appearance'), findsNothing);
+    // Rail rows gone; the open pane's own title is what remains of
+    // 'Appearance'.
+    expect(find.text('Appearance'), findsOneWidget);
     expect(find.text('Terminal'), findsNothing);
     expect(find.text('Preferences'), findsNothing);
 
@@ -202,7 +180,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Back to app'), findsNothing);
-    expect(find.text('Providers'), findsNothing);
+    expect(find.text('Appearance'), findsNothing);
     expect(find.byType(Placeholder), findsOneWidget);
   });
 }

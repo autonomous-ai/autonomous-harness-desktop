@@ -1,14 +1,13 @@
 /// Records a child process into [cliLog] — the transcript both the daily file
 /// and Settings ▸ Debug are built from.
 ///
-/// One place, shared by [HarnessCliRunner] and [GridCli], because the two CLIs
-/// this app drives are the same kind of evidence: "the CLI did something
-/// unexpected" is the most common shape of a fault here, since the app itself
-/// holds almost no logic.
+/// One place, used by [HarnessCliRunner]: "the CLI did something unexpected"
+/// is the most common shape of a fault here, since the app itself holds almost
+/// no logic.
 ///
-/// **A command line and its output are logged; its environment is not.** Secrets
-/// travel in the child's environment precisely so they stay out of argv (see
-/// `GridCli.start`), and writing the environment here would undo that. What the
+/// **A command line and its output are logged; its environment is not.** A
+/// secret handed to a child belongs in its environment precisely so it stays
+/// out of argv, and writing the environment here would undo that. What the
 /// child *prints* can still carry one — `harness auth status --json` prints a
 /// session — so every line goes through [redactSecretsInText] first.
 library;

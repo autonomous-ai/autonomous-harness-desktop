@@ -34,7 +34,7 @@ class TerminalGestureHandler extends StatefulWidget {
 
   final GestureTapUpCallback? onSingleTapUp;
 
-  final GestureTapDownCallback? onTapDown;
+  final bool Function(TapDownDetails)? onTapDown;
 
   final GestureTapDownCallback? onSecondaryTapDown;
 
@@ -58,6 +58,8 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
   DragStartDetails? _lastDragStartDetails;
 
   LongPressStartDetails? _lastLongPressStartDetails;
+
+  bool _hostHandlesTap = false;
 
   @override
   Widget build(BuildContext context) {
@@ -126,18 +128,28 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
   }
 
   void onTapDown(TapDownDetails details) {
-    // onTapDown is special, as it will always call the supplied callback.
-    // The TerminalView depends on it to bring the terminal into focus.
+    // Give host actions (e.g. Cmd-click a link) first refusal. Neither half
+    // of a consumed click may also reach a mouse-tracking TUI.
+    _hostHandlesTap = widget.onTapDown?.call(details) ?? false;
+    if (_hostHandlesTap) return;
     _tapDown(
-      widget.onTapDown,
+      null,
       details,
       TerminalMouseButton.left,
-      forceCallback: true,
     );
   }
 
   void onSingleTapUp(TapUpDetails details) {
-    _tapUp(widget.onSingleTapUp, details, TerminalMouseButton.left);
+    void notify(TapUpDetails details) {
+      widget.onTapUp?.call(details);
+      widget.onSingleTapUp?.call(details);
+    }
+
+    if (_hostHandlesTap) {
+      notify(details);
+      return;
+    }
+    _tapUp(notify, details, TerminalMouseButton.left);
   }
 
   void onSecondaryTapDown(TapDownDetails details) {
@@ -157,6 +169,7 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
   }
 
   void onDoubleTapDown(TapDownDetails details) {
+    if (_hostHandlesTap) return;
     renderTerminal.selectWord(details.localPosition);
   }
 

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
@@ -28,6 +30,63 @@ void main() {
     session.status = TerminalSessionStatus.controlling;
     session.streamId = 'stream-$agentId';
     return session;
+  }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+    testWidgets(
+      'Shift + horizontal arrows reach Codex on $platform in both buffers',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final frames = <TerminalBinaryFrame>[];
+        final session = sessionFor('codex', frames);
+        final notifier = AppNotifier(
+          config: AppConfig.dev,
+          authSession: AuthSession(),
+          configStore: null,
+        );
+        addTearDown(() {
+          session.dispose();
+          notifier.dispose();
+        });
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: TerminalPanel(
+                notifier: notifier,
+                session: session,
+                focused: true,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Codex's queued-question picker uses Shift+Left in the normal
+        // screen. Other TUIs use the alternate screen; both must receive
+        // the standard xterm modifier sequence through the real input path.
+        for (final alternate in [false, true]) {
+          if (alternate) session.terminal.write('\x1b[?1049h');
+          expect(session.terminal.isUsingAltBuffer, alternate);
+          frames.clear();
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.pump(const Duration(milliseconds: 20));
+
+          expect(
+            utf8.decode(frames.expand((frame) => frame.bytes).toList()),
+            '\x1b[1;2D\x1b[1;2C',
+            reason:
+                'Shift+Left/Right must reach the PTY in '
+                '${alternate ? 'the alternate' : 'the normal'} screen',
+          );
+        }
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
   }
 
   testWidgets(

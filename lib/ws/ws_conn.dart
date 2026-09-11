@@ -45,7 +45,7 @@ class WsRequestFailure implements Exception {
     this.detail,
   });
 
-  /// The frame that carried the refusal — `agent_retarget_result`, say.
+  /// The frame that carried the refusal — `agent_create_result`, say.
   final String responseType;
 
   /// The peer's own error code.
@@ -68,6 +68,7 @@ class WsConn {
   final String machineId;
   final AccessTokenProvider accessTokenProvider;
   final void Function(String message) onAuthFailure;
+
   /// The connection stopped for a specific, non-retryable reason — currently always 4404 (see
   /// [_refusePeer]): the target machine has no link from this device yet, or no longer trusts it.
   /// The local CLI closes with it; a viewer's relay connection raises it itself. Surfaced instead
@@ -75,6 +76,7 @@ class WsConn {
   final void Function(int code, String reason)? onLocalFailure;
   final WsTransportKind transportKind;
   final Uri? localWsUri;
+
   /// Retained only for fixture constructor compatibility. Local transport ignores it.
   final String? localApiKey;
   final int localProtocolVersion;
@@ -112,6 +114,7 @@ class WsConn {
   Future<void> _inboundTail = Future<void>.value();
 
   bool get isReady => _ready && _channel != null;
+
   /// True once this connection has permanently given up (a deliberate [close], or a non-retryable
   /// local failure like NO_PEER_LINK) — [WsPool] must not hand a closed connection back out.
   bool get isClosed => _closing;
@@ -314,8 +317,11 @@ class WsConn {
   void _refusePeer(String reason) {
     _closing = true;
     _ready = false;
-    onStatus(ConnectionStatus.disconnected);
+    // needsLink first: AppNotifier's onStatus handler reads machine.needsLink to decide whether a
+    // disconnect should be treated as the node going offline — it has to see it flipped before
+    // onStatus runs, or the very first 4404 for this machine reads as offline for one retry cycle.
     onLocalFailure?.call(4404, reason);
+    onStatus(ConnectionStatus.disconnected);
     unawaited(_channel?.sink.close());
   }
 
@@ -399,7 +405,8 @@ class WsConn {
       // becomes an unhandled rejection.
       completer.future.then(
         (value) => appLog.debug('ws', '← $type ${summariseForLog(value)}'),
-        onError: (Object error) => appLog.warn('ws', '← $type failed', error: error),
+        onError: (Object error) =>
+            appLog.warn('ws', '← $type failed', error: error),
       );
     }
     final frame = {

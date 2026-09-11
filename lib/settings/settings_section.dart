@@ -1,7 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../grid/grid_surface.dart';
 import '../logging/debug_surface.dart';
 
 /// One screen in Settings — a row in its rail, and the pane that row opens.
@@ -10,12 +9,6 @@ import '../logging/debug_surface.dart';
 /// rail, the search filter and the pane all read this list, so a section cannot
 /// be listed without a screen behind it or reachable without a row.
 enum SettingsSection {
-  grid(LucideIcons.zap300, 'Providers'),
-  // ⚠️ `main` renamed this to "Share this computer" while this branch was
-  // renaming its neighbour to Providers. Kept as it was: the two rows are one
-  // group, and "Share Intelligence" is the name the pane itself, the setup
-  // step (`EnvironmentStep.grid`) and the Grid product all use.
-  shareIntelligence(LucideIcons.share2300, 'Share Intelligence'),
   appearance(LucideIcons.sun300, 'Appearance'),
   terminal(LucideIcons.terminal300, 'Terminal'),
   usage(LucideIcons.chartNoAxesColumn300, 'Usage'),
@@ -50,30 +43,23 @@ class SettingsGroup {
 ///
 /// A getter rather than a `const`, for the rows that are not always there:
 /// [SettingsSection.debug] and [SettingsSection.tracking] are developer
-/// furniture and ship only where [kDebugSurfaceEnabled] says so, and the two
-/// Grid rows ship only where [kGridSurfaceEnabled] does. Everything that draws
-/// or searches the rail reads this, so a hidden section cannot be reached by a
-/// stale copy of the list — while the enum values themselves always exist, so
-/// the screens behind them need no gate of their own.
-List<SettingsGroup> get settingsGroups => settingsGroupsFor(
-  debugSurface: kDebugSurfaceEnabled,
-  gridSurface: kGridSurfaceEnabled,
-);
+/// furniture and ship only where [kDebugSurfaceEnabled] says so. Everything
+/// that draws or searches the rail reads this, so a hidden section cannot be
+/// reached by a stale copy of the list — while the enum values themselves
+/// always exist, so the screens behind them need no gate of their own.
+List<SettingsGroup> get settingsGroups =>
+    settingsGroupsFor(debugSurface: kDebugSurfaceEnabled);
 
-/// [settingsGroups] with the two gates passed in rather than read off the
-/// build.
+/// [settingsGroups] with the gate passed in rather than read off the build.
 ///
-/// Both flags are compile-time consts, so the shape a SHIPPED build has — no
-/// Grid group, Settings opening on Appearance — is otherwise unreachable from a
-/// test, which by definition runs with everything switched on. This seam is the
-/// only way to assert the thing the gate exists to do.
+/// The flag is a compile-time const, so the shape a SHIPPED build has — no
+/// Debug, no Tracking — is otherwise unreachable from a test, which by
+/// definition runs with it switched on. This seam is the only way to assert
+/// the thing the gate exists to do.
 @visibleForTesting
-List<SettingsGroup> settingsGroupsFor({
-  required bool debugSurface,
-  required bool gridSurface,
-}) {
+List<SettingsGroup> settingsGroupsFor({required bool debugSurface}) {
   bool visible(SettingsSection section) =>
-      _isVisible(section, debugSurface: debugSurface, gridSurface: gridSurface);
+      debugSurface || !_kDeveloperSections.contains(section);
   return [
     for (final group in _kSettingsGroups)
       if (group.sections.any(visible))
@@ -89,32 +75,7 @@ List<SettingsGroup> settingsGroupsFor({
 /// second list of "which ones are hidden" is how the two would drift apart.
 const _kDeveloperSections = {SettingsSection.debug, SettingsSection.tracking};
 
-/// The two provider sections, hidden together for a different reason: not furniture
-/// nobody but us wants, but a feature not finished being one. Kept apart from
-/// [_kDeveloperSections] so a build can show either set without the other.
-const _kGridSections = {
-  SettingsSection.grid,
-  SettingsSection.shareIntelligence,
-};
-
-bool _isVisible(
-  SettingsSection section, {
-  required bool debugSurface,
-  required bool gridSurface,
-}) {
-  if (_kDeveloperSections.contains(section)) return debugSurface;
-  if (_kGridSections.contains(section)) return gridSurface;
-  return true;
-}
-
 const _kSettingsGroups = [
-  // The two directions of the same relationship, and the only run here about
-  // something outside this Mac: which providers this account can talk to, and
-  // what this computer gives back to the one that is picked.
-  SettingsGroup('Providers', [
-    SettingsSection.grid,
-    SettingsSection.shareIntelligence,
-  ]),
   // Usage sits with the preferences rather than with Debug and Tracking, which
   // it otherwise resembles: those two are developer furniture a shipped build
   // hides, and this is a screen anybody is meant to open. It earns its place in
@@ -141,8 +102,7 @@ const _kSettingsGroups = [
 /// The section Settings opens on — the first row of the first group, so the
 /// screen never opens on a pane its rail doesn't show as selected.
 ///
-/// Derived, not named: the first group is Providers, which a shipped build hides, and
-/// a constant pointing at it would open Settings on a pane with no row lit in
-/// the rail beside it.
+/// Derived rather than named, so a reordered or gated first group cannot open
+/// Settings on a pane with no row lit in the rail beside it.
 SettingsSection get kDefaultSettingsSection =>
     settingsGroups.first.sections.first;

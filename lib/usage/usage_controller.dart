@@ -11,14 +11,14 @@ import 'usage_window.dart';
 
 /// What each agent account has spent, kept current for the status rail.
 ///
-/// Polling, for the same reason the grid overview polls: neither vendor pushes,
+/// Polling, because neither vendor pushes,
 /// and neither figure moves fast enough to be worth a socket. A minute is also
 /// the granularity the countdowns are printed at, so a faster poll would redraw
 /// the same minute.
 ///
-/// **The last good reading stays on screen through a failed refresh**, exactly
-/// as the grid rail does — a strip that blanked whenever a network hiccup
-/// landed would be worse than one that quietly went [stale]. The sources are
+/// **The last good reading stays on screen through a failed refresh** — a
+/// strip that blanked whenever a network hiccup landed would be worse than one
+/// that quietly went [stale]. The sources are
 /// read in parallel because one being slow says nothing about the other.
 class UsageController extends ChangeNotifier {
   UsageController({
@@ -86,9 +86,7 @@ class UsageController extends ChangeNotifier {
 
   /// One figure per ACCOUNT, this computer's first — see [groupUsageAccounts].
   ///
-  /// [readings] stays this computer's alone, on purpose: the limit notice and
-  /// the panel's offer act on agents by ENGINE across every machine, and a
-  /// remote account at 95% is no reason to move this Mac's agents anywhere.
+  /// [readings] stays this computer's alone; this is the grouped view.
   List<UsageAccount> get accounts => groupUsageAccounts(readings, _remote);
 
   /// Whether the rail has anything at all to say — figures, or a reason there

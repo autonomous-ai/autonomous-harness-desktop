@@ -354,6 +354,55 @@ void main() {
     session.dispose();
     app.dispose();
   });
+
+  testWidgets('Ctrl+W deletes the last word', (tester) async {
+    final app = _notifier(local: false);
+    final session = await _liveSession([]);
+    await tester.pumpWidget(_host(app, session));
+    await tester.pump();
+
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'deploy the service');
+    await tester.pump();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      'deploy the ',
+    );
+    session.dispose();
+    app.dispose();
+  });
+
+  testWidgets('Ctrl+U clears everything before the cursor', (tester) async {
+    final app = _notifier(local: false);
+    final session = await _liveSession([]);
+    await tester.pumpWidget(_host(app, session));
+    await tester.pump();
+
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'deploy the service');
+    await tester.pump();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      '',
+    );
+    session.dispose();
+    app.dispose();
+  });
+
   testWidgets(
     'the grip stays reachable once the box is gone, and gives its rows back',
     (tester) async {

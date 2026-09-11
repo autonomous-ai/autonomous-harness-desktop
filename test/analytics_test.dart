@@ -77,8 +77,8 @@ void main() {
 
   test('the payload is the web client shape, and says which app sent it', () {
     final event = AnalyticsEvent(
-      name: 'grid_picked',
-      params: const {'source': 'pill', 'has_grid': true},
+      name: 'agent_created',
+      params: const {'engine': 'claude', 'bypass_permission': true},
       at: DateTime.fromMillisecondsSinceEpoch(1700000000000, isUtc: true),
       identity: const AnalyticsIdentity(
         pseudoId: 'device-1',
@@ -92,7 +92,7 @@ void main() {
     final data = payload['data']! as Map<String, Object?>;
     final params = paramsOf(payload);
 
-    expect(payload['event_name'], 'grid_picked');
+    expect(payload['event_name'], 'agent_created');
     // Seconds, not milliseconds — the web client's unit.
     expect(payload['event_timestamp'], 1700000000);
     expect(data['session_id'], 'visit-1');
@@ -101,8 +101,8 @@ void main() {
     expect(data['user_id'], 'user-1');
     expect(params['user_id'], 'user-1');
     expect(params['user_email'], 'someone@example.test');
-    expect(params['source'], 'pill');
-    expect(params['has_grid'], true);
+    expect(params['engine'], 'claude');
+    expect(params['bypass_permission'], true);
     // Without this every stream in the shared project looks like one app.
     expect(params['category'], 'harness-desktop');
   });
@@ -150,7 +150,7 @@ void main() {
       final client = FakeAnalyticsClient();
       final analytics = queueOn(client);
 
-      analytics.track('Grid Picked');
+      analytics.track('Agent Created');
       analytics.track('no');
       await analytics.flush();
 
@@ -163,13 +163,13 @@ void main() {
     final client = FakeAnalyticsClient();
     final analytics = queueOn(client);
 
-    analytics.track('grid_picked');
+    analytics.track('agent_created');
     await analytics.flush();
     expect(client.sent, hasLength(1));
     expect(analytics.pending, 0);
 
     client.answer = AnalyticsSendResult.rejected;
-    analytics.track('grid_picked');
+    analytics.track('agent_created');
     await analytics.flush();
     // Sending it again would fail identically, so it goes.
     expect(analytics.pending, 0);
@@ -179,7 +179,7 @@ void main() {
     final client = FakeAnalyticsClient(AnalyticsSendResult.retry);
     final analytics = queueOn(client);
 
-    analytics.track('grid_picked');
+    analytics.track('agent_created');
     await analytics.flush();
 
     expect(analytics.pending, 1, reason: 'a 5xx must not lose the event');
@@ -339,7 +339,7 @@ void main() {
     final client = FakeAnalyticsClient();
     final analytics = queueOn(client, recorder: log);
 
-    analytics.track('grid_picked', params: const {'source': 'pill'});
+    analytics.track('agent_created', params: const {'engine': 'claude'});
     expect(log.entries.single.status, AnalyticsEventStatus.queued);
 
     await analytics.flush();
@@ -350,7 +350,7 @@ void main() {
     expect(entry.took, isNotNull);
     // The payload, not the params: the gap between what the call site passed
     // and what actually left is the bug this screen is opened to find.
-    expect(entry.payload, contains('"event_name": "grid_picked"'));
+    expect(entry.payload, contains('"event_name": "agent_created"'));
     expect(entry.payload, contains('harness-desktop'));
   });
 
@@ -383,7 +383,7 @@ void main() {
       recorder: log,
     );
 
-    analytics.track('Grid Picked');
+    analytics.track('Agent Created');
     analytics.track('signed_in');
     await analytics.flush();
 
@@ -393,7 +393,7 @@ void main() {
     // Dropped before the queue, so it never reached the wire — and it is on
     // the screen at all, which is the point: an event the app itself refused
     // is otherwise indistinguishable from one nobody tracked.
-    expect(log.entries.last.name, 'Grid Picked');
+    expect(log.entries.last.name, 'Agent Created');
     expect(log.entries.last.status, AnalyticsEventStatus.dropped);
     expect(log.entries.last.payload, isNull);
   });

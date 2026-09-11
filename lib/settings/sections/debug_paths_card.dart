@@ -3,22 +3,19 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/harness_cli_runner.dart';
 import '../../logging/log_file.dart';
-import '../../share/grid_cli.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/app_icon_button.dart';
 
-/// Where the two CLIs this app drives actually resolved to, and where the logs
-/// they write are.
+/// Where the CLI this app drives actually resolved to, and where the logs it
+/// writes are.
 ///
-/// The first thing to check when commands fail — a wrong path, a launcher that
-/// predates the managed runtime, a `grid` that was never installed — and the
-/// app is the only thing that knows, because none of it comes from PATH (see
-/// [HarnessCliRunner]).
+/// The first thing to check when commands fail — a wrong path, or a launcher
+/// that predates the managed runtime — and the app is the only thing that
+/// knows, because none of it comes from PATH (see [HarnessCliRunner]).
 class DebugEnvironment {
   const DebugEnvironment({
     required this.harnessCommand,
     required this.harnessSource,
-    required this.gridExecutable,
     required this.logsDirectory,
   });
 
@@ -29,14 +26,10 @@ class DebugEnvironment {
   /// Which of the three tiers answered — managed, launcher, or bare PATH.
   final HarnessCliSource harnessSource;
 
-  /// Null on a computer that has not got the Grid CLI, which is an ordinary
-  /// state here (see [GridCli]).
-  final String? gridExecutable;
-
   final String logsDirectory;
 }
 
-/// Resolves both CLIs. Injected in tests, which must not read a real
+/// Resolves the CLI. Injected in tests, which must not read a real
 /// `~/.harness`.
 Future<DebugEnvironment> probeDebugEnvironment() async {
   final invocation = await HarnessCliRunner().resolve(const []);
@@ -46,7 +39,6 @@ Future<DebugEnvironment> probeDebugEnvironment() async {
       ...invocation.arguments,
     ].join(' ').trim(),
     harnessSource: invocation.source,
-    gridExecutable: await GridCli().locate(),
     logsDirectory: DailyLogFile.defaultDirectory.path,
   );
 }
@@ -116,15 +108,6 @@ class _DebugPathsCardState extends State<DebugPathsCard> {
                         '${environment.harnessCommand}  '
                         '(${environment.harnessSource.name})',
                   ),
-                  _PathRow(
-                    label: 'grid',
-                    value:
-                        environment.gridExecutable ??
-                        'Not installed on this computer',
-                    // Not an error: `grid` is the one optional step of first-run
-                    // provisioning, and Share Intelligence explains its absence.
-                    muted: environment.gridExecutable == null,
-                  ),
                   _PathRow(label: 'logs', value: environment.logsDirectory),
                 ],
               );
@@ -137,15 +120,10 @@ class _DebugPathsCardState extends State<DebugPathsCard> {
 }
 
 class _PathRow extends StatelessWidget {
-  const _PathRow({
-    required this.label,
-    required this.value,
-    this.muted = false,
-  });
+  const _PathRow({required this.label, required this.value});
 
   final String label;
   final String value;
-  final bool muted;
 
   @override
   Widget build(BuildContext context) {
@@ -170,9 +148,7 @@ class _PathRow extends StatelessWidget {
                 height: 1.4,
                 fontFamily: AppFont.mono,
                 fontFamilyFallback: AppFont.monoFallback,
-                color: muted
-                    ? AppPalette.textSecondary
-                    : AppPalette.textPrimary,
+                color: AppPalette.textPrimary,
               ),
             ),
           ),

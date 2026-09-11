@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'analytics/analytics_lifecycle.dart';
 import 'core/crash_log.dart';
 import 'core/desktop_window.dart';
-import 'grid/grid_session.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'state/app_state.dart';
@@ -15,6 +14,7 @@ import 'shared/theme/app_theme.dart' as grid;
 import 'shared/theme/appearance_prefs_store.dart';
 import 'terminal/terminal_font_store.dart';
 import 'widgets/layout_palette.dart';
+import 'widgets/environment_preflight_screen.dart';
 import 'widgets/environment_setup_screen.dart';
 import 'widgets/flash_firmware_dialog.dart';
 import 'core/startup.dart';
@@ -32,12 +32,6 @@ Future<void> main() async {
   CrashLog.install();
   appLog.info('app', 'launched');
   await loadPersistedSettings();
-  // Keep reading the Grid CLI's credential file, rather than holding the copy
-  // taken a line ago for the life of the process. Here and not in
-  // `loadPersistedSettings` because this is a live subscription and not a
-  // setting: that function is what the tests call, and a watch left running on
-  // the developer's own `~/.grid` is not something a test should start.
-  gridSessionStore.watchForChanges();
   // After the settings: the window shows itself once it is ready, and the
   // first frame it shows must already wear the saved theme.
   await configureDesktopWindow();
@@ -225,6 +219,10 @@ class _RootShellState extends ConsumerState<RootShell> {
                       ),
                     ),
                   );
+          case AppStatus.checkingEnvironment:
+            screen = EnvironmentPreflightScreen(
+              readiness: app.environmentReadiness,
+            );
           case AppStatus.preparingEnvironment:
             screen = EnvironmentSetupScreen(notifier: app);
           case AppStatus.unauthenticated:
@@ -247,6 +245,7 @@ class _RootShellState extends ConsumerState<RootShell> {
           children: [
             if (app.hasAvailableUpdate &&
                 app.status != AppStatus.bootstrapping &&
+                app.status != AppStatus.checkingEnvironment &&
                 app.status != AppStatus.preparingEnvironment)
               UpdateNotice(notifier: app),
             Expanded(child: framed),

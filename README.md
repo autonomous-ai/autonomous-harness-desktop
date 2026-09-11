@@ -27,6 +27,20 @@ flutter build linux --release   # must run on an Ubuntu host — no cross-compil
 The terminal core is vendored at `third_party/xterm`. Do not replace it with an
 upstream package upgrade without preserving the local rendering and IME fixes.
 
+## Open media from agent output
+
+Hold **⌘ and click** on macOS, or **Ctrl and click** on Linux, to open an
+image/video path in the OS default app. HTTP(S) links open in the default browser.
+Hover over a recognized path to see the shortcut and full target. Normal clicks,
+text selection, copy/paste and terminal mouse input keep their existing behavior.
+
+Local previews support absolute paths, `~/...` and `file://...` URLs, including
+spaces, Unicode, visible Markdown links and terminal soft wraps. The file must
+already exist. Relative paths need a full path because CLI agent frames do not
+currently include the working directory. Remote media needs a web link or a local
+download; a path on another machine is never opened against this computer's disk.
+This reads visible terminal text, not hidden OSC 8 hyperlink targets.
+
 ## Local Codex profiles
 
 New Agent → Codex discovers local profiles when the Harness CLI advertises
@@ -57,7 +71,7 @@ The selected directory supplies that agent’s Codex login, configuration, hooks
 history and model cache, and stays attached across restarts. The terminal header
 shows its folder name and exposes the full path in a tooltip. **Default** keeps
 the machine’s normal launch behavior. This picker applies to local agents using
-Codex’s own account; remote machines and Grid launches use their existing flows.
+Codex’s own account; remote machines use their existing flow.
 The rail’s Codex usage panel still reports the default `~/.codex` profile.
 
 This requires the companion CLI support for `agent_create.codexHome`. Older CLIs

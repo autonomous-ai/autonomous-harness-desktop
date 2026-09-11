@@ -202,7 +202,8 @@ String trackedSummaryLine(AnalyticsLogEntry entry) {
   return trackedParamsSummary(entry.params);
 }
 
-/// The params a call site passed, on one line: `screen=grids · signed_in=true`.
+/// The params a call site passed, on one line:
+/// `screen=settings_usage · source=rail`.
 ///
 /// The row can only hold a line, and the line has to say *which* event this was
 /// — `screen_view` on its own is thirty identical rows. The whole payload,

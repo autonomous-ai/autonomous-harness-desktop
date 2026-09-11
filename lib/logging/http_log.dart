@@ -10,12 +10,12 @@ import 'redact.dart';
 /// Debug. The shape is deliberately Grid's (`CommandLogNotifier._mirrorToAppLog`),
 /// so the two products' logs read alike.
 ///
-/// **Headers and bodies are not logged.** The `Authorization` header on the
-/// Grid leg is a live session token; a body can carry one too. A URL can carry
+/// **Headers and bodies are not logged.** An `Authorization` header is a live
+/// credential; a body can carry one too. A URL can carry
 /// one in its query, so the line goes through [redactSecretsInText] first.
 ///
-/// Successful calls log at `debug`, because the status rail polls the relay
-/// every 60s and a day of that is not news; a failure logs at `warn`, where it
+/// Successful calls log at `debug`, because the status rail polls every 60s
+/// and a day of that is not news; a failure logs at `warn`, where it
 /// joins the Failed lens.
 Dio attachHttpLog(Dio dio) {
   dio.interceptors.add(_HttpLogInterceptor());

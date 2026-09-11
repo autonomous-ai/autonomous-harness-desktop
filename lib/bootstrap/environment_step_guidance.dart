@@ -3,18 +3,23 @@ import 'environment_provisioner.dart';
 /// The exact command to hand the user for a step stuck in [EnvironmentStepStatus.failed] or
 /// [EnvironmentStepStatus.needsTerminal], so they can run it themselves instead of only seeing a
 /// generic "Retry" with no idea what actually needs to happen. Returns null for any step/status
-/// combination that isn't a stuck, self-servable state (in particular: [EnvironmentStep.grid], which
-/// never blocks and gets no guidance block on the setup screen).
+/// combination that isn't a stuck, self-servable state.
 String? environmentStepGuidanceCommand(
   EnvironmentStep step,
   EnvironmentStepStatus status, {
   required bool isMacOS,
 }) {
   switch (step) {
+    case EnvironmentStep.clipboard:
+      if (status != EnvironmentStepStatus.failed &&
+          status != EnvironmentStepStatus.needsTerminal) {
+        return null;
+      }
+      return 'if [ -n "\${WAYLAND_DISPLAY:-}" ]; then sudo apt-get install -y wl-clipboard; else sudo apt-get install -y xclip; fi';
     case EnvironmentStep.harness:
       if (status != EnvironmentStepStatus.failed) return null;
       // Same URL _ensureHarness() itself curls — see environment_provisioner.dart.
-      return 'curl -fsSL https://cdn.autonomous.ai/harness/cli/install.sh | /bin/sh';
+      return kHarnessDesktopInstallCommand;
     case EnvironmentStep.tmux:
       if (status == EnvironmentStepStatus.needsTerminal) {
         return isMacOS
@@ -27,8 +32,6 @@ String? environmentStepGuidanceCommand(
         return 'brew install tmux';
       }
       return null;
-    case EnvironmentStep.grid:
-      return null;
   }
 }
 
@@ -40,6 +43,10 @@ String environmentStepGuidanceText(
   required bool isMacOS,
 }) {
   switch (step) {
+    case EnvironmentStep.clipboard:
+      return status == EnvironmentStepStatus.needsTerminal
+          ? 'The clipboard package is part of the single Host dependencies install. Finish the existing Terminal prompt; do not start a second installer.'
+          : 'Install the clipboard helper for the active Linux display, then click Recheck.';
     case EnvironmentStep.harness:
       return 'Run this in a terminal, then click Recheck.';
     case EnvironmentStep.tmux:
@@ -54,7 +61,5 @@ String environmentStepGuidanceText(
         return '$opened $manual';
       }
       return 'Homebrew is installed but the tmux install itself failed. Run it again yourself:';
-    case EnvironmentStep.grid:
-      return '';
   }
 }

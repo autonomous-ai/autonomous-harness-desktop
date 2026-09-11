@@ -137,22 +137,6 @@ void main() {
   });
 
   group('the declared set', () {
-    test('the model picker is ⇧⌘M, never plain ⌘M', () {
-      // ⌘M is Minimize, and AppKit matches it in `performKeyEquivalent:` —
-      // before the keystroke reaches Flutter at all. A binding on it would look
-      // right in this list and do nothing but minimise the window, which is the
-      // same trap that once ate ⌘V in a terminal pane.
-      // Read off the const rather than out of `kAppShortcuts`: the key moved
-      // behind `kGridSurfaceEnabled` (a build with no providers has no picker
-      // for it to open), so `appShortcuts()` is where it reaches a binding and
-      // this is where it is declared.
-      const model = kChangeModelShortcut;
-      expect(appShortcuts(), contains(model));
-      expect(model.activator.trigger, LogicalKeyboardKey.keyM);
-      expect(model.activator.meta, isTrue);
-      expect(model.activator.shift, isTrue);
-    });
-
     test('no two shortcuts claim the same chord', () {
       final seen = <String>{};
       for (final shortcut in appShortcuts()) {
@@ -165,7 +149,7 @@ void main() {
       // Ctrl belongs to tmux and the shell; Option alone is how a terminal
       // sends Meta, which is why ⌥⏎ reaches the engine.
       //
-      // ⌃⇥ / ⌃⇧⇥ are the single exception, and are pinned by CHORD rather than
+      // ⌃⇥ / ⌃⇧⇥ are the single exception (they walk AGENTS now), pinned by CHORD rather than
       // waved through by action: the terminal is made to let exactly that pair
       // past (see terminal_view.dart) because no shell or tmux binding uses it,
       // and it is the pair every tabbed app trains people to reach for.
@@ -241,18 +225,71 @@ void main() {
       expect(bindings.length, appShortcuts().length + kAgentDigitCount);
     });
 
-    test('the arrow keys walk the grid, with ⌘ held', () {
-      // Asked for by name: the grid reads left to right, so the keys that mean
-      // left and right should move along it. They sit BESIDE ⌘[ / ⌘], which
-      // stay — this adds a way, it does not take one.
-      chordFor(ShortcutAction a) => appShortcuts()
-          .where((s) => s.action == a)
-          .map((s) => describeShortcut(s.activator))
-          .toList();
-      expect(chordFor(ShortcutAction.focusPreviousPane), contains('⌘←'));
-      expect(chordFor(ShortcutAction.focusNextPane), contains('⌘→'));
-      expect(chordFor(ShortcutAction.focusPreviousPane), contains('⌘['));
-      expect(chordFor(ShortcutAction.focusNextPane), contains('⌘]'));
+    chordsFor(ShortcutAction a) => appShortcuts()
+        .where((s) => s.action == a)
+        .map((s) => describeShortcut(s.activator))
+        .toList();
+
+    test('every direction is spelled BOTH ways, with no mode to pick', () {
+      // The whole point of the scheme: a hand that reaches for hjkl and a hand
+      // that reaches for the arrows are not two populations to be asked about,
+      // they are two hands on the same keyboard. zellij binds both on Alt for
+      // the same reason.
+      expect(
+        chordsFor(ShortcutAction.focusPaneLeft),
+        containsAll(['⌘H', '⌘←']),
+      );
+      expect(
+        chordsFor(ShortcutAction.focusPaneBelow),
+        containsAll(['⌘J', '⌘↓']),
+      );
+      expect(
+        chordsFor(ShortcutAction.focusPaneAbove),
+        containsAll(['⌘K', '⌘↑']),
+      );
+      expect(
+        chordsFor(ShortcutAction.focusPaneRight),
+        containsAll(['⌘L', '⌘→']),
+      );
+    });
+
+    test('shift moves what the plain key walks to', () {
+      // vim's `Ctrl-w H/J/K/L`. Not a convention invented here — which is the
+      // argument for spending four more chords on it.
+      expect(
+        chordsFor(ShortcutAction.movePaneLeft),
+        containsAll(['⇧⌘H', '⇧⌘←']),
+      );
+      expect(
+        chordsFor(ShortcutAction.movePaneDown),
+        containsAll(['⇧⌘J', '⇧⌘↓']),
+      );
+      expect(chordsFor(ShortcutAction.movePaneUp), containsAll(['⇧⌘K', '⇧⌘↑']));
+      expect(
+        chordsFor(ShortcutAction.movePaneRight),
+        containsAll(['⇧⌘L', '⇧⌘→']),
+      );
+    });
+
+    test('the brackets mean exactly one thing', () {
+      // They used to carry three verbs told apart only by modifiers: ⌘[ ] walked
+      // panes, ⇧⌘[ ] walked agents, ⌥⌘[ ] moved panes. Panes went to hjkl, so
+      // the brackets keep the one job a bracket is good at.
+      final bracketed = <ShortcutAction>{};
+      for (final s in appShortcuts()) {
+        final chord = describeShortcut(s.activator);
+        if (chord.contains('[') || chord.contains(']')) bracketed.add(s.action);
+      }
+      expect(bracketed, {
+        ShortcutAction.previousAgent,
+        ShortcutAction.nextAgent,
+      });
+    });
+
+    test('the terminal verbs tmux trained people on are all here', () {
+      expect(chordsFor(ShortcutAction.zoomPane), contains('⌘⏎'));
+      expect(chordsFor(ShortcutAction.lastPane), contains('⌘;'));
+      expect(chordsFor(ShortcutAction.switchAgent), contains('⌘P'));
     });
 
     test(
@@ -266,17 +303,26 @@ void main() {
 
   group('the rows the UI prints', () {
     test('two chords for one action are one row, not two', () {
-      // ⌘], ⌘→ and ⌃⇥ all focus the next pane. Printed as three rows — which is
-      // what the list did before it merged them — the screen reads as though
-      // it forgot to collapse a duplicate.
+      // ⌘L, ⌘→ both focus the pane on the right, and ⌘], ⌃⇥ both step to the
+      // next agent. Printed as a row each — which is what the list did before it
+      // merged them — the screen reads as though it forgot to collapse a
+      // duplicate. That matters more now than it did: every direction is
+      // deliberately spelled twice, so the sheet would be half repetition.
       final rows = shortcutRows();
       final labels = rows.map((row) => row.label).toList();
       expect(labels.toSet().length, labels.length, reason: 'a label repeats');
 
-      final next = rows.firstWhere((row) => row.label == 'Focus the next pane');
+      final right = rows.firstWhere(
+        (row) => row.label == 'Focus the pane to the right',
+      );
+      expect(right.chords, [
+        ['⌘', 'L'],
+        ['⌘', '→'],
+      ]);
+
+      final next = rows.firstWhere((row) => row.label == 'Next agent');
       expect(next.chords, [
         ['⌘', ']'],
-        ['⌘', '→'],
         ['⌃', '⇥'],
       ]);
     });

@@ -36,6 +36,7 @@ class TerminalView extends StatefulWidget {
     this.backgroundOpacity = 1,
     this.focusNode,
     this.autofocus = false,
+    this.onTapDown,
     this.onTapUp,
     this.onSecondaryTapDown,
     this.onSecondaryTapUp,
@@ -87,7 +88,12 @@ class TerminalView extends StatefulWidget {
   /// node in its scope is currently focused.
   final bool autofocus;
 
-  /// Callback for when the user taps on the terminal.
+  /// Return true to handle this primary click in the host instead of sending
+  /// mouse reports to the terminal or clearing its selection. The matching
+  /// tap up still calls [onTapUp]; dragging does not complete a click.
+  final bool Function(TapDownDetails, CellOffset)? onTapDown;
+
+  /// Callback for a primary click handled locally, including [onTapDown].
   final void Function(TapUpDetails, CellOffset)? onTapUp;
 
   /// Function called when the user taps on the terminal with a secondary
@@ -372,11 +378,17 @@ class TerminalViewState extends State<TerminalView> {
   }
 
   void _onTapUp(TapUpDetails details) {
-    final offset = renderTerminal.getCellOffset(details.localPosition);
+    final offset = renderTerminal.getCellOffset(
+      renderTerminal.globalToLocal(details.globalPosition),
+    );
     widget.onTapUp?.call(details, offset);
   }
 
-  void _onTapDown(_) {
+  bool _onTapDown(TapDownDetails details) {
+    final offset = renderTerminal.getCellOffset(
+      renderTerminal.globalToLocal(details.globalPosition),
+    );
+    if (widget.onTapDown?.call(details, offset) ?? false) return true;
     if (_controller.selection != null) {
       _controller.clearSelection();
     } else {
@@ -386,6 +398,7 @@ class TerminalViewState extends State<TerminalView> {
         _focusNode.requestFocus();
       }
     }
+    return false;
   }
 
   void _onSecondaryTapDown(TapDownDetails details) {
