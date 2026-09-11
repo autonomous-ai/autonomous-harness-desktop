@@ -14,6 +14,11 @@ import 'package:window_manager/window_manager.dart';
 /// The sizes are Grid's too, so the two apps open to the same frame on a desk
 /// where both are running.
 Future<void> configureDesktopWindow() async {
+  // window_manager ships macOS, Linux and Windows only. On a phone there is no
+  // window to shape, and `ensureInitialized` reaches for a plugin that was
+  // never registered — a MissingPluginException thrown from `main`, before
+  // `runApp`, which shows as a launch that dies with a blank screen.
+  if (!Platform.isMacOS && !Platform.isLinux && !Platform.isWindows) return;
   await windowManager.ensureInitialized();
   final options = WindowOptions(
     size: const Size(1280, 800),

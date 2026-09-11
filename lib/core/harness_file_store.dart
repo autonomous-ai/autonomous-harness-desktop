@@ -40,6 +40,21 @@ class HarnessFileStore implements LocalKeyValueStore {
         if (drive != null && path != null) home = '$drive$path';
       }
     }
+    // iOS and Android hand an app a sandbox container rather than a user home:
+    // HOME is unset on a simulator and meaningless on a device, so the desktop
+    // lookup above resolves to nothing and every caller of this — the log files
+    // and the crash log among them, both of which run before the first frame —
+    // would throw before the app could report why. TMPDIR is the one container
+    // path a plain `dart:io` process can name without a plugin.
+    if ((home == null || home.isEmpty) && (Platform.isIOS || Platform.isAndroid)) {
+      // Not TMPDIR: the simulator hands a Dart isolate an environment with
+      // neither HOME nor TMPDIR in it. `systemTemp` asks the platform instead
+      // of the environment, which is the only question that has an answer here.
+      final temporary = env['TMPDIR'];
+      home = temporary != null && temporary.isNotEmpty
+          ? temporary
+          : Directory.systemTemp.path;
+    }
     if (home == null || home.isEmpty) {
       throw StateError('Could not resolve the current user home directory');
     }
