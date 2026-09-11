@@ -195,10 +195,10 @@ class HarnessFileStore implements LocalKeyValueStore {
 
   Future<void> _makePrivateFile(File file) => _chmod(file.path, '600');
 
-  /// Windows has no POSIX modes, and iOS neither needs one — the app's sandbox is already private
-  /// to it — nor can spawn `/bin/chmod` at all.
+  /// Windows has no POSIX modes, and a phone neither needs one — the app's sandbox is already
+  /// private to it — nor can spawn `/bin/chmod` at all.
   Future<void> _chmod(String path, String mode) async {
-    if (Platform.isWindows || Platform.isIOS) return;
+    if (Platform.isWindows || Platform.isIOS || Platform.isAndroid) return;
     final result = await Process.run('/bin/chmod', [mode, path]);
     if (result.exitCode != 0) {
       throw FileSystemException('Could not set mode $mode', path);

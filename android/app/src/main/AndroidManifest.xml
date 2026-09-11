@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- A viewer build reaches the backend and the relay directly: there is no harness CLI beside
+         it to do that. Declared here rather than only in the debug and profile manifests Flutter
+         generates, or a release build would have no network at all. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Harness"
         android:name="${applicationName}"
@@ -40,6 +44,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Sign-in opens the SSO page in a Custom Tab (see `viewer/sign_in_browser.dart`). From
+             Android 11 a browser this app cannot SEE is a browser it cannot launch, and the launch
+             fails silently — so the intent it resolves has to be declared here. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
         </intent>
     </queries>
 </manifest>
