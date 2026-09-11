@@ -7,7 +7,7 @@ import '../core/harness_cli_runner.dart';
 /// The CLI-only installer contract for callers that already own host setup.
 /// Desktop verifies system tools, the active Linux clipboard helper and tmux
 /// before reaching this command, then performs its own complete verification
-/// again after Harness and Grid land.
+/// again after Harness lands.
 const String kHarnessDesktopInstallCommand =
     'curl -fsSL https://cdn.autonomous.ai/harness/cli/install.sh | '
     '/bin/sh -s -- --desktop';
@@ -22,8 +22,7 @@ const String _linuxClockRepairCommand =
 enum EnvironmentStep {
   clipboard,
   harness,
-  tmux,
-  grid;
+  tmux;
 
   /// Harness Desktop is only ready when every command in this list works.
   bool get isRequired => true;
@@ -545,16 +544,6 @@ class EnvironmentProvisioner {
             : '✗ managed Node >= 20 · harness version',
       );
 
-      final gridReady = await _hasGrid();
-      emit(
-        step: EnvironmentStep.grid,
-        status: gridReady
-            ? EnvironmentStepStatus.ready
-            : EnvironmentStepStatus.failed,
-        message: gridReady ? 'Grid CLI is ready.' : 'Grid CLI is required.',
-        output: gridReady ? '✓ grid --version' : '✗ grid --version',
-      );
-
       if (state.isReady) {
         emit(
           message: 'All required tools passed verification.',
@@ -597,7 +586,7 @@ class EnvironmentProvisioner {
       }
 
       // Strict dependency order: one host-package transaction (base tools,
-      // tmux and the active clipboard helper) -> managed Node/Harness -> Grid.
+      // tmux and the active clipboard helper) -> managed Node/Harness.
       if (_isLinux && (!systemReady || !clipboardReady || !tmuxBinaryReady)) {
         var packages = <String>{
           ...linuxMissingBasePackages,
@@ -835,20 +824,6 @@ class EnvironmentProvisioner {
         );
       }
 
-      if (!gridReady) {
-        emit(
-          step: EnvironmentStep.grid,
-          status: EnvironmentStepStatus.running,
-          message: 'Installing Grid CLI…',
-        );
-        await _ensureGrid((line) => emit(output: line));
-        emit(
-          step: EnvironmentStep.grid,
-          status: EnvironmentStepStatus.ready,
-          output: '✓ Grid CLI ready',
-        );
-      }
-
       emit(
         message: 'Verifying every required command…',
         phase: EnvironmentSetupPhase.verifying,
@@ -885,7 +860,6 @@ class EnvironmentProvisioner {
       final finalChecks = <EnvironmentStep, Future<bool> Function()>{
         EnvironmentStep.tmux: _isTmuxEnvironmentReady,
         EnvironmentStep.harness: _hasHarness,
-        EnvironmentStep.grid: _hasGrid,
       };
       for (final entry in finalChecks.entries) {
         if (!await entry.value()) {
@@ -978,40 +952,6 @@ class EnvironmentProvisioner {
       output:
           'tmux does not exist on Windows — terminals come from Herdr instead.',
     );
-
-    emit(
-      step: EnvironmentStep.grid,
-      status: EnvironmentStepStatus.running,
-      message: 'Checking the Grid CLI…',
-    );
-    final grid = await _hasGridOnWindows();
-    emit(
-      step: EnvironmentStep.grid,
-      status: grid ? EnvironmentStepStatus.ready : EnvironmentStepStatus.failed,
-      message: grid ? 'Grid CLI ready.' : 'Grid CLI is required.',
-      output: grid ? 'Grid CLI ready' : 'Grid CLI unavailable.',
-    );
-  }
-
-  /// [_hasGrid]'s probe is `command -v` inside a login shell, neither of which Windows has. This
-  /// names the path the installer writes first, then falls back to PATH.
-  Future<bool> _hasGridOnWindows() async {
-    final home = userHome();
-    final candidates = <String>[
-      if (home != null)
-        '$home${Platform.pathSeparator}.local${Platform.pathSeparator}bin'
-            '${Platform.pathSeparator}grid.exe',
-      'grid',
-    ];
-    for (final candidate in candidates) {
-      try {
-        final probe = await _run(candidate, ['--version']);
-        if (probe.exitCode == 0) return true;
-      } on ProcessException {
-        continue;
-      }
-    }
-    return false;
   }
 
   Future<EnvironmentFailure?> _systemPreflightFailure() async {
@@ -1321,44 +1261,6 @@ fi''';
     );
   }
 
-  /// Installs the required Grid CLI when this computer has not got it.
-  ///
-  /// Install-if-missing, never upgrade-if-old. A developer running a build of
-  /// `grid` from source must not have it replaced by a release on every launch
-  /// — the same mistake the Harness CLI's self-update makes, and the reason
-  /// [_ensureHarness] also stops at the first working answer.
-  Future<void> _ensureGrid(void Function(String line) onOutput) async {
-    if (await _hasGrid()) return;
-    final install = await _shellStreaming(
-      // The vendor installer: a `grid` binary on Linux, the universal wheel
-      // via uv on macOS (which it bootstraps itself). It is `bash`, not `sh`.
-      'set -e; curl -fsSL https://grid.autonomous.ai/install.sh | bash',
-      onOutput: onOutput,
-      // A first install pulls uv, a Python and the wheel's dependencies. The
-      // ceiling is not a budget for that, it is a guard: an installer that
-      // hangs on a captive-portal proxy must not hold the whole boot open.
-      timeout: const Duration(minutes: 5),
-    );
-    if (install.exitCode != 0) {
-      throw StateError(
-        'Grid installer exited ${install.exitCode}: ${_resultText(install)}',
-      );
-    }
-    if (!await _hasGrid()) {
-      throw StateError(
-        'Grid CLI did not pass `grid --version` after installation.',
-      );
-    }
-  }
-
-  /// Must agree with `GridCli.locate`, which reads `~/.local/bin/grid` first —
-  /// [_shell] puts exactly that directory in front of a login shell's PATH, so
-  /// "the provisioner installed it" and "the app can find it" cannot disagree.
-  Future<bool> _hasGrid() async {
-    final result = await _shell('command -v grid >/dev/null && grid --version');
-    return result.exitCode == 0;
-  }
-
   Future<bool> _hasTmux() async {
     final result = await _shell('command -v tmux >/dev/null && tmux -V');
     return result.exitCode == 0;
@@ -1523,9 +1425,9 @@ fi
     final run = _run(_isMacOS ? '/bin/zsh' : '/bin/bash', [
       '-l',
       '-c',
-      // The Homebrew prefixes are named rather than trusted to be on PATH, for
-      // the same reason `GridCli.locate` names them: `-l` is a LOGIN shell but
-      // not an interactive one, so it reads `~/.zprofile` and never `~/.zshrc`
+      // The Homebrew prefixes are named rather than trusted to be on PATH:
+      // `-l` is a LOGIN shell but not an interactive one, so it reads
+      // `~/.zprofile` and never `~/.zshrc`
       // — which is where `brew shellenv` sits on plenty of machines. A Finder
       // launch then starts from launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`
       // and this probe reports tmux missing on a computer that has it, then
@@ -1616,7 +1518,6 @@ fi
           : 'sudo apt-get install -y tmux && tmux -V',
     EnvironmentStep.harness =>
       '$kHarnessDesktopInstallCommand && harness version',
-    EnvironmentStep.grid => 'curl -fsSL https://grid.autonomous.ai/install.sh | bash && grid --version',
   };
 
   String _resultText(ProcessResult result) {

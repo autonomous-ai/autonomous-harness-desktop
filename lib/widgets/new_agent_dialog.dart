@@ -7,12 +7,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../analytics/analytics.dart';
 import '../core/engine_availability.dart';
 import '../core/codex_profiles.dart';
-// Two strings, and nothing else from the grid layer: this screen names the
-// engine's own login with the SAME words the sidebar's provider pill and the
-// agent's model menu use for it. It no longer reads the store those constants
-// live beside — see `_submit`.
-import '../grid/grid_selection_store.dart'
-    show kNoGridTargetDetail, kNoGridTargetLabel;
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_checkbox.dart';
 import '../shared/widgets/app_dialog.dart';
@@ -45,10 +39,6 @@ Future<void> showNewAgentDialog(
   AppNotifier notifier,
   String machineId, {
   required String source,
-  // ⚠️ There is no `gridApiClient` seam here any more, and there is nothing for
-  // one to fake: this dialog makes no network call of its own. It used to mint
-  // a relay key on every Create, which is the call a test had to stub — see
-  // [_NewAgentDialogState._submit] for why that call is gone.
 }) {
   // Reported here rather than at each call site: the doors are four and
   // growing, and one that forgets to track is a hole in the funnel that only
@@ -135,14 +125,6 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   /// vanish — or by reading `command not found` out of a pane — is a worse way
   /// to learn it. One note per row, so the row stays a name with a caveat
   /// rather than a sentence.
-  ///
-  /// ⚠️ **Nothing here is about grids any more.** This used to print
-  /// `grid not supported` beside an engine the CLI would refuse to point at the
-  /// chosen grid. A new agent now always launches on the engine's own login
-  /// (see [_submit]), so every engine's grid-capability decides nothing at this
-  /// screen and the caveat would be a warning about a road this dialog no
-  /// longer takes. Moving an agent onto a grid is the agent view's own header
-  /// menu, and `AgentModelMenu` is where that refusal is stated instead.
   String? _engineNote(String engine) {
     return _engineInstallNote(engine) ??
         (kEngineBypassPermissionFlag.containsKey(engine)
@@ -200,9 +182,8 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
   bool get _machineIsThisComputer =>
       widget.notifier.stateOf(widget.machineId)?.isLocalMachine ?? false;
 
-  /// Codex is always on its own login here (see [_submit]), so the profile
-  /// field is always live — it used to stand down whenever a grid was chosen,
-  /// and there is no such state left to stand down for.
+  /// Create waits while the Codex profile list is still loading on a machine
+  /// that can launch into one, so a click cannot land before the choice does.
   bool get _waitingForCodexProfile =>
       _engine == 'codex' &&
       _availability('codex')?.supportsCodexHome == true &&
@@ -267,31 +248,11 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       _submitting = true;
       _error = null;
     });
-    // ⚠️ **A new agent always starts on the engine's own login**, whatever
-    // Settings ▸ Providers has as its default. `grid: null` is the frame this
-    // app sent before grids existed, and it is the frame every create sends
-    // now.
-    //
-    // This used to read `gridSelectionStore` and mint a relay key for whatever
-    // it found. One value was answering two questions — "which provider is my
-    // default" and "what should a new agent start on" — so the only way to
-    // launch an agent on the subscription already signed in on this computer
-    // was to change the default for the whole app. The two questions are now
-    // separate by being answered in separate places: this screen always says
-    // the engine's own login, and moving an agent onto a grid is a deliberate
-    // act in the agent view's own header menu (see `AgentModelMenu`), where the
-    // grid AND the model are picked together for the one agent they apply to.
-    //
-    // What that buys, besides the obvious: no credentials round trip before the
-    // create, so no failure mode between the click and the launch — and every
-    // engine can be launched here, including the ones the CLI refuses to point
-    // at a grid at all (Cursor, Amp, Devin).
     final error = await widget.notifier.createAgent(
       widget.machineId,
       engine: engine,
       folder: folder,
       bypassPermission: bypassPermission,
-      grid: null,
       // Keep the explicit choice even if machine discovery changes mid-submit.
       // The notifier must reject a now-remote target, never use its default login.
       codexHome: engine == 'codex' ? profile?.path : null,
@@ -304,16 +265,7 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
       });
       return;
     }
-    // `onGrid: false` is now a constant here rather than a question, and it is
-    // still sent: the event's readers count grid launches against all launches,
-    // and a create that stopped reporting itself would read as a drop in agents
-    // rather than a move off the grid. The grid launches it is compared with
-    // arrive from `AgentModelMenu` instead.
-    analytics.agentCreated(
-      engine: engine,
-      onGrid: false,
-      bypassPermission: bypassPermission,
-    );
+    analytics.agentCreated(engine: engine, bypassPermission: bypassPermission);
     Navigator.of(context).pop();
   }
 
@@ -329,12 +281,6 @@ class _NewAgentDialogState extends State<_NewAgentDialog> {
     );
   }
 
-  /// ⚠️ **This no longer watches `gridSelectionStore`.** It used to sit inside a
-  /// `ValueListenableBuilder` on it, because every launch went wherever that
-  /// store pointed. A create is now always the engine's own login (see
-  /// [_submit]), so there is nothing on this screen for that store to change —
-  /// and a listener that changes nothing is a listener the next reader has to
-  /// prove is dead.
   Widget _buildDialog(BuildContext context) {
     final bypassFlag = kEngineBypassPermissionFlag[_engine];
     final canCreate =
@@ -623,8 +569,8 @@ TextStyle _mono({required Color color}) => TextStyle(
   color: color,
 );
 
-/// Wide enough for the longest key the summary states ("Inference"), so the
-/// three values line up on one left edge.
+/// Wide enough for the longest key the summary states ("Machine"), so the
+/// values line up on one left edge.
 const double _factKeyWidth = 62;
 
 // The dialog's spacing scale. Four steps, named, rather than the run of
@@ -876,12 +822,6 @@ class _BypassCheck extends StatelessWidget {
 /// outside this window: a bypass flag turns off an engine's own guardrails on a
 /// machine that may not be this one.
 ///
-/// Its `Inference` line is now a CONSTANT rather than a readout — every create
-/// is the engine's own login (see `_submit`) — and it is still printed, because
-/// "on whose account" is the question it was added to answer and a reader who
-/// has a grid as their default provider is exactly the one who needs telling
-/// that this launch is not using it.
-///
 /// Read-only on purpose, and shaped so: it takes the recessed inset fill, never
 /// a field's, so nothing here invites a click.
 class _NewAgentSummary extends StatelessWidget {
@@ -1055,21 +995,11 @@ class _NewAgentSummary extends StatelessWidget {
             // a bug.
             note: machineIsThisComputer ? 'this computer' : 'remote',
           ),
-          _fact(
-            context,
-            'Inference',
-            // [kNoGridTargetLabel], not a sentence of this screen's own: it is
-            // the same state the sidebar's provider pill and the agent's model
-            // menu call `This computer`, and a third wording for it is how a
-            // reader stops recognising it as one thing. A chosen Codex profile
-            // is more specific and wins — it names WHICH login on this
-            // computer.
-            codexProfile?.label ?? kNoGridTargetLabel,
-            // Same trade as the label: the profile's path when there is one,
-            // otherwise the line that says which kinds of credential
-            // `This computer` can mean.
-            note: codexProfile?.path ?? kNoGridTargetDetail,
-          ),
+          // Which login a Codex agent starts on, when one other than the
+          // machine's default was chosen — restated here with the rest of what
+          // this launch is.
+          if (codexProfile case final profile?)
+            _fact(context, 'Profile', profile.label, note: profile.path),
           if (missingWithoutRecipe) ...[
             const SizedBox(height: _gapBlock),
             Container(

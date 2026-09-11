@@ -87,8 +87,7 @@ void main() {
         final grounds = {
           'page': page,
           'card': _over(page, AppPalette.cardBg),
-          'accent hero': _over(page, AppSurface.accentWash),
-          'slate hero': _over(page, AppSurface.neutralWash),
+          'accent wash': _over(page, AppSurface.accentWash),
         };
         grounds.forEach((name, ground) {
           expect(

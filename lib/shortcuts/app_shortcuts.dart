@@ -1,7 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import '../grid/grid_surface.dart';
 import '../logging/debug_surface.dart';
 
 /// Every keyboard shortcut in the app, declared once.
@@ -69,7 +68,6 @@ enum ShortcutAction {
 
   closePane,
   newAgent,
-  changeModel,
   routeTask,
   reload,
   showLayout,
@@ -402,22 +400,6 @@ const List<AppShortcut> kAppShortcuts = [
   ),
 ];
 
-/// fetched them from the control plane to do it — in a build whose own answer
-/// is that Grid is not finished. A key that opens a feature the build does not
-/// have is worse than a key that was never taken.
-const AppShortcut kChangeModelShortcut = AppShortcut(
-  action: ShortcutAction.changeModel,
-  // ⇧, because plain ⌘M is Minimize — AppKit owns it in `MainMenu.xib` and
-  // matches it in `performKeyEquivalent:`, which runs BEFORE the keystroke
-  // reaches Flutter at all (the same trap the note at the top of this file
-  // tells about ⌘C/⌘V/⌘A). The M is worth keeping through the shift: it is
-  // the letter of the thing being changed, and every other action here is
-  // named by its own initial.
-  activator: SingleActivator(LogicalKeyboardKey.keyM, meta: true, shift: true),
-  label: "Change the focused agent's model",
-  group: ShortcutGroup.actions,
-);
-
 /// Open Settings ▸ Debug — the app's own log, as this session still holds it.
 ///
 /// Kept out of [kAppShortcuts] because it is not always there: a release build
@@ -440,7 +422,6 @@ const AppShortcut kDebugShortcut = AppShortcut(
 /// bind.
 List<AppShortcut> appShortcuts() => [
   ...kAppShortcuts,
-  if (kGridSurfaceEnabled) kChangeModelShortcut,
   if (kDebugSurfaceEnabled) kDebugShortcut,
 ];
 

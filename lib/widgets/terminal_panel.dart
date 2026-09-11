@@ -12,7 +12,6 @@ import '../clipboard/native_clipboard.dart';
 import '../state/app_state.dart';
 
 import 'agent_drag.dart';
-import 'agent_model_menu.dart';
 import 'rename_agent_dialog.dart';
 import 'terminal_composer.dart';
 import '../terminal/terminal_binary.dart';
@@ -26,10 +25,7 @@ import '../shared/theme/app_theme.dart' as grid;
 import '../theme/app_theme.dart';
 import 'engine_identity.dart';
 
-/// The pane header's own horizontal inset. Named because
-/// `test/terminal_panel_header_test.dart` measures the model control against
-/// the right edge and has to subtract exactly this, not a number that once
-/// matched it.
+/// The pane header's own horizontal inset.
 const double _stripPadding = 14;
 
 class TerminalPanel extends StatefulWidget {
@@ -803,120 +799,80 @@ class _TerminalHeader extends StatelessWidget {
       height: 46,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: _stripPadding),
-        // Outside the Row on purpose: a non-flex Row child is laid out with an
-        // INFINITE main-axis constraint, so a LayoutBuilder in the menu's slot
-        // would be handed infinity and could cap nothing. Here it sees the
-        // strip's real width.
-        child: LayoutBuilder(
-          builder: (context, constraints) => Row(
-            children: [
-              EngineMark(engine: session.engineId, size: 17),
-              const SizedBox(width: 8),
-              Expanded(
-                // Double click the NAME to rename — the same dialog the rail's
-                // row opens, so one name has one way to change wherever it is
-                // shown. Scoped to the text rather than the whole strip: the
-                // strip is the drag handle, and a double click that both renamed
-                // and looked like the start of a drag would be two answers to one
-                // gesture.
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onDoubleTap: () => unawaited(
-                    showAgentRenameDialog(
-                      context,
-                      notifier,
-                      session.machineId,
-                      session.agentId,
-                      session.agentName,
-                    ),
+        child: Row(
+          children: [
+            EngineMark(engine: session.engineId, size: 17),
+            const SizedBox(width: 8),
+            Expanded(
+              // Double click the NAME to rename — the same dialog the rail's
+              // row opens, so one name has one way to change wherever it is
+              // shown. Scoped to the text rather than the whole strip: the
+              // strip is the drag handle, and a double click that both renamed
+              // and looked like the start of a drag would be two answers to one
+              // gesture.
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onDoubleTap: () => unawaited(
+                  showAgentRenameDialog(
+                    context,
+                    notifier,
+                    session.machineId,
+                    session.agentId,
+                    session.agentName,
                   ),
-                  child: Tooltip(
-                    message: profile == null
-                        ? 'Double-click to rename'
-                        : 'Codex profile: $profile\nDouble-click to rename',
-                    waitDuration: const Duration(milliseconds: 700),
-                    child: Text(
-                      // The profile path's basename used to trail the name here, but for the
-                      // default profile that basename is literally the hidden `.codex` folder —
-                      // meaningless clutter on every ordinary codex agent. The tooltip above still
-                      // carries the full path for whoever actually needs it.
-                      session.agentName,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.text,
-                        fontFamily: AppFonts.sans,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
+                ),
+                child: Tooltip(
+                  message: profile == null
+                      ? 'Double-click to rename'
+                      : 'Codex profile: $profile\nDouble-click to rename',
+                  waitDuration: const Duration(milliseconds: 700),
+                  child: Text(
+                    // The profile path's basename used to trail the name here, but for the
+                    // default profile that basename is literally the hidden `.codex` folder —
+                    // meaningless clutter on every ordinary codex agent. The tooltip above still
+                    // carries the full path for whoever actually needs it.
+                    session.agentName,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontFamily: AppFonts.sans,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
-
-              // Bounded, and NOT flexible. Both matter, for opposite reasons.
-              //
-              // Bounded because the live grid serves model ids like
-              // `grid/claude-3-5-sonnet`, four panes can sit side by side, and the label
-              // (`agent_model_menu.dart`) ellipsizes only once something bounds its width —
-              // unbounded it is a Row child with an infinite constraint that overflows on a
-              // long id in a narrow pane.
-              //
-              // Not flexible because a `Flexible` here was competing with the name's
-              // `Expanded` for the free space, one flex share each. The menu is loose and
-              // wanted far less than its half, and RenderFlex does not hand an unused share
-              // back — with `mainAxisAlignment.start` it lands as dead space at the END of
-              // the row, which put the pill and the status dot 350px shy of the right edge
-              // in a 900px pane. A non-flex child is laid out FIRST at its own width, so
-              // every remaining pixel goes to the name and these two stay flush right,
-              // which is the whole point of their being on this side.
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  // Half the strip: generous enough that a real model id never
-                  // ellipsizes in a pane anyone works in, small enough that the
-                  // name keeps a readable share in the narrowest four-pane tile.
-                  maxWidth: constraints.maxWidth / 2,
-                ),
-                child: AgentModelMenu(
-                  notifier: notifier,
-                  machineId: session.machineId,
-                  agentId: session.agentId,
-                  // Falls back to a phrase, not '': AgentModelMenu builds a tooltip sentence around
-                  // this ("$engine cannot use a grid"), and an empty string there reads with a leading
-                  // space.
-                  engine: session.engineId ?? 'this engine',
+            ),
+            const SizedBox(width: 6),
+            if (session.status == TerminalSessionStatus.controlling)
+              Padding(padding: const EdgeInsets.all(4), child: statusMark)
+            else
+              Tooltip(
+                message: statusLabel,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: statusMark,
                 ),
               ),
-              const SizedBox(width: 6),
-              if (session.status == TerminalSessionStatus.controlling)
-                Padding(padding: const EdgeInsets.all(4), child: statusMark)
-              else
-                Tooltip(
-                  message: statusLabel,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: statusMark,
-                  ),
-                ),
-              // Which of the three paths carries this pane's bytes. Absent for a local machine's own
-              // terminal, which has no such distinction and so gets no badge.
-              //
-              // The wire word and the word a person reads differ for the middle state, deliberately:
-              // the CLI sends 'turn' (it is a TURN allocation) but both middle and last are relays to
-              // a reader, so they read as "relay" and "ws". 'relay' on the wire kept its original
-              // meaning — the backend WebSocket — so an older CLI is never mislabelled.
-              if (session.linkMode case final mode?)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: _LinkModeMark(mode: mode),
-                ),
-              // Before the close button: pinning is the rarer act, and a control
-              // that appears to the LEFT of the one people aim for by muscle
-              // memory cannot shift it under their pointer.
-              if (onTogglePin case final toggle?)
-                PanePinButton(pinned: pinned, onPressed: toggle),
-              if (onClose != null) PaneCloseButton(onPressed: onClose!),
-            ],
-          ),
+            // Which of the three paths carries this pane's bytes. Absent for a local machine's own
+            // terminal, which has no such distinction and so gets no badge.
+            //
+            // The wire word and the word a person reads differ for the middle state, deliberately:
+            // the CLI sends 'turn' (it is a TURN allocation) but both middle and last are relays to
+            // a reader, so they read as "relay" and "ws". 'relay' on the wire kept its original
+            // meaning — the backend WebSocket — so an older CLI is never mislabelled.
+            if (session.linkMode case final mode?)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: _LinkModeMark(mode: mode),
+              ),
+            // Before the close button: pinning is the rarer act, and a control
+            // that appears to the LEFT of the one people aim for by muscle
+            // memory cannot shift it under their pointer.
+            if (onTogglePin case final toggle?)
+              PanePinButton(pinned: pinned, onPressed: toggle),
+            if (onClose != null) PaneCloseButton(onPressed: onClose!),
+          ],
         ),
       ),
     );
@@ -1024,8 +980,7 @@ class _OverlayBadge extends StatelessWidget {
 /// Shown while an image/file drag-drop upload is in flight — see [TerminalSession.uploadProgress].
 /// Same container language as [_OverlayBadge] (panelBg@0.93, borderStrong border, radius 4,
 /// textSoft label) with a thin [LinearProgressIndicator] in place of a spinner, plus a Cancel
-/// affordance mirroring `lib/share/widgets/model_manager_dialog.dart`'s `PullBanner` — the closest
-/// existing analog in this app for "a known-size transfer with a percentage".
+/// affordance.
 class _UploadProgressBadge extends StatelessWidget {
   final UploadProgress progress;
   final VoidCallback onCancel;

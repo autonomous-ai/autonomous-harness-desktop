@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// figure, and the key that says where that figure sits.
 ///
 /// Both, because the link alone cannot answer whether the panel it places still
-/// fits inside the window — see [GridStatPanel.anchorKey].
+/// fits inside the window — see `RailPanel`.
 typedef RailFigureAnchor = ({LayerLink link, GlobalKey key});
 
 /// A fresh anchor. One per figure: a [LayerLink] can only be attached to a
@@ -18,11 +18,8 @@ RailFigureAnchor newRailFigureAnchor() => (link: LayerLink(), key: GlobalKey());
 /// the pointer crossing it belongs to nothing, so an open panel would close on
 /// the way past and reopen on landing.
 ///
-/// Generic over what a figure opens, so the grid readout and the usage readout
-/// can name their own panels while sharing one hover surface. The two never
-/// appear together — the rail shows usage exactly when there is no grid to
-/// describe — but they must behave identically when they do appear, and the
-/// only way to guarantee that is for there to be one of this.
+/// Generic over what a figure opens: the figure hands back whatever its panel
+/// is looked up by.
 class RailHoverTarget<T> extends StatelessWidget {
   const RailHoverTarget({
     super.key,

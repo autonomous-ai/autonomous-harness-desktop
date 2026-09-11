@@ -104,7 +104,7 @@ void main() {
     );
     _record(
       log,
-      'grid_picked',
+      'agent_created',
       status: AnalyticsEventStatus.dropped,
       note: 'the queue was full',
     );
@@ -119,7 +119,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final tiles = tester.widgetList<TrackingTile>(find.byType(TrackingTile));
-    expect(tiles.map((tile) => tile.entry.name), ['grid_picked', 'signed_in']);
+    expect(tiles.map((tile) => tile.entry.name), ['agent_created', 'signed_in']);
   });
 
   testWidgets('Waiting keeps only what has not settled', (tester) async {
@@ -193,11 +193,11 @@ void main() {
     final log = AnalyticsLogStream();
     _record(
       log,
-      'grid_picked',
-      params: const {'source': 'pill'},
+      'agent_created',
+      params: const {'engine': 'claude'},
       status: AnalyticsEventStatus.sent,
       payload: const {
-        'event_name': 'grid_picked',
+        'event_name': 'agent_created',
         'data': {'session_id': 'visit-1'},
       },
     );

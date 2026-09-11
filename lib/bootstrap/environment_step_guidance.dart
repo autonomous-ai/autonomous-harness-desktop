@@ -32,9 +32,6 @@ String? environmentStepGuidanceCommand(
         return 'brew install tmux';
       }
       return null;
-    case EnvironmentStep.grid:
-      if (status != EnvironmentStepStatus.failed) return null;
-      return 'curl -fsSL https://grid.autonomous.ai/install.sh | bash && grid --version';
   }
 }
 
@@ -64,7 +61,5 @@ String environmentStepGuidanceText(
         return '$opened $manual';
       }
       return 'Homebrew is installed but the tmux install itself failed. Run it again yourself:';
-    case EnvironmentStep.grid:
-      return 'Grid CLI is required by Desktop. Run the installer, verify it, then click Recheck.';
   }
 }

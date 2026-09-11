@@ -125,22 +125,7 @@ class AppMenuItem extends StatefulWidget {
     this.leading,
     this.trailing,
     this.metrics = AppMenuRowMetrics.compact,
-    this.highlighted = false,
-    this.accentSelection = false,
   });
-
-  /// Mark the ticked row in the ACCENT rather than in ink.
-  ///
-  /// Off by default, and opt-in per call site rather than inferred from
-  /// [metrics]: `roomy` is also what [AppSelectField] passes, and every select
-  /// field in Settings would have changed colour along with the one panel that
-  /// asked for it.
-  ///
-  /// For a list that IS the control — the model picker, where the tick is the
-  /// answer to the question the panel asks and the eye should find it by colour
-  /// before it reads a word. A context menu's tick stays ink: there it is a
-  /// state on a command, not the point of the list.
-  final bool accentSelection;
 
   /// The leading glyph. Null for a row in a list that PICKS one of several — the
   /// slot is still reserved, so labels line up whether a row is ticked or not.
@@ -194,15 +179,6 @@ class AppMenuItem extends StatefulWidget {
 
   final VoidCallback onPressed;
 
-  /// Drawn as though the pointer were on it, for a list walked by the KEYBOARD
-  /// — the picker in `widgets/model_picker_dialog.dart`, where ↑/↓ move a
-  /// highlight the mouse never touches.
-  ///
-  /// Deliberately the hover treatment and not [selected]'s: the two mean
-  /// different things and a list shows both at once — the tick says where the
-  /// agent IS, the highlight says what Enter would do next.
-  final bool highlighted;
-
   /// Tints the row red and gives it a red hover wash — for the row that
   /// destroys something.
   final bool danger;
@@ -220,15 +196,11 @@ class _AppMenuItemState extends State<AppMenuItem> {
     AppTheme.watch(context);
     final error = Theme.of(context).colorScheme.error;
     // A danger row is already red at rest, so it deepens rather than climbs.
-    final lit = _hovered || widget.highlighted;
-    final picker = widget.accentSelection;
     final tint = widget.danger
         ? error
-        : (widget.selected && picker
-              ? AppPalette.accentOnSurface
-              : (lit || widget.selected
-                    ? AppPalette.textPrimary
-                    : AppPalette.textSecondary));
+        : (_hovered || widget.selected
+              ? AppPalette.textPrimary
+              : AppPalette.textSecondary);
     // The tick takes the leading slot when this row is the choice; otherwise the
     // row's own glyph does, and a row with neither keeps the slot EMPTY.
     //
@@ -253,21 +225,9 @@ class _AppMenuItemState extends State<AppMenuItem> {
           splashFactory: NoSplash.splashFactory,
           child: Ink(
             decoration: BoxDecoration(
-              // The keyboard's highlight wears the same fill the pointer's does,
-              // so a row reached either way reads the same. `selected` outranks
-              // it: an accent wash says "this is where you are", which stays
-              // true under a highlight that is only passing through.
-              //
-              // A picker's rows sit on a DIALOG, which is lighter than the page
-              // the rail's wash was tuned against — see [AppSurface
-              // .accentWashPanel] for why the same alpha reads as a slab there.
               color: widget.selected
-                  ? (picker
-                        ? AppSurface.accentWashPanel
-                        : AppSurface.accentWash)
-                  : (widget.highlighted
-                        ? AppSurface.hoverFill
-                        : Colors.transparent),
+                  ? AppSurface.accentWash
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
             ),
             padding: widget.metrics.padding,
@@ -352,96 +312,6 @@ class _AppMenuItemState extends State<AppMenuItem> {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A row in a menu that is there to be READ, not picked.
-///
-/// The standing "changing the model restarts the agent" note over a picker's
-/// list, and the placeholder that stands in for the choices while they load or
-/// after they failed to.
-///
-/// Laid out on the column an [AppMenuItem]'s label starts on — its icon slot,
-/// empty, plus the gap after it — so it reads as part of the same list rather
-/// than as an aside bolted onto it. That alignment is the whole reason this is
-/// a widget and not a `Text` at the call site: two menus eyeballing the same
-/// gutter is how the gutter stops matching.
-class AppMenuNote extends StatelessWidget {
-  const AppMenuNote(
-    this.message, {
-    super.key,
-    this.metrics = AppMenuRowMetrics.compact,
-    this.panelWidth,
-  });
-
-  final String message;
-
-  /// The size of the rows this note sits AMONG — a note a size apart from its
-  /// list is the drift [AppMenuRowMetrics] exists to end.
-  final AppMenuRowMetrics metrics;
-
-  /// The `maxWidth` its panel was given, when the note is a SENTENCE rather than
-  /// a label.
-  ///
-  /// ⚠️ Without this a long note does not wrap — it is CLIPPED, and the panel
-  /// does not look narrow, it looks broken mid-word. `MenuAnchor` lays its
-  /// children out inside a vertical `SingleChildScrollView`, which hands them
-  /// **unbounded width**; the row then takes its intrinsic width (a 70-character
-  /// note measured 805px against a 304px panel), and the panel's own
-  /// `maximumSize` clips what overflows. [maxLines] never comes into it, and
-  /// neither does the [Expanded] below: there is no bounded width to expand
-  /// into.
-  ///
-  /// So the width has to arrive from the call site, which is the only place that
-  /// knows what it passed to [AppMenu.style]. A note that is one short label —
-  /// a placeholder standing in for a list — can leave this null and size
-  /// itself.
-  final double? panelWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    AppTheme.watch(context);
-    // The text's own share of the panel: what is left after the 6px gutter on
-    // each side, the row's own padding, and the empty icon slot the label
-    // column starts after.
-    final textWidth = panelWidth == null
-        ? null
-        : panelWidth! - 12 - metrics.padding.horizontal - metrics.iconSize - 9;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      child: Padding(
-        padding: metrics.padding,
-        child: Row(
-          children: [
-            SizedBox(width: metrics.iconSize),
-            const SizedBox(width: 9),
-            ConstrainedBox(
-              // Bounded so the sentence WRAPS. Unbounded, it runs off the panel
-              // and is cut — see [panelWidth].
-              constraints: BoxConstraints(
-                maxWidth: textWidth ?? double.infinity,
-              ),
-              child: Text(
-                message,
-                // A note is prose, not a label: let it take the lines it needs
-                // rather than ellipsing a sentence the reader has to finish.
-                maxLines: panelWidth == null ? 2 : null,
-                overflow: panelWidth == null
-                    ? TextOverflow.ellipsis
-                    : TextOverflow.clip,
-                style: TextStyle(
-                  color: AppPalette.textFaint,
-                  fontFamily: AppFont.sans,
-                  fontFamilyFallback: AppFont.sansFallback,
-                  fontSize: metrics.noteSize,
-                  height: 1.3,
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

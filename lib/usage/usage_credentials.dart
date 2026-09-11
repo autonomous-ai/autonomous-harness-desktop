@@ -1,9 +1,8 @@
 /// Where the agent CLIs keep the tokens their usage endpoints want.
 ///
 /// This app reads them; it never writes them and never refreshes them. One
-/// sign-in per machine, owned by the CLI that made it — the same rule Grid
-/// follows with `~/.grid/credentials.toml`. A second copy here would be a
-/// second thing to expire and to disagree about.
+/// sign-in per machine, owned by the CLI that made it. A second copy here
+/// would be a second thing to expire and to disagree about.
 ///
 /// **Nothing in this file may be logged.** Every value it returns is a bearer
 /// token; the CLI transcript exists precisely so secrets stay out of argv, and

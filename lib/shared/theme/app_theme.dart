@@ -446,61 +446,6 @@ abstract final class AppSurface {
   static Color get accentWashHover =>
       AppTheme.pick(const Color(0x1F2F5BEA), const Color(0x332F5BEA));
 
-  /// [accentWash], softened for a row inside a PANEL rather than on the page.
-  ///
-  /// ⚠️ The hue moves in dark, and that is the point. [accentWash] lays
-  /// `#2F5BEA` — the fill colour, tuned to carry white text — over the app's
-  /// own charcoal. A dialog is lighter than the page it floats over, so on
-  /// panel grey that same wash lands as a saturated indigo block: the row stops
-  /// reading as "the one you are on" and starts reading as a button someone
-  /// dropped into the list.
-  ///
-  /// So it takes [AppPalette.accentOnSurface]'s lighter `#6E8BFF` — the value
-  /// this app already reserves for the accent AS A MARK rather than as a fill —
-  /// and carries less of it. The row still separates from its neighbours by
-  /// about what [accentWash] gives on the page; it just does so as a tint
-  /// instead of a slab.
-  ///
-  /// Light is unchanged: `#2F5BEA` at 8% on a white dialog was never the
-  /// problem, and lightening it there would leave nothing to see.
-  static Color get accentWashPanel =>
-      AppTheme.pick(const Color(0x142F5BEA), const Color(0x1A6E8BFF));
-
-  /// A cool slate wash for a block that is deliberately NOT the accent one.
-  ///
-  /// Settings ▸ Grid's headline has two live states — a grid is chosen, or the
-  /// agents run on each engine's own account — and both are legitimate
-  /// settings. The second one wore a plain grey surface and read as disabled or
-  /// still-loading, because grey in this app means the absence of a state, not
-  /// a state of its own.
-  ///
-  /// So: a hue, but not the accent's. Slate sits far enough off `#2F5BEA` that
-  /// the two headlines never read as the same thing at a glance, and the
-  /// deliberately narrow choice of colour matters — [AppPalette.teal] already
-  /// marks a grid you own, [AppPalette.online] marks one that is up, and
-  /// [AppPalette.warn] is amber, so borrowing any of them would have this block
-  /// asserting something it does not mean.
-  ///
-  /// An overlay rather than an opaque fill, for the reason [wellFill] gives: it
-  /// rides whatever it is drawn on instead of being picked against one ground
-  /// and vanishing on another.
-  ///
-  /// ⚠️ The alphas are MEASURED against the two states sitting side by side,
-  /// not picked off a scale. At 0x26 the dark wash landed on #24272a, which is
-  /// a block whose edges you cannot find; at 0x40 it lands on #2b3037 and
-  /// separates from the page about as far as [accentWash] does from it — which
-  /// is the bar, because the two are the same control in its two states and one
-  /// must not read as louder than the other.
-  static Color get neutralWash =>
-      AppTheme.pick(const Color(0x1464748B), const Color(0x4064748B));
-
-  /// The rim that goes with [neutralWash] — the same slate, held a step
-  /// stronger so the block keeps an edge instead of bleeding into the page.
-  /// Paired here rather than left to the call site, so the two cannot be
-  /// changed apart.
-  static Color get neutralRim =>
-      AppTheme.pick(const Color(0x2464748B), const Color(0x4064748B));
-
   /// The icon well inside a list row.
   ///
   /// Translucent on purpose. An opaque fill would be picked against the row's
@@ -520,7 +465,7 @@ abstract final class AppSurface {
   static Color get wellFill =>
       AppTheme.pick(const Color(0x12000000), const Color(0x0FFFFFFF));
 
-  /// A recessed well inside a panel (e.g. the grid list column).
+  /// A recessed well inside a panel.
   static Color get recess =>
       AppTheme.pick(const Color(0x08000000), const Color(0x0FFFFFFF));
 
@@ -1391,7 +1336,7 @@ abstract final class AppMotion {
   /// A surface reacting to the pointer — a row's hover fill, a chip warming up.
   static const Duration hover = Duration(milliseconds: 130);
 
-  /// Content being replaced in place: a list swapping to another grid's models.
+  /// Content being replaced in place: a list swapping to another set of rows.
   static const Duration swap = Duration(milliseconds: 160);
 
   /// A panel folding or unfolding — the sidebar collapsing to its glyphs.

@@ -44,7 +44,7 @@ class WsRequestFailure implements Exception {
     this.detail,
   });
 
-  /// The frame that carried the refusal — `agent_retarget_result`, say.
+  /// The frame that carried the refusal — `agent_create_result`, say.
   final String responseType;
 
   /// The peer's own error code.

@@ -13,6 +13,13 @@ separate code paths. The Windows runner exists but is unexercised. Package name 
 (`import 'package:harness/...'`). This repo was split out of a monorepo; a few comments still point at
 files that live in the `autonomous-harness` (CLI) or `autonomous-code` (backend) checkouts.
 
+**Grid was removed on 2026-09-11, when the project was killed**: no `lib/grid/`, no `lib/share/`, no
+Settings ▸ Providers or Share Intelligence, no provider pill, model picker, node dashboard or
+usage-limit card, and first-run setup no longer installs the Grid CLI. The last commit that still
+has all of it is the `archive/grid` branch — bring anything back from there rather than rewriting
+it from memory. The harness CLI (`autonomous-harness`) still carries its own grid code
+(`gridLaunch.ts`, `gridWebMcp.ts`, `agent_retarget`, `harness grid login`); nothing here calls it.
+
 ## Toolchain and commands
 
 `pubspec.yaml` pins `sdk: ^3.13.0`, i.e. **Flutter ≥ 3.47 / Dart ≥ 3.13**. An older Flutter fails at
@@ -97,8 +104,8 @@ holds an SSO token:
 
 `lib/core/harness_cli_runner.dart` is how the app finds the CLI without a shell: prefer
 `~/.harness/runtime/current-node` + `~/.harness/cli/cli.js`, then `~/.local/bin/harness`, then PATH.
-`lib/bootstrap/environment_provisioner.dart` installs the CLI, tmux and the **Grid** CLI on first run
-(the `preparingEnvironment` status) — three steps, not four.
+`lib/bootstrap/environment_provisioner.dart` installs the CLI and tmux (plus, on Linux, the clipboard
+helper) on first run (the `preparingEnvironment` status).
 
 Node is deliberately not the user's: it is a private, sha256-verified runtime under
 `~/.harness/runtime`, never Homebrew, nvm or PATH. **The app does not install it — `install.sh` does**,
@@ -174,288 +181,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - `macos/Runner/MainFlutterWindow.swift` installs native menu items and calls into Dart over the
   `harness/app_menu` MethodChannel (`checkForUpdates`, `flashFirmware`, `showShortcuts`, terminal font
   size). Keep the menu in Swift; only the handler lives in `RootShell`.
-- **Grid is the one exception to "the app talks only to the local CLI"**: `lib/grid/` calls
-  `https://api-grid.autonomous.ai/v1/grid/me` directly with a bearer token, because the Harness CLI
-  owns a Harness session and knows nothing about Grid accounts. That token is **the machine's own
-  Grid session**, read by `GridSessionStore` (`grid/grid_session.dart`) out of the *Grid* CLI's
-  `~/.grid/credentials.toml` — the file `grid login` writes. This app never writes it: one Grid
-  sign-in per machine, and a second copy here is a second thing to expire and to disagree about.
-  Loaded before the first frame by `loadPersistedSettings`, and read **per request** rather than
-  captured in `GridApiClient`'s constructor, so a sign-in or a `grid logout` mid-session lands
-  without rebuilding a controller. Only three top-level keys are parsed (`session_token`, `api_url`,
-  `email`), scanning stops at the first `[` table because `name`/`email` mean something else under
-  `[[networks]]`, and `api_url` is honoured so a `grid` pointed at staging does not send its token
-  to production. Signing in is `GridSessionStore.signIn()` → `harness grid login --json`, which
-  hands the Harness session this app already has to `grid login --harness` over that child's
-  **stdin** — no browser, and the account token never reaches an argv. Its refusals already name
-  their own way forward, so they are shown verbatim rather than re-worded. **The app signs in for
-  you on bootstrap (`AppNotifier._ensureGridSession`), but ONLY when the machine has no Grid session
-  at all, or when the one it has belongs to a DIFFERENT account** — every run mints a fresh 365-day
-  session and revokes nothing, so signing in on each launch would pile sessions onto the account,
-  with `grid logout --everywhere` (all-or-nothing, every machine) as the only cleanup. A session
-  matching the Harness account is therefore left exactly alone; the address is compared inside
-  `GridSessionStore.signIn(account:)`, so the guard stays in one place rather than once per caller,
-  and an address it cannot know reads as "leave it alone" (a slow `api.me()` must not look like a
-  mismatch). Settings ▸ Grid still says the mismatch out loud (`_AccountMismatch`) for the window
-  between the two. **`logout()` now signs Grid out too** (`GridSessionStore.signOut` →
-  `harness grid logout --json`, this machine only): the CLI itself still has no cascade in either
-  direction, so without this a sign-out left a live 365-day token on the machine and the next person
-  to sign in inherited the previous one's grids. It never blocks the Harness sign-out — trapping
-  somebody in the account they asked to leave over a Grid failure would be worse — but it is logged
-  rather than swallowed, because a failure means the credential is still there. ⚠️ `grid logout`
-  **stops whatever engine this machine is serving** before deleting anything, and that engine is
-  detached and normally outlives the app, so a sign-out now ends a share the user left running.
-  No session is a state,
-  not an error: `GridSignedOutException` → `GridNetworksSignedOut` → the sign-in card in Settings ▸
-  Grid, kept apart from `GridNetworksFailed` because that one offers a Retry and retrying a sign-out
-  fails identically forever. `--dart-define=GRID_API_TOKEN=…` still pins a token for a build that
-  wants an account it has not signed into here. **The hardcoded developer token is gone** — it was a
-  real credential in the repo, and every build made from that branch read one person's grids.
-  Response fields were read off the live API, not the OpenAPI spec, whose `/v1/grid/me` response
-  schema is empty.
-- **The surface is called PROVIDERS, and a "grid" is what the code still calls one.** Settings ▸
-  Providers, `New provider`, `Filter providers` — the rename is copy and rail labels only; every
-  type, store, controller and API path is still `Grid*`/`grid_*`, because the control plane's
-  vocabulary is `grid` and a half-renamed data layer is worse than an honestly split one. **"Grid"
-  survives in the copy wherever it names the PRODUCT** — the sign-in card, `harness grid login`,
-  "Join one from the Grid app" — since that is a real, separate account a person signs into.
-- **The DEFAULT provider does NOT decide where a new agent launches, and ENABLED is a second,
-  separate question.** `gridSelectionStore` (`lib/grid/`, persisted like `themeModeStore`, loaded in
-  `loadPersistedSettings`) holds the DEFAULT — ⚠️ **once "the provider new agents launch against",
-  and no longer that.** A new agent always starts on the engine's own login (see the New agent
-  dialog bullet below); what the default still decides is what Share Intelligence offers first when
-  nothing is pinned there, which provider `usage_offer_actions.dart` moves agents to, and which
-  provider the rail's usage figures are about. Copy across four surfaces used to say "new agents run
-  on X" — the two pills, Settings ▸ Providers' subtitle and footnote, `grid_network_table`'s
-  semantics label — and all of it was rewritten when the behaviour changed; if you find that
-  sentence anywhere, it is a straggler, not a spec. `providerEnablementStore`
-  (`grid/provider_enablement_store.dart`) holds which providers this
-  computer will offer at all, of which many can be on. They were one radio before, which made "stop
-  offering me this provider" impossible to say without also moving every new agent. **Turning the
-  default OFF hands the default to the next enabled provider** rather than refusing the click, and
-  clears it when there is none left — `ProviderAllOffBanner` is what then says so, because the
-  consequence lands on agents launched later and nothing on screen would otherwise look wrong.
-  **Enablement is a CLIENT-side filter and calls no API**: the grid keeps running, this account stays
-  a member, and only the pickers skip it. Its file is its OWN — `~/.harness/desktop-app/
-  providers_config.json`, not `state.json` — because it is a *set* whose membership is the point, and
-  it stores only the **disabled** ids, so a provider it has never heard of is enabled and a fresh
-  install needs no file. Both stores are read by the status rail's provider pill
-  (`widgets/status_rail/rail_provider_pill.dart`, which imports
-  `gridTargetMenuOptions` from `widgets/grid_target_pill.dart` — it takes `isEnabled` and DROPS a
-  switched-off provider rather than dimming it) and by Settings ▸ Providers. ⚠️ **The widget
-  `GridTargetPill` in that file is dead** — the rail's pill replaced it and nothing builds it now,
-  only its own test, the arrangement `GridHero` is kept under. Visible to the day in the analytics:
-  `grid_picked` reports `source='pill'` up to 2026-09-09 and `source='rail'` from 2026-09-09. The
-  FILE is alive for its pure menu-row builder; only the widget is not. Both list
-  `gridNetworksController`, the shared singleton, so neither holds a half-stale copy. The label for
-  "no provider" is `kNoGridTargetLabel` beside the selection store — **the pill still prints it, and
-  Settings no longer does**: a picker may offer "use nothing", but a roster of providers must not
-  carry a row that is not one. **Grid is hidden in a shipped build** (`kGridSurfaceEnabled`,
-  `grid/grid_surface.dart` — `kDebugMode` or `--dart-define=HARNESS_GRID_SURFACE=true`): it is a
-  feature still being built, so its own flag rather than `kDebugSurfaceEnabled`, which is developer
-  furniture and must be switchable apart from it. The places that read it are the two Settings rows
-  (`_kGridSections`), the rail's pill, the status rail's readout (the strip stays, for the version
-  mark), `UsageLimitNotice`, **`⇧⌘M`** (`kChangeModelShortcut` lives in `appShortcuts()` beside
-  `kDebugShortcut`, not in `kAppShortcuts` — bound unconditionally it was the one door onto the
-  whole model picker that was NOT a control the build already hides, and it fetched every provider
-  on the account from the control plane to draw it; `pickAgentModel` carries the same guard, since
-  it is the one function both doors run), **`GridSessionStore.signIn`** (⚠️ called unprompted on
-  every bootstrap by `AppNotifier._ensureGridSession`, and every call mints a fresh 365-day session
-  and revokes nothing — in a build with no Settings ▸ Grid that is a credential its owner can
-  neither see, explain, nor undo from inside the app; `load` is deliberately NOT gated, because a
-  session written by `grid login` in a terminal directs nothing on its own), and
-  **`GridSelectionStore.load`, which is the one that matters**: `state.json` is shared
-  with the debug build where a grid IS picked, so without it a release build would inherit that
-  choice off disk and act on a grid it shows no picker, no pane and no way out of — no longer
-  *launching agents* on it (that stopped reading the store), but still sharing to it and counting
-  its usage, which is just as unexplainable from a build with the surface hidden. The
-  stored key is left alone, not cleared — it is the other build's setting. `settingsGroupsFor` takes
-  both gates as arguments so the shipped shape can be asserted from a test run, which by definition
-  has everything switched on, and `kDefaultSettingsSection` is derived from the visible list rather
-  than named (it used to name Grid, the first row a shipped build drops).
-  The provider AND the model are chosen per agent, not globally, and **only once the agent exists**:
-  the agent view's header pill (`widgets/agent_model_menu.dart`) picks both for a running agent, and
-  the New agent dialog offers neither. **Every new agent launches with `grid: null`** — the frame
-  this app sent before grids existed — so it runs on whatever login the engine is already signed in
-  with on that machine, and the dialog's `Inference` line is a constant reading `kNoGridTargetLabel`
-  / `kNoGridTargetDetail` (the same two strings the pills and the model picker use, never a third
-  wording). The old behaviour read `gridSelectionStore` and minted a relay key on every Create,
-  which meant one value answered two questions — "which provider is my default" and "what should a
-  new agent start on" — and the only way to launch on the subscription already signed in here was to
-  change the default for the whole app. Three things fell out of `_submit` with it: the credentials
-  round trip (so there is no failure mode between the click and the launch), the `refused` gate (so
-  Cursor/Amp/Devin, which the CLI will not point at a grid, can be launched from here again), and
-  every `!refused &&` guard in the summary. ⚠️ `test/new_agent_grid_warning_test.dart` sets a grid
-  in the store on purpose in nearly every case — it is asserting the dialog IGNORES it, so do not
-  "tidy" those away; `agent_events_test.dart` guards the same thing from the analytics side. **The pill prints one word — `Model` — not the model id**
-  (`kModelPillLabel`): a pane header already carries the agent's name, a status dot, a transport
-  badge and the pane's own buttons, so four panes side by side leave it ~150px and a real id
-  ellipsized to `DeepSeek-V4-F…`, which answers nothing and costs the width anyway. The answer is
-  on hover, where the tooltip leads with the model and follows with the caveat, and in the picker,
-  where the row the agent is on is ticked. **⇧⌘M opens the same picker for the focused pane** — never plain ⌘M, which is
-  Minimize and is matched by AppKit before the keystroke reaches Flutter (the trap that once ate
-  ⌘V in a terminal pane). Both doors run one function, `pickAgentModel`, and share one in-flight
-  set, `retargetingAgents` (keyed `machineId/agentId`): it is what stops a second restart landing
-  on the first, and what draws the pill's skeleton for a restart the keyboard started. It draws
-  **nothing at all** only where there are no providers in the build (`kGridSurfaceEnabled`, taken as a `@visibleForTesting` argument so the
-  shipped shape can be asserted). It used to leave whenever the SIDEBAR had picked no default,
-  which was right while the menu could only offer that one grid's models — with the picker listing
-  every provider, that hid the door for exactly the people who had not found the sidebar's picker.
-  **The choices themselves are a DIALOG, grouped by provider**
-  (`widgets/model_picker_dialog.dart`, rows from the pure `grid/model_picker_options.dart`), the
-  shape OpenCode's model picker uses: a search that crosses providers, the last five picks under
-  `Recent` (`grid/model_recents_store.dart`, loaded by `loadPersistedSettings` because it is drawn
-  on the frame the panel opens), then one group per provider with the models it serves, and ↑/↓/↵.
-  It replaced a dropdown that could only list the models of the ONE provider the sidebar had
-  picked, which made "run this agent on that other provider" a trip to the sidebar that also
-  changed where every future agent launched. A pick therefore carries **both halves** — a
-  `ModelChoice` is a provider *and* a model, because a model id names nothing without the relay
-  that answers for it — so one restart can do what two used to, and the sidebar's default is not
-  touched by moving one agent. `gridModelsController` is keyed **per network** for the same reason:
-  a single slot had each provider's answer evicting the last one's. The highlight is held as a
-  choice, never as a row number, since a provider answering late inserts rows above it — and it is
-  re-placed on the agent's own row until the reader takes the keyboard, because that row does not
-  exist on the frame the panel opens on. `Auto` and
-  the no-provider row (`kNoGridTargetLabel`) are different rows on purpose (the relay's own virtual
-  `auto` id is dropped from every list — see `kAutoModelId`), and a provider switched off in
-  Settings ▸ Providers is not offered here either. ⚠️ **A provider with nothing to pick is dropped
-  from the list entirely** — still loading, failed, or serving no models: header, note and all. An
-  account on four grids opened a panel that was four names over four apologies, none of them a
-  choice. What is still happening is said ONCE, under the list, by `modelPickerModelsNote`
-  (`Loading models…`, or the failure when a load ended in one) — dropping the rows is right,
-  dropping the fact that grids are still being asked is not, since the reader would otherwise watch
-  the list grow with no idea why. A grid serving NOTHING is silent there: it is neither pending nor
-  broken, and there is nothing to wait for or fix. ⚠️ **`resolveGridAgentOverride()` is no longer
-  called at create time** — the New agent dialog sends `grid: null` always. Its one caller is
-  `applyAgentModel` (`widgets/agent_model_menu.dart`), which mints a fresh relay key for the one
-  agent being moved, and `moveAgentToGrid`/`createAgent` put it on the wire as `payload.grid`. The
-  harness CLI (`autonomous-harness`, `cli/src/lib/gridLaunch.ts`) reads that field
-  and gives the new tmux session `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` via
-  `new-session -e`, so the key never lands in the engine's argv. **Seven engines are grid-capable —
-  claude, codex, copilot, grok, hermes, opencode, pi**; the CLI refuses the rest with
-  `GRID_ENGINE_UNSUPPORTED` rather than running them on their own login, and `kGridCapableEngines` in
-  `grid/grid_agent_override.dart` mirrors that list to warn before the click. Keep the two in sync. Moving a RUNNING agent is `agent_retarget`,
-  and a CLI that predates it answers `UNSUPPORTED` from `backendSocket`'s default case — which is
-  what every **published** release still does, so `make install-cli` in `autonomous-harness` is part
-  of testing this feature. Every CLI refusal reaches Dart as a thrown `WsRequestFailure` (never as an
-  `error` key on a returned map); `AppNotifier.retargetMessage` turns its `code` into the sentence
-  the user sees.
-- **A grid launch also hands the agent the grid's WEB TOOLS.** The same `payload.grid` carries
-  `mcpUrl` — `grid_web_mcp.dart`, the control plane's `/v1/grid/web-mcp/` — and the CLI's
-  `lib/gridWebMcp.ts` wires it into claude, codex, copilot, opencode and hermes as an MCP server
-  named `grid-web`.
-  **The control plane, not the relay** (grid ADR 0041 D-a: a relay is per-grid, can be asleep, and
-  may be a LAN address), built from the *session's* `apiBaseUrl` so a `grid` signed into staging does
-  not send agents at production. The address is sent rather than derived because the machine running
-  the agent may have no Grid session at all. **No second credential**: ADR 0041 D-b takes the
-  per-grid access token and requires no scope of it, `consumer` included, which is exactly what
-  `/networks/{id}/credentials` mints. The engines wired are the ones whose header handling was
-  measured on the wire rather than read off a vendor page — the three `grid mcp config` prints for,
-  plus hermes and copilot since. ⚠️ The key still travels only in the
-  pane's environment: Claude Code expands `${GRID_API_KEY}` inside `--mcp-config` (the JSON-string
-  form, so no file) and **copilot expands the same `${…}` in the same document** under
-  `--additional-mcp-config`, which augments `~/.copilot/mcp-config.json` rather than replacing it —
-  so both share one builder, `mcpServersConfig`. Codex reads `env_http_headers` off `-c`, opencode
-  expands `{env:…}` in the
-  config the launch already writes, and hermes interpolates `${…}` Cursor-style in a **managed-scope
-  overlay** (`HERMES_MANAGED_DIR`, deep-merged over the user's `config.yaml` — not `HERMES_HOME`,
-  which would move auth, sessions and memory too). That is the OPPOSITE of ADR 0041 D-d, which is
-  right about a person pasting into their own dotfile and wrong here, where the daemon owns both
-  ends. ⚠️ Hermes' overlay REPLACES `/etc/hermes` rather than adding to it, so `cli.ts` drops it on a
-  machine that has one and the agent starts without web tools instead of losing an administrator's
-  policy. ⚠️ **The reference syntax is not interchangeable and each one was measured**: copilot sends
-  opencode's `{env:…}` and a `${env:…}` through VERBATIM, so the wrong spelling puts the literal
-  string on the wire and the tools fail authentication with nothing naming why. An absent `mcpUrl`
-  wires nothing, so an older desktop launches exactly as it did.
-- **Share Intelligence is the one place this app drives a SECOND CLI.** `lib/share/` runs the *Grid*
-  CLI (`~/.local/bin/grid`, `GridCli` in `share/grid_cli.dart`, always `grid --remote …`), because
-  `harness` cannot serve inference: the models live in `~/.grid/models`, the engine is
-  `~/.grid/bin/llama-server`, and `grid join <grid-id> …` is what puts this Mac on a grid. This app
-  installs `grid` at boot too (`EnvironmentStep.grid`), but as the one **optional** step: it is
-  install-if-missing and never upgrade-if-old — a `grid` built from source must survive a launch,
-  the way the harness CLI's self-update does not — and a failure marks the step `unavailable`
-  rather than `failed`, so `isReady` (required steps only) still lets the app boot. "Not installed"
-  therefore stays a state the pane explains, not a failure it repairs.
-  Three routes (`ShareRoute`): a local GGUF, a vendor key, or an OpenAI-compatible server already
-  running here. **A key never reaches argv** (`ps` is world-readable) — it goes in the child's
-  environment, which is why `GridCli.start` takes `secrets` separately. The engine `grid join`
-  starts is **detached and outlives the app**, so "am I sharing?" is answered by re-reading the
-  CLI's run record (`~/.grid/run/engines/<grid-id>/*.json`, `share/engine_run.dart`), never by
-  anything this app remembers — and closing Harness does not stop it, which the rail's footnote
-  says out loud. Reached as Settings ▸ Grid ▸ Share Intelligence; `lib/shared/theme/share_page_theme.dart`
-  is the page's own palette, copied value-for-value from Grid — keep the two in step.
-- **Which grid this computer SERVES is not `GridSelectionStore`.** It is
-  `share/share_target_store.dart`, and the split is the point: Providers' `DEFAULT` answers "which
-  provider does this computer fall back to" (what this machine *consumes*), the share target answers
-  "who do my GPU and my keys answer for" (what it *gives*). One value for both meant pointing the
-  share at a lab grid silently moved every new agent with it — ⚠️ that particular consequence is
-  gone (a new agent reads neither value now), but the split stands on its own: the share target is
-  where this computer's GPU is offered, and that is not a fallback. `resolveShareTarget(pin, providersDefault)`
-  is the only place the precedence is written: **an absent pin means "follow Providers", not "no
-  grid"**, so a machine that never opens the picker behaves exactly as it did before the picker
-  existed, and a pin deliberately does NOT track the default afterwards. The page says which of the
-  two produced the grid it is showing in every state (`ShareTargetPicker`) — a reader looking at
-  `Water Grid` has to be able to tell, without leaving the page, whether their agents moved too.
-  The picker **locks while an engine is up**: a join is per-grid and detached, so switching under a
-  live run would leave it serving a grid the page no longer names, with no Stop button anywhere for
-  it (Stop only ever leaves the grid currently on screen). ⚠️ `ShareController.refresh` takes a
-  **nullable** grid id on purpose — what this machine can offer is a fact about the machine, so the
-  probe runs before any grid is chosen and the rail (which holds the picker) can draw itself.
-- **A typed engine address is ASKED before it is joined** (`share/engine_endpoint.dart`,
-  `share/engine_reachability.dart`) — ported by hand from the Grid app
-  (`autonomous-grid-app`, commit `2742acea`); the two repos share this page's design and no code,
-  so a fix in one does not reach the other. `grid join --at` takes any address happily: one missing
-  `/v1` used to register a node that went green, advertised its model, and then failed **every**
-  message — twice over, because the capability probe travels the same address, so the node also
-  registered as supporting no tools and no vision and the router refused chat before a request was
-  made. One wrong address, two unrelated-looking errors two minutes apart.
-  ⚠️ **`readEngineAddress` never ADDS anything** — not `/v1`, not a scheme, not a guess. It trims,
-  drops trailing slashes and cuts one trailing OpenAI endpoint (longest first: `/chat/completions`
-  also ends with `/completions`, and cutting the short one leaves `…/v1/chat`, which looks plausible
-  and answers nothing). Trying `<url>/models` **and** `<url>/v1/models` and keeping whichever
-  answers is the tempting version and it breaks the one invariant here: **what gets tested is what
-  gets called.** For the same reason `_start` joins `EngineAddressReady.base`, never
-  `_endpoint.text`. The check runs on a 600ms debounce as soon as the address parses — **not** on
-  Start, where it deadlocks (the button waits for a model; the model list only exists once the
-  server has been asked) — and is tokened against a newer check and tied to the base it was about.
-  Start is **fail-closed**: an address that parses is not enough, the server has to have answered.
-  Model becomes a picker only when the `/models` body was *recognised* (`ProbedEngine`, named that
-  because `share/engine_run.dart` already has an `EngineKind` meaning something else); an
-  unrecognised body may still carry a usable list, but a picker built from one nobody recognised
-  might be listing the wrong thing. Context: only vLLM's `max_model_len` is read — llama.cpp's
-  `meta.n_ctx_train` is the window the MODEL was trained at, not the one the server was launched
-  with, and the router picks nodes on this number, so an inflated one wins work it cannot do.
-  **Manage models is the one part of this feature that is NOT the Grid CLI**: the shelf is
-  `POST /v1/grid/catalog` on the control plane (`GridApiClient.catalog`/`catalogDetail`, the same
-  bearer as the Grid tab), because `grid catalog` answers with two or three picks ranked for THIS
-  machine and that is far too short to browse. Both are shown, labelled apart. A version's
-  `pull_spec` names only the FIRST file, so a split GGUF is downloaded through every URL in `urls`
-  (`share/pull_spec.dart`) — pulling the named one alone leaves a model that will not load.
-- **The status rail is where the app polls** (`lib/widgets/status_rail/`,
-  `grid/grid_overview_controller.dart`): a 26px full-bleed strip along the window's bottom edge
-  showing what the chosen grid is made of. Two pollers now hang off it, never both at once — the grid
-  overview below, and the agent-account usage further down. Its data is `GET {relay}/grid/overview` — the RELAY, not
-  the control plane, because the relay is what dispatches the work — reached with a fresh key from
-  `credentials(networkId)` every 60s. **A figure the relay did not send is null, never zero**: a zero
-  is a measurement and a blank is an admission, and on this strip the difference is the whole point.
-  The last good answer stays on screen when a refresh fails (`stale` turns the dot amber). The work
-  figure is `answered.freshInput` (tokens_in − tokens_cached), not the total, which cache hits
-  dominate. Member count is owner-only on the server and reads null on a 403 — the figure is then
-  omitted, because "we may not ask" and "nobody is here" must not render the same.
-  **The five panels are Grid's own files, ported rather than rewritten** —
-  `grid_power_panel.dart`, `grid_stat_panels.dart`, `grid_models_panel.dart`,
-  `memory_split_bar.dart`, `pill_panel_shell.dart`, and the pure half of
-  `node_display.dart`/`node_metrics.dart`/`node_groups.dart`/`model_usage.dart` under
-  `lib/grid/`. The only change is Riverpod out, constructor parameters in; keep them in step
-  with Grid. `test/fixtures/` is one real relay answer, anonymised, and it is what drives
-  `grid_panels_test.dart` — a hand-written fixture has none of the shapes these panels
-  exist to fit.
-- **Agent-account usage is the rail's OTHER readout, and it stands exactly where the grid's
-  cannot** (`lib/usage/`, `widgets/status_rail/usage_readout.dart` + `usage_panel.dart`). With a grid
-  chosen the strip reads the grid; with none — or in a build where `kGridSurfaceEnabled` is off — it
-  reads what the Claude and Codex accounts on this machine have spent. The two never share the strip,
-  which is why they share one hover/pin surface (`rail_figure.dart`, extracted from the grid rail
-  rather than copied) and one `_PanelKind`. **The strip prints ONE figure per account — the WEEKLY
+- **The status rail is where the app polls** (`lib/widgets/status_rail/`): a 26px full-bleed strip
+  along the window's bottom edge carrying what the agent accounts have spent, right-aligned against
+  the key hints (`key_hints.dart`). The hover/pin surface is `rail_figure.dart` + `rail_panel.dart`.
+  The `UsageController` behind it is owned by `_HomeScreenState`, not by the rail, because the rail
+  unmounts when the sidebar folds and a poller living in it would restart on every unfold.
+- **Agent-account usage is what the rail reads** (`lib/usage/`, `widgets/status_rail/usage_readout.dart`
+  + `usage_panel.dart`): what the Claude and Codex accounts on this machine — and on the remote
+  machines that answer `usage_read` — have spent. **The strip prints ONE figure per account — the WEEKLY
   window** (`ProviderUsage.railWindow`, deliberately not `tightest`): Claude answers with three
   windows and Codex with one, so printing them all made one account three figures wide and the
   other one — two readouts that read as different KINDS of thing rather than the same thing about
@@ -465,8 +198,8 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   provider reporting no weekly window falls back to it — one figure is the rule, and a blank strip
   is a worse answer than the wrong window. `kWeeklyWindowLabel` is written down once because the
   rail MATCHES on it and the two sources spell it separately; the panel behind the figure still
-  shows every window. The block sits at the RIGHT end of the strip: the pill at the other end is
-  what you press, and furniture you only read belongs at the edge you are not reaching for.
+  shows every window. The block sits at the RIGHT end of the strip, beside the key hints: furniture
+  you only read belongs at the edge you are not reaching for.
   **Remote machines' accounts arrive through `usage_read`** (`AppNotifier.readRemoteUsage`,
   `usage/remote_usage.dart`, `usage/usage_accounts.dart`; CLI side `cli/src/lib/accountUsage.ts`).
   A remote machine may be signed in to a DIFFERENT subscription, and the only honest way to read
@@ -481,28 +214,24 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   ⚠️ A null key never matches, itself included, and a remote reading folds into this computer's
   only when this computer HAS figures — otherwise a token that expired here would swallow a live
   reading of the same account taken there. `readings` stays this computer's alone and `accounts`
-  is the grouped view: the notice and the offer read `readings`, because a remote account at 95%
-  is no reason to move this Mac's agents. ⚠️ **`usage_read` is in the E2EE type sets** (`core.ts`),
+  is the grouped view. ⚠️ **`usage_read` is in the E2EE type sets** (`core.ts`),
   which re-pinned the interop keystone the browser client and the paired device share. And a
   remote CLI that predates it does not refuse the frame — it cannot open the envelope, loses the
   requestId and goes silent — so this asks with a 10s timeout and treats every failure as nothing
-  to add, never holding up this computer's own figures. It replaced the words "No grid chosen", a sentence that
-  tells someone what they already know and hands a riddle to anyone whose build has no picker.
-  **This is the SECOND exception to "the app talks only to the local CLI"**, after Grid, and it is a
-  narrower one: nothing here is dialled on the app's own behalf. `UsageCredentials` reads the tokens
+  to add, never holding up this computer's own figures.
+  **This is the one exception to "the app talks only to the local CLI"**, and a narrow one: nothing
+  here is dialled on the app's own behalf. `UsageCredentials` reads the tokens
   the agent CLIs already wrote — the macOS Keychain item `Claude Code-credentials` (falling back to
   `~/.claude/.credentials.json`, which is all Linux has) and `~/.codex/auth.json` — and spends them
   against the vendors' own usage endpoints. It never writes or refreshes them: one sign-in per
-  machine, owned by the CLI that made it, the same rule Grid follows with `credentials.toml`.
+  machine, owned by the CLI that made it.
   A rate limit is scoped to an **account**, not a machine, so reading it here is right even though
-  the agents run elsewhere — provided the remote machines sign in as the same account. They are also
-  the reason this poller is not gated on a grid: an account's limit is true with no grid at all.
+  the agents run elsewhere — provided the remote machines sign in as the same account.
   ⚠️ **Both endpoints are undocumented** — `api.anthropic.com/api/oauth/usage` (needs
   `anthropic-beta: oauth-2025-04-20` and the CLI's own user agent, because the OAuth token was minted
   for the CLI) and `chatgpt.com/backend-api/wham/usage`. Either can change without notice; both
   failures land as a `ProviderUsage` state rather than an exception. **`signedOut` is kept apart from
-  `failed`** for the reason Grid keeps `GridNetworksSignedOut` apart from `GridNetworksFailed`:
-  retrying a sign-out fails identically forever. Claude's Fable window has been spelled three ways
+  `failed`**: retrying a sign-out fails identically forever. Claude's Fable window has been spelled three ways
   across releases and all three are tried; Codex names its windows from `limit_window_seconds` rather
   than assuming, because a confident "5h" beside a real percentage reads as measured.
   `loading` is false **before** `start()` as well as after the first answer — a controller nobody
@@ -510,56 +239,9 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   That is also what keeps `flutter test` honest: `kUnderTest` (`core/test_run.dart`, shared with
   `AnalyticsConfig`) stops the poll auto-starting, since a `Timer.periodic` is a `pumpAndSettle` that
   never settles and these sources would otherwise shell out to `security` and open real sockets.
-- **A nearly-spent subscription is the ONE thing this app says unprompted**
-  (`lib/usage/usage_pressure.dart`, `usage_offer.dart`, `usage_nudge_store.dart`;
-  `widgets/usage_limit_notice.dart` + `usage_limit_card.dart` + `usage_offer_actions.dart`).
-  Two thresholds, one meaning each: **80% changes a colour, 90% speaks**. The rail figure and
-  `UsageBar` share both through `usagePressureOf`, so a window cannot be amber in the strip and
-  plain in the panel that expands it — `19% used` and `92% used` used to print in identical ink,
-  which made the readout useless for the one question it answers at a glance.
-  ⚠️ **It is deliberately NOT a modal.** These panes are terminals: a dialog takes focus off
-  whichever one has it, so keystrokes meant for a running agent land nowhere — and 90% of a window
-  arrives precisely when somebody is deep in a turn. It is also not full-bleed like `_ErrorStrip`:
-  a row in the shell's `Column` would SIGWINCH every pty on screen to deliver a message, so it
-  floats at bottom-left, over the figure it is about, taking no layout.
-  **It never draws without something to press.** `usageOfferFor` answers null in four cases —
-  a build with no providers (`kGridSurfaceEnabled`), an engine this computer does not run at all,
-  a provider chosen with every candidate mid-turn (the CLI would answer `AGENT_BUSY`), and below
-  the threshold. ⚠️ **The two offers ask DIFFERENT questions of `UsageAgentTally`**, and reading
-  both off `candidates` was a real hole: a computer whose only Codex agent had been moved onto a
-  provider by hand watched that account hit 97% and was offered nothing, while `New agent` would
-  have launched the next one straight back onto the spent subscription because no DEFAULT was
-  picked. ⚠️ That second half now happens **regardless of the DEFAULT** — a new agent always starts
-  on the engine's own login — which makes `Move my agents` the offer that carries this, not
-  `Choose a default`. Moving asks `candidates` ("what is on that subscription now"); choosing a default asks
-  `present` ("does this computer run that engine at all"), and an agent parked on a provider
-  answers yes. In every one of those cases the amber figure has already said the only thing left
-  to say, and a warning the reader can only agree with is not worth interrupting for.
-  ⚠️ **The silence names itself**: `resolveUsageOffer` returns a `UsageOfferBlocked` beside the
-  offer and the notice logs it (`app` category, so Settings ▸ Debug shows it live). Four unrelated
-  facts about a machine produce the identical blank and each is fixed somewhere else entirely, so
-  a red figure with nothing beside it reads as a broken feature — this is what tells whoever is
-  looking which of the four it is. It is also what caught the `candidates`/`present` hole above.
-  With a default provider the button MOVES
-  the idle agents (`applyAgentModel` per agent, Auto model, sequential — a retarget respawns the
-  pane in place with `--resume`, so this is not destructive); with none it opens Settings ▸
-  Providers. ⚠️ **Only the MOVE closes the card.** Choosing a provider does not answer the
-  question, it changes which offer applies — the card should come back reading `Move 3 agents to
-  Water Grid`, which is the step that gets the work going again; silencing it there would strand
-  somebody one click short. ⚠️ **Any dismissal buys `kUsageNudgeCoolOff` of quiet from the notice as a whole**, not just
-  from the window it closed: two accounts can be over the threshold at once, and closing the first
-  used to put the second on screen in the same place under the pointer that had just clicked — so
-  the second click landed on a card nobody had read. No timer behind it; the poll rebuilds this
-  once a minute anyway.
-  **Once per rate-limit window**: `UsageNudgeStore` keys a dismissal by
-  `provider|label` — deliberately WITHOUT the reset time, which both vendors recompute on every
-  answer, so a key carrying it would change under a once-a-minute poll — and expires it at the
-  window's own reset, or `kUsageDismissGrace` when the vendor sent none. **Every entry expires**,
-  which is why there is no permanent opt-out and why the file cannot grow. The `UsageController`
-  moved to `_HomeScreenState`: the notice and the rail read the SAME poller, or the card could
-  name a percentage the figure under it disagreed with. Three events —
-  `usage_limit_warned`/`_offer`/`_dismissed` — because a warning nobody sees and a warning nobody
-  acts on produce the same number of moves.
+  The rail figure and `UsageBar` share one pair of thresholds through `usagePressureOf`
+  (`usage/usage_pressure.dart`) — amber from 80%, red from 90% — so a window cannot be amber in the
+  strip and plain in the panel that expands it.
 - **The token ledger is the OTHER usage feature, and the two must not be merged** (`lib/usage/ledger/`,
   Settings ▸ Usage in `settings/sections/usage_section.dart` + `usage_panels.dart`). The rail's readout
   above asks the vendors *how much of your rate limit is left* — a percentage, scoped to an **account**,
@@ -662,44 +344,6 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   `SingleChildScrollView` the incoming width is unbounded, so `CrossAxisAlignment.stretch` asks for
   an infinite row and the layout throws; `_sessionTableWidth` sums the columns, which is the only
   honest width it has.
-- **The rail's two panels open the only surfaces this app grew that the CLI
-  knows nothing about.** "View dashboard" opens the node dashboard
-  (`lib/widgets/node_dashboard/`, logic in `grid/node_dashboard_view.dart`
-  + `node_dashboard_layout.dart`) — one card per machine, off the same overview
-  poll the rail already runs, so opening it starts no second timer.
-  **It is a SCREEN, pushed the way `showSettingsScreen` is** — a faded
-  `PageRouteBuilder`, "Back to app" rather than a close ✕, gutters instead of a
-  1180×860 cap, so a wide display buys real extra columns. The dialog form
-  (`node_dashboard_dialog.dart`, `showNodeDashboard`) is kept for callers that
-  want a dismissable box, and **both surfaces draw the same
-  `NodeDashboardBody`** (`node_dashboard_body.dart`) — a surface owns only its
-  frame, its header and its way out, so the two can never drift into two
-  dashboards that disagree. Each hands the body an `onLeaveSurface`, because the
-  empty state's offers push Settings and pushing before leaving pops the thing
-  just pushed. `NodeDashboardViewStore` is passed in rather than made per
-  surface, so filters survive leaving the screen and coming back. Rows are
-  laid out with `IntrinsicHeight`, never a `GridView`: a tile has to be given its
-  height up front and the fullest cards overflowed the guess by 22px. **No card
-  may contain a `LayoutBuilder`** for the same reason — `IntrinsicHeight` asks
-  every child for its intrinsic height and `LayoutBuilder` throws rather than
-  answer, so both tracks are `CustomPaint`. `NodeDashboardViewStore` holds the
-  sort and filters for as long as the app runs (not persisted: a filter that
-  survived a relaunch would greet somebody with half their grid hidden since
-  yesterday).
-  "Invite people to X" opens the share sheet (`lib/widgets/share_grid/`,
-  `grid/grid_members_controller.dart`, `grid/invite_email.dart`) — invite,
-  change a grant, remove. **A role change is ONE `POST …/members`**, which
-  upserts; DELETE-then-POST drops the person off the grid entirely if its second
-  half fails. Removing is the owner's alone and gates the whole trailing column;
-  a member admitted by the grid's email domain has no row to delete, so it draws
-  none. **"Who can join" is a STATEMENT, not a control** (`grid/grid_access.dart`):
-  Grid lets an owner flip the rule, and flipping it restarts the grid under
-  everyone on it — under one shared developer token that would land on somebody
-  else's grid, in somebody else's name. The wire values are the control plane's
-  own (`grid_networks/store.py`), not Grid's client enum, which only half
-  overlaps them; a `private-domain` grid's NAME is its domain, which is where
-  "@autonomous.ai emails" comes from, because `access_domain` reads null on
-  every network `GET /v1/grid/me` returns.
 - **Behavioural analytics is a PORT of Grid's, not a second design** (`lib/analytics/`, copied from
   `autonomous-grid-app/lib/infrastructure/analytics/`). It reports to **Autonomous Analytics**, the
   stream the website and Grid already feed, so one person's path across the three products is one
@@ -709,7 +353,9 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   of its own: `_defaultWriteKey` is the same constant `autonomous-grid-app` ships, so both apps
   append into one analytics project and are separable **only by `category`**, not at the source —
   a quota, a retention rule or a rotated key set on that project lands on both at once
-  (**TODO(BE)**: a Harness Desktop key is a one-constant change here). `--dart-define=HARNESS_ANALYTICS_KEY=…`
+  (**TODO(BE)**: a Harness Desktop key is a one-constant change here). ⚠️ **With the Grid project
+  killed (2026-09-11), that shared project is the one to watch**: if it is wound down or its key
+  rotated, this app's analytics go silent with it. `--dart-define=HARNESS_ANALYTICS_KEY=…`
   overrides it for a dev build. It still mutes for three other reasons — `HARNESS_ANALYTICS_DISABLED`,
   a test run, and an opt-out (`{"enabled": false}` in `~/.harness/desktop-app/analytics.json`) —
   checked in that order so `flutter test` never reads a real Harness home. The sink is a **singleton** (`analytics`), like
@@ -717,19 +363,14 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   pane header, and most were handed a notifier rather than a `Ref`. Every event name is written down
   **once**, in `analytics_events.dart` — two call sites naming one action differently is what makes
   a stream unqueryable — and params are product facts only: a short code, an option, a count, an id.
-  **Never** a prompt, terminal output, an agent or machine name, a path, or a grid's name. Two
-  events are deliberately not where you would look for them: `app_opened` is sent by `AppNotifier`
-  when bootstrap resolves (a first-frame event would report every launch as signed out) and
-  `grid_networks_loaded` by `GridNetworksController` on its first answer (both doors read that one
-  shared controller, so a per-surface event would count one account twice). **The agent funnel is
+  **Never** a prompt, terminal output, an agent or machine name, or a path. One event is
+  deliberately not where you would look for it: `app_opened` is sent by `AppNotifier` when
+  bootstrap resolves (a first-frame event would report every launch as signed out). **The agent funnel is
   three events, one per step, because the interesting numbers are the DROPS between them**:
   `new_agent_opened` is sent by `showNewAgentDialog` itself rather than by its four callers, so a
   fifth door cannot forget to report (its `source` is `required`, not defaulted); `agent_created`
-  is sent by the **dialog**, not `createAgent`, because only the dialog can tell Auto (`on_grid`
-  true, no model) from the engine's own login (`on_grid` false) — both reach the notifier as one
-  null override — and it covers EVERY agent, unlike `grid_agent_launched`, which counts only the
-  ones pointed at a grid (so a grid agent fires both; `agent_created where on_grid` is the same set
-  and is the one to build on); `app_first_message` rides the CLI's `turn_started` rather than the
+  is sent by the dialog once Create succeeds, carrying only the engine and the bypass flag;
+  `app_first_message` rides the CLI's `turn_started` rather than the
   composer, so a message typed straight into the terminal counts, and it fires **once per signed-in
   session, not per agent** (`_awaitingFirstMessage`) — the question is how long somebody sits
   logged in before talking to anything at all, so it carries the wait and `from` (`sign_in` against
@@ -756,19 +397,6 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   in memory and never written to disk — a stream that measures the app must not become a second
   thing the app writes on every click — which is also why recording is right even for a user who
   opted out: their choice is about what we *send*, and this sends nothing.
-- **Settings ▸ Providers is a SPLIT, not a table** (`settings/sections/provider_split_pane.dart`,
-  framed by `grid_section.dart`): a rail of every provider on the left, and on the right everything
-  about whichever one the rail has selected. Selecting a row READS a provider; `Make default` is
-  what changes this computer's fallback provider — separated because the table's row-as-radio made
-  looking at a provider indistinguishable from changing that (and, at the time, from moving every
-  new agent onto it). The panel prints what the old
-  per-row drawer hid (id, signaling, owner, the router's models **by name**, created) with one
-  deliberate omission: **`Provider type` is gone**, since it is the control plane's wire spelling
-  (`permissioned-public`) of the rule "Who can join" states two rows above in words. Under 820px the
-  two halves stack. ⚠️ **`GridHero` and `GridNetworkTable` are the pane this replaced and nothing
-  builds them any more** — kept, not deleted, so the design can come back without being rewritten
-  from the log; `grid_hero_test.dart` builds `GridHero` directly, which is the only way left to
-  reach it, and is what stops it rotting silently.
 - Settings is a **screen**, not a dialog (`lib/settings/`): `showSettingsScreen` pushes a faded route
   whose rail lists `settingsGroups` from `settings_section.dart` and whose pane is one widget per
   `SettingsSection` (`sections/`). Adding a setting means adding an enum value, a group entry and a
@@ -781,11 +409,11 @@ from `node_status` pushes — distinct from our own socket status, pending offli
 - **The log is written to files, and Settings ▸ Debug reads them back** (`lib/logging/`,
   `settings/sections/debug_*.dart`). `appLog` (`app-YYYYMMDD.log`) is the narrative — `app`, `ws`,
   `api`, `flutter` — and `cliLog` (`cli-YYYYMMDD.log`) is a transcript of every child process, both
-  ported from Grid and both pruned after 14 days. The two CLI chokepoints write it:
-  `HarnessCliRunner.run/start` and `GridCli.run/start` go through `logging/cli_transcript.dart`,
-  which logs the command **as a person reads it** (`harness auth status --json`, never the managed
-  tier's `<node> <cli.js>` argv) and never its environment — a key rides there precisely to stay out
-  of argv. Both Dio clients carry `attachHttpLog`, one `api` line per finished request, method and
+  ported from Grid and both pruned after 14 days. The CLI chokepoint writes it:
+  `HarnessCliRunner.run/start` goes through `logging/cli_transcript.dart`, which logs the command
+  **as a person reads it** (`harness auth status --json`, never the managed tier's
+  `<node> <cli.js>` argv) and never its environment — a secret handed to a child rides there
+  precisely to stay out of argv. The Dio clients carry `attachHttpLog`, one `api` line per finished request, method and
   URL only. **What a child PRINTS can still be a credential**, so CLI output and URLs go through
   `redactSecretsInText` (`logging/redact.dart`, beside the frame-level `redactValue`) before
   anything is written. The Debug pane is a **mirror** of those sinks, not a second stream
@@ -809,7 +437,7 @@ from `node_status` pushes — distinct from our own socket status, pending offli
   usually is, since a skeleton that shrinks jumps the page upward. **"Loading" and "answered with
   nothing" must not render the same** — hence `AppNotifier.machinesLoading`, which is set on the
   first fetch only so a refresh keeps the rows already on screen. Same reason the status rail blanks
-  its figures only before the first reading and `SharePane` blanks only before the first probe.
+  its figures only before the first reading.
 - `lib/shortcuts/app_shortcuts.dart` is the one list that feeds both the live bindings and the ⌘/
   sheet. `shortcutRows()` there is that list as the UI prints it — one row per action, so the two
   activators on "focus the next pane" (`⌘]`, `⌃⇥`) fold into one line, and `⌘1`–`⌘9` join as one.

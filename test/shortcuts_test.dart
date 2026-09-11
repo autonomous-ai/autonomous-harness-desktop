@@ -137,22 +137,6 @@ void main() {
   });
 
   group('the declared set', () {
-    test('the model picker is ⇧⌘M, never plain ⌘M', () {
-      // ⌘M is Minimize, and AppKit matches it in `performKeyEquivalent:` —
-      // before the keystroke reaches Flutter at all. A binding on it would look
-      // right in this list and do nothing but minimise the window, which is the
-      // same trap that once ate ⌘V in a terminal pane.
-      // Read off the const rather than out of `kAppShortcuts`: the key moved
-      // behind `kGridSurfaceEnabled` (a build with no providers has no picker
-      // for it to open), so `appShortcuts()` is where it reaches a binding and
-      // this is where it is declared.
-      const model = kChangeModelShortcut;
-      expect(appShortcuts(), contains(model));
-      expect(model.activator.trigger, LogicalKeyboardKey.keyM);
-      expect(model.activator.meta, isTrue);
-      expect(model.activator.shift, isTrue);
-    });
-
     test('no two shortcuts claim the same chord', () {
       final seen = <String>{};
       for (final shortcut in appShortcuts()) {

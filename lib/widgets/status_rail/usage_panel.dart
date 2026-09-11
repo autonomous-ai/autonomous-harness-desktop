@@ -1,31 +1,26 @@
 import 'package:flutter/material.dart';
 
-import '../../grid/grid_selection_store.dart' show thisComputerLabel;
 import '../../shared/theme/app_theme.dart' as grid;
 import '../../usage/usage_accounts.dart';
-import '../../usage/usage_offer.dart';
 import '../../usage/usage_pressure.dart';
 import '../../usage/usage_window.dart';
 import '../engine_identity.dart';
 import 'usage_ink.dart';
+
+/// What a panel calls this computer when neither the sidebar nor the OS has a
+/// name for it.
+const String _kThisComputer = 'This computer';
 
 /// What one account has spent, window by window.
 ///
 /// The panel behind a figure on the status rail: the same numbers the strip
 /// prints, given the room to say which window each belongs to and when it
 /// starts over.
-///
-/// With a window nearly spent it also carries [offer] — the same offer the
-/// strip above the rail makes, in the one place that is always reachable. The
-/// strip appears once per window and can be closed for good; this cannot, so
-/// somebody who waved it away an hour ago still has a door.
 class UsagePanelContent extends StatelessWidget {
   const UsagePanelContent({
     super.key,
     required this.accounts,
     this.machineName,
-    this.offer,
-    this.onAct,
   });
 
   /// Every account of ONE provider, this computer's first
@@ -47,14 +42,6 @@ class UsagePanelContent extends StatelessWidget {
   /// Null falls back to those words rather than printing a blank caption.
   final String? machineName;
 
-  /// What this computer's nearly-spent window is worth doing about, or null
-  /// when there is nothing worth pressing — see `resolveUsageOffer`.
-  final UsageOffer? offer;
-
-  /// Runs [offer]. Null drops the footer entirely rather than drawing a button
-  /// that goes nowhere.
-  final VoidCallback? onAct;
-
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
@@ -64,10 +51,9 @@ class UsagePanelContent extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _Header(reading: accounts.first.reading),
-        // Whose spend this is, said the way the tokens panel beside it says
-        // its own (`Grid · autonomous.ai`). The two figures now sit together
-        // at the right of the rail, so a panel that named no scope left the
-        // reader to infer it from which figure they happened to hover.
+        // Whose spend this is. The rail can carry other machines' accounts
+        // as well as this one's, so a panel that named no scope would leave
+        // the reader to infer it.
         //
         // Only when there is ONE account: past that the per-account captions
         // below already name every machine, and a heading claiming this
@@ -82,10 +68,6 @@ class UsagePanelContent extends StatelessWidget {
             _AccountCaption(account: account, machineName: machineName),
           ],
           ..._accountBody(account.reading),
-        ],
-        if (offer case final offer? when onAct != null) ...[
-          const SizedBox(height: 12),
-          _OfferFooter(offer: offer, onAct: onAct!),
         ],
       ],
     );
@@ -144,12 +126,10 @@ class _AccountCaption extends StatelessWidget {
 
   String get _caption {
     if (!account.isLocal) return account.machines.join(', ');
-    // The machine's own name, falling back to the words it replaced when the
-    // rail has none to give — a caption is worth more than a blank line. The
-    // fallback goes through `thisComputerLabel` rather than spelling the words
-    // again, so this caption and the pill cannot end up disagreeing.
+    // The machine's own name, falling back to [_kThisComputer] when the rail
+    // has none to give — a caption is worth more than a blank line.
     final own = machineName?.trim();
-    final here = own == null || own.isEmpty ? thisComputerLabel : own;
+    final here = own == null || own.isEmpty ? _kThisComputer : own;
     return account.machines.isEmpty
         ? here
         : '$here · also ${account.machines.join(', ')}';
@@ -157,10 +137,6 @@ class _AccountCaption extends StatelessWidget {
 }
 
 /// Whose spend a single-account panel is showing: this computer, named.
-///
-/// The counterpart to the tokens panel's `Grid · <name>` — same place, same
-/// ink, same shape — so the two panels that open from adjacent figures answer
-/// "whose?" in one voice instead of one answering and the other staying quiet.
 class _PanelScope extends StatelessWidget {
   const _PanelScope({required this.name});
 
@@ -182,12 +158,9 @@ class _PanelScope extends StatelessWidget {
       text: TextSpan(
         style: style,
         children: [
-          // `Computer ·` against the tokens panel's `Grid ·`: the pair names
-          // the two worlds a figure on this rail can belong to, which is the
-          // whole distinction a reader is being helped with.
           TextSpan(text: 'Computer · ', style: style),
           TextSpan(
-            text: own == null || own.isEmpty ? thisComputerLabel : own,
+            text: own == null || own.isEmpty ? _kThisComputer : own,
             style: style.copyWith(
               color: grid.AppPalette.textPrimary,
               fontWeight: grid.AppFont.medium,
@@ -197,55 +170,6 @@ class _PanelScope extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The way out of a nearly-spent window, under the windows themselves.
-///
-/// Deliberately below the figures rather than above them: the panel is opened
-/// to read a number, and an offer that pushed that number down the panel would
-/// be answering a question nobody asked first.
-class _OfferFooter extends StatelessWidget {
-  const _OfferFooter({required this.offer, required this.onAct});
-
-  final UsageOffer offer;
-  final VoidCallback onAct;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Divider(height: 13, color: grid.AppPalette.divider),
-      Text(
-        offer.detail,
-        style: TextStyle(
-          color: grid.AppPalette.textSecondary,
-          fontSize: 11,
-          height: 1.4,
-        ),
-      ),
-      const SizedBox(height: 8),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton(
-          onPressed: onAct,
-          style: FilledButton.styleFrom(
-            backgroundColor: grid.AppPalette.accent,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: TextStyle(
-              fontFamily: grid.AppFont.sans,
-              fontSize: 12,
-              fontWeight: grid.AppFont.medium,
-            ),
-          ),
-          child: Text(offer.actionLabel),
-        ),
-      ),
-    ],
-  );
 }
 
 /// The account this panel is about, and how fresh its figures are.
@@ -361,9 +285,8 @@ class _WindowRow extends StatelessWidget {
 
 /// How full one window is.
 ///
-/// Drawn the way the grid's memory bar is drawn — 6px and fully rounded — and
-/// in the **account's own colour**, which is the same colour as the mark at the
-/// top of the panel. The first version was a 3px grey sliver on a recessed
+/// Drawn 6px and fully rounded, in the **account's own colour** — the same
+/// colour as the mark at the top of the panel. The first version was a 3px grey sliver on a recessed
 /// track, and at the single-digit percentages these windows actually sit at for
 /// most of their life it was invisible: the figure beside it was doing all the
 /// work and the bar was decoration that could not be seen.
@@ -393,9 +316,8 @@ class UsageBar extends StatelessWidget {
 
   /// The narrowest the filled part may be drawn.
   ///
-  /// The same reasoning as `MemorySplitBar.minSliceWidth`: below this a band of
-  /// colour reads as a rendering artefact rather than a quantity, so a small
-  /// percentage is over-represented on purpose. A window at 2% is *not* a
+  /// Below this a band of colour reads as a rendering artefact rather than a
+  /// quantity, so a small percentage is over-represented on purpose. A window at 2% is *not* a
   /// window at 0%, and the bar has to be able to say so — the exact figure is
   /// printed directly underneath, so nothing is lost by rounding up here.
   static const double _minFill = 4;

@@ -132,12 +132,6 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
       _checkList(state),
       const SizedBox(height: 20),
       _planList(),
-      const SizedBox(height: 16),
-      _notice(
-        Icons.shield_outlined,
-        'Grid CLI is required; Grid sign-in comes later',
-        'After Harness SSO, the app connects your Grid account through the existing secure login flow.',
-      ),
     ],
   );
 
@@ -149,7 +143,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
         _heading(
           'Step 3 of 3 · Choose & install',
           'Choose how to prepare this computer',
-          'Both paths finish with the same verification: host dependencies, managed Node 20+, Harness CLI and Grid CLI must all answer.',
+          'Both paths finish with the same verification: host dependencies, managed Node 20+ and Harness CLI must all answer.',
         ),
         SegmentedButton<EnvironmentSetupMode>(
           segments: const [
@@ -246,7 +240,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
       _heading(
         'Setup complete',
         'This computer is ready',
-        'Every required command passed. Continue to Harness sign-in; Grid account login remains after Harness SSO.',
+        'Every required command passed. Continue to Harness sign-in.',
       ),
       _checkList(state),
       const SizedBox(height: 18),
@@ -291,11 +285,6 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
               detail: '~/.harness/runtime · harness version',
               status: state.steps[EnvironmentStep.harness],
             ),
-            _CheckRow(
-              label: 'Grid CLI',
-              detail: 'Required binary · account login comes later',
-              status: state.steps[EnvironmentStep.grid],
-            ),
           ],
         ),
       );
@@ -334,14 +323,12 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
             ('Homebrew', 'Only when missing'),
             ('tmux', 'Required · Homebrew'),
             ('Managed Node 20+ & Harness CLI', '~/.harness only'),
-            ('Grid CLI', 'Required'),
             ('Final verification', 'All commands'),
           ]
         : const [
             ('Host dependency check', 'Read-only'),
             ('Install missing host dependencies', 'One apt transaction'),
             ('Managed Node 20+ & Harness CLI', '~/.harness only'),
-            ('Grid CLI', 'Required'),
             ('Final verification', 'All commands'),
           ];
     return _Panel(
@@ -383,14 +370,7 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
             'eval "\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install tmux',
           ),
           ('4 · Harness CLI', kHarnessDesktopInstallCommand),
-          (
-            '5 · Grid CLI',
-            'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
-          ),
-          (
-            '6 · Verify',
-            'tmux -V && ~/.local/bin/harness version && ~/.local/bin/grid --version',
-          ),
+          ('5 · Verify', 'tmux -V && ~/.local/bin/harness version'),
         ]
       : [
           (
@@ -399,12 +379,8 @@ class _EnvironmentSetupScreenState extends State<EnvironmentSetupScreen> {
           ),
           ('2 · Harness CLI', kHarnessDesktopInstallCommand),
           (
-            '3 · Grid CLI',
-            'curl -fsSL https://grid.autonomous.ai/install.sh | bash',
-          ),
-          (
-            '4 · Verify',
-            'tmux -V${_linuxClipboardPackage == null ? '' : ' && command -v ${_linuxClipboardPackage == 'wl-clipboard' ? 'wl-copy' : 'xclip'}'} && ~/.local/bin/harness version && ~/.local/bin/grid --version',
+            '3 · Verify',
+            'tmux -V${_linuxClipboardPackage == null ? '' : ' && command -v ${_linuxClipboardPackage == 'wl-clipboard' ? 'wl-copy' : 'xclip'}'} && ~/.local/bin/harness version',
           ),
         ];
 
@@ -676,7 +652,7 @@ class _Rail extends StatelessWidget {
           _RailStep(index: index, stage: stage),
         const Spacer(),
         Text(
-          'Required: tmux · managed Node 20+ · Harness CLI · Grid CLI',
+          'Required: tmux · managed Node 20+ · Harness CLI',
           style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.5),
         ),
       ],

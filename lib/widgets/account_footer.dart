@@ -80,13 +80,6 @@ class _AccountFooterState extends State<AccountFooter> {
             unawaited(showLinkMachineDialog(context, widget.notifier));
           },
         ),
-        // ⚠️ No provider row here, and none on the rail either. The pill that
-        // used to stand on the rail's floor was removed, and the row that
-        // briefly replaced it went the same way: choosing a provider is a
-        // setting somebody touches once, and Settings — the row directly below
-        // — already opens on the pane that holds it. A second door onto one
-        // screen, sitting one row above the first, is two rows that are both
-        // right and neither of which says which to press.
         AppMenuItem(
           key: const Key('settings-menu-item'),
           icon: LucideIcons.settings300,

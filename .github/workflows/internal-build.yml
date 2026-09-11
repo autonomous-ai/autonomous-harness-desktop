@@ -3,8 +3,8 @@ name: Internal build
 # A signed, notarized macOS build of any branch for testers — not a release. Nothing a running app
 # polls is touched, and nothing is tagged.
 #
-#   git push origin HEAD:internal/grid-demo      # builds that commit, Grid on, Debug off
-#   Actions -> Internal build -> Run workflow    # any branch, with the two flags below
+#   git push origin HEAD:internal/<name>         # builds that commit, Debug off
+#   Actions -> Internal build -> Run workflow    # any branch, with the flag below
 #
 # The run prints both .dmg links: as notices at the top of the run page, and in its summary. THIS
 # REPOSITORY IS PUBLIC, so that page is too — anyone who opens it can download the build. The path
@@ -34,10 +34,6 @@ on:
     branches: ['internal/**']
   workflow_dispatch:
     inputs:
-      grid_surface:
-        description: 'Show Grid (HARNESS_GRID_SURFACE)'
-        type: boolean
-        default: true
       debug_surface:
         description: 'Show Settings > Debug and Tracking (HARNESS_DEBUG_SURFACE)'
         type: boolean
@@ -66,7 +62,6 @@ jobs:
       flutter_version: ${{ steps.plan.outputs.flutter_version }}
       prefix: ${{ steps.plan.outputs.prefix }}
       short_sha: ${{ steps.plan.outputs.short_sha }}
-      grid_surface: ${{ steps.plan.outputs.grid_surface }}
       debug_surface: ${{ steps.plan.outputs.debug_surface }}
     steps:
       - uses: actions/checkout@v7
@@ -77,8 +72,7 @@ jobs:
         # Through env, never `${{ }}` inline in run: — a ref name may carry quotes and $().
         env:
           REF_NAME: ${{ github.ref_name }}
-          # A push has no inputs: it gets what a Grid tester needs, Grid on and Debug off.
-          GRID_SURFACE: ${{ github.event_name == 'push' || inputs.grid_surface }}
+          # A push has no inputs: it gets Debug off.
           DEBUG_SURFACE: ${{ github.event_name != 'push' && inputs.debug_surface }}
         run: |
           set -euo pipefail
@@ -102,7 +96,6 @@ jobs:
             echo "flutter_version=$flutter"
             echo "prefix=harness/desktop-internal/$token"
             echo "short_sha=${GITHUB_SHA::7}"
-            echo "grid_surface=$GRID_SURFACE"
             echo "debug_surface=$DEBUG_SURFACE"
           } >> "$GITHUB_OUTPUT"
 
@@ -120,7 +113,6 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       PREFIX: ${{ needs.prepare.outputs.prefix }}
       VARIANT: ${{ matrix.variant }}
-      GRID_SURFACE: ${{ needs.prepare.outputs.grid_surface }}
       DEBUG_SURFACE: ${{ needs.prepare.outputs.debug_surface }}
       # The file a tester downloads names the build it is: version AND commit.
       ARTIFACT: ${{ matrix.artifact }}-${{ needs.prepare.outputs.version }}-${{ needs.prepare.outputs.short_sha }}
@@ -161,7 +153,6 @@ jobs:
           set -euo pipefail
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           bash scripts/publish-macos-variant.sh "$VARIANT" "$VERSION" --build-only \
-            --dart-define=HARNESS_GRID_SURFACE="$GRID_SURFACE" \
             --dart-define=HARNESS_DEBUG_SURFACE="$DEBUG_SURFACE" \
             --dart-define=DESKTOP_UPDATE_METADATA_URL="https://storage.googleapis.com/${GCS_BUCKET}/harness/desktop-internal/no-updates.json"
 
@@ -199,7 +190,7 @@ jobs:
             echo
             echo "**[${ARTIFACT}.dmg](${url})**"
             echo
-            echo "${VERSION} · \`${GITHUB_SHA::7}\` on \`${GITHUB_REF_NAME}\` · Grid ${GRID_SURFACE} · Debug ${DEBUG_SURFACE} · self-update off"
+            echo "${VERSION} · \`${GITHUB_SHA::7}\` on \`${GITHUB_REF_NAME}\` · Debug ${DEBUG_SURFACE} · self-update off"
             echo
             echo "dmg sha256 \`${sha}\`"
             echo

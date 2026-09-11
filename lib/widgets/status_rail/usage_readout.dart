@@ -9,26 +9,18 @@ import '../engine_identity.dart';
 import 'rail_figure.dart';
 import 'usage_ink.dart';
 
-/// What the agent accounts on this machine have spent, along the status rail.
+/// What the agent accounts have spent, along the status rail.
 ///
-/// Stands where the grid figures stand, and appears exactly when they cannot:
-/// with no grid chosen the strip used to read "No grid chosen", which is a
-/// sentence that tells someone what they already know and gives them nothing.
-/// These figures are true whether or not a grid is picked, because a rate limit
-/// belongs to an *account*, not to a grid.
-///
-/// Generic over what a figure opens so it can hand the rail back its own panel
-/// kind without that enum having to leave the rail.
-class UsageReadout<T> extends StatelessWidget {
+/// True whichever machine the agents run on, because a rate limit belongs to an
+/// *account* rather than to a machine — see `UsageController`.
+class UsageReadout extends StatelessWidget {
   const UsageReadout({
     super.key,
     required this.accounts,
     required this.loading,
     required this.anchorFor,
-    required this.kindFor,
     required this.onEnter,
     required this.onExit,
-    this.tight = false,
   });
 
   /// One per ACCOUNT, this computer's first — see `groupUsageAccounts`. A
@@ -40,24 +32,8 @@ class UsageReadout<T> extends StatelessWidget {
   final bool loading;
 
   final RailFigureAnchor Function(UsageProvider) anchorFor;
-  final T Function(UsageProvider) kindFor;
-  final void Function(T) onEnter;
-  final void Function(T) onExit;
-
-  /// Take only the width the figures need, instead of filling what is offered
-  /// and pushing them to its right edge.
-  ///
-  /// The no-grid branch leaves this false: it hands this readout an `Expanded`
-  /// covering the whole rail, and the right-alignment is what puts the figures
-  /// at the strip's far end where they belong.
-  ///
-  /// ⚠️ The grid branch sets it. There the readout is one block among several
-  /// against a bounded width, and filling that bound put a band of dead rail
-  /// BETWEEN the grid's token figure and these — a gap that read as though the
-  /// two belonged to different halves of the strip when they are the two spend
-  /// figures and sit together. The `Spacer` ahead of them is what pins the
-  /// whole group right; this block does not need to do it a second time.
-  final bool tight;
+  final void Function(UsageProvider) onEnter;
+  final void Function(UsageProvider) onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -66,12 +42,10 @@ class UsageReadout<T> extends StatelessWidget {
     // one account at a time. Only before the first reading: once figures exist
     // they stay through every refresh.
     if (loading) {
-      return tight
-          ? const _UsageSkeleton()
-          : const Align(
-              alignment: Alignment.centerRight,
-              child: _UsageSkeleton(),
-            );
+      return const Align(
+        alignment: Alignment.centerRight,
+        child: _UsageSkeleton(),
+      );
     }
     // One hover target per PROVIDER, holding a figure for each of its
     // accounts. The rail's panels are keyed by provider, and one Claude panel
@@ -86,35 +60,31 @@ class UsageReadout<T> extends StatelessWidget {
       byProvider.putIfAbsent(account.provider, () => []).add(account);
     }
     if (byProvider.isEmpty) return const SizedBox.shrink();
-    // Right, at the strip's far end. These figures are the one thing on it
-    // that is nobody's *setting* — the pill at the other end is what you
-    // press, and furniture you only read belongs at the edge you are not
-    // reaching for.
-    final row = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final MapEntry(key: provider, value: shown) in byProvider.entries)
-          // Loose, so a provider gives width back instead of overflowing.
-          // This row is `min` and sizes to its content, which is right when
-          // it has the rail to itself — but the grid readout hangs it off a
-          // bounded block beside its own figures, and there two providers'
-          // worth of `92% used · resets in 12d 8h` is wider than the budget.
-          // Without this the surplus became an overflow bar rather than an
-          // ellipsis, because nothing in here could yield.
-          Flexible(
-            child: RailHoverTarget<T>(
-              kind: kindFor(provider),
-              anchor: anchorFor(provider),
-              semantics: _semantics(provider, shown),
-              onEnter: onEnter,
-              onExit: onExit,
-              child: _ProviderFigures(provider: provider, accounts: shown),
+    // Right, at the strip's far end beside the key hints: furniture you only
+    // read belongs at the edge you are not reaching for.
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final MapEntry(key: provider, value: shown)
+              in byProvider.entries)
+            // Loose, so a provider gives width back instead of overflowing:
+            // two providers' worth of `92% used · resets in 12d 8h` beside the
+            // key hints is wider than a narrow window leaves.
+            Flexible(
+              child: RailHoverTarget<UsageProvider>(
+                kind: provider,
+                anchor: anchorFor(provider),
+                semantics: _semantics(provider, shown),
+                onEnter: onEnter,
+                onExit: onExit,
+                child: _ProviderFigures(provider: provider, accounts: shown),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
-    // Tight takes the figures' own width; otherwise fill and sit right.
-    return tight ? row : Align(alignment: Alignment.centerRight, child: row);
   }
 
   static String _semantics(UsageProvider provider, List<UsageAccount> shown) {
@@ -212,11 +182,11 @@ class _AccountFigure extends StatelessWidget {
         // is not — so the figure is always followed by something that says
         // which limit it belongs to.
         //
-        // Flexible, and the only part of the figure that is: on the grid rail
-        // this readout shares the strip with the grid's own blocks, and
-        // something has to give when two accounts' worth of it will not fit.
-        // The percentage is what a person came here to read and must never be
-        // clipped; `resets in 12d 8h` still means something half-ellipsised.
+        // Flexible, and the only part of the figure that is: this readout
+        // shares the strip with the key hints, and something has to give when
+        // two accounts' worth of it will not fit. The percentage is what a
+        // person came here to read and must never be clipped; `resets in 12d
+        // 8h` still means something half-ellipsised.
         Flexible(
           child: Text(
             window.resetsInLabel() ?? window.label,

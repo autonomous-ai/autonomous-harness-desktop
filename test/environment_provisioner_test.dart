@@ -31,7 +31,6 @@ void main() {
 
   ProcessRunner runner({
     required bool Function() tmuxPresent,
-    required bool Function() gridPresent,
     bool Function()? homebrewPresent,
     bool Function()? xclipPresent,
     bool Function()? wlCopyPresent,
@@ -43,12 +42,10 @@ void main() {
     Future<void> Function()? installTmux,
     Future<void> Function(List<String> packages)? installLinuxPackages,
     Future<void> Function()? installHarness,
-    Future<void> Function()? installGrid,
     List<String>? calls,
     int tmuxInstallExitCode = 0,
     int linuxInstallExitCode = 0,
     String linuxInstallStderr = 'apt install failed',
-    int gridInstallExitCode = 0,
   }) {
     return (executable, arguments, {environment}) async {
       final command = '$executable ${arguments.join(' ')}';
@@ -122,20 +119,9 @@ void main() {
             ? result(0, stdout: '/usr/bin/clang')
             : result(1, stderr: 'unable to find utility clang');
       }
-      if (shell.contains('command -v grid')) {
-        return gridPresent() ? result(0, stdout: 'grid 1.0') : result(1);
-      }
       if (shell.contains('cdn.autonomous.ai/harness/cli/install.sh')) {
         await installHarness?.call();
         return result(0, stdout: 'Harness installed');
-      }
-      if (shell.contains('grid.autonomous.ai/install.sh')) {
-        if (gridInstallExitCode == 0) await installGrid?.call();
-        return result(
-          gridInstallExitCode,
-          stdout: gridInstallExitCode == 0 ? 'Grid installed' : '',
-          stderr: gridInstallExitCode == 0 ? '' : 'network unavailable',
-        );
       }
       if (executable == managedNode.path &&
           arguments.length == 1 &&
@@ -159,11 +145,7 @@ void main() {
         harnessHome: scratch,
         isMacOS: true,
         openTerminal: (_) async => terminalLaunches++,
-        run: runner(
-          tmuxPresent: () => false,
-          gridPresent: () => false,
-          calls: calls,
-        ),
+        run: runner(tmuxPresent: () => false, calls: calls),
       );
 
       final readiness = await provisioner.ensureReady(
@@ -188,7 +170,6 @@ void main() {
       run: runner(
         developerToolsPresent: false,
         tmuxPresent: () => true,
-        gridPresent: () => false,
         calls: calls,
       ),
     );
@@ -218,7 +199,6 @@ void main() {
       run: runner(
         developerToolsPresent: false,
         tmuxPresent: () => false,
-        gridPresent: () => false,
         calls: calls,
       ),
     );
@@ -262,7 +242,6 @@ void main() {
         openTerminal: (_) async => terminalLaunches++,
         run: runner(
           tmuxPresent: () => tmuxPresent,
-          gridPresent: () => true,
           installTmux: () async => tmuxPresent = true,
           calls: calls,
         ),
@@ -294,7 +273,6 @@ void main() {
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         tmuxPresent: () => false,
-        gridPresent: () => true,
         tmuxInstallExitCode: 7,
         calls: calls,
       ),
@@ -328,7 +306,6 @@ void main() {
         run: runner(
           homebrewPresent: () => false,
           tmuxPresent: () => false,
-          gridPresent: () => false,
           calls: calls,
         ),
       );
@@ -349,84 +326,67 @@ void main() {
     },
   );
 
-  test(
-    'automatic setup installs Harness before required Grid then verifies',
-    () async {
-      var gridPresent = false;
-      final calls = <String>[];
-      final provisioner = EnvironmentProvisioner(
-        harnessHome: scratch,
-        isMacOS: true,
-        run: runner(
-          tmuxPresent: () => true,
-          gridPresent: () => gridPresent,
-          installHarness: createManagedHarness,
-          installGrid: () async => gridPresent = true,
-          calls: calls,
-        ),
-      );
+  test('automatic setup installs Harness, then verifies', () async {
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      run: runner(
+        tmuxPresent: () => true,
+        installHarness: createManagedHarness,
+        calls: calls,
+      ),
+    );
 
-      final readiness = await provisioner.ensureReady(
-        onProgress: (_) {},
-        install: true,
-        mode: EnvironmentSetupMode.automatic,
-      );
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
 
-      final harnessInstall = calls.indexWhere(
-        (line) => line.contains('cdn.autonomous.ai/harness/cli/install.sh'),
-      );
-      final gridInstall = calls.indexWhere(
-        (line) => line.contains('grid.autonomous.ai/install.sh'),
-      );
-      expect(readiness.isReady, isTrue);
-      expect(readiness.phase, EnvironmentSetupPhase.ready);
-      expect(harnessInstall, greaterThan(-1));
-      expect(gridInstall, greaterThan(harnessInstall));
-      expect(calls[harnessInstall], contains('/bin/sh -s -- --desktop'));
-    },
-  );
+    final harnessInstall = calls.indexWhere(
+      (line) => line.contains('cdn.autonomous.ai/harness/cli/install.sh'),
+    );
+    expect(readiness.isReady, isTrue);
+    expect(readiness.phase, EnvironmentSetupPhase.ready);
+    expect(harnessInstall, greaterThan(-1));
+    expect(calls[harnessInstall], contains('/bin/sh -s -- --desktop'));
+  });
 
-  test(
-    'missing tmux opens a real terminal before either CLI installer',
-    () async {
-      String? terminalScript;
-      final calls = <String>[];
-      final provisioner = EnvironmentProvisioner(
-        harnessHome: scratch,
-        isMacOS: false,
-        isLinux: true,
-        openTerminal: (path) async => terminalScript = path,
-        run: runner(
-          tmuxPresent: () => false,
-          gridPresent: () => false,
-          calls: calls,
-        ),
-      );
+  test('missing tmux opens a real terminal before the CLI installer', () async {
+    String? terminalScript;
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      openTerminal: (path) async => terminalScript = path,
+      run: runner(tmuxPresent: () => false, calls: calls),
+    );
 
-      final readiness = await provisioner.ensureReady(
-        onProgress: (_) {},
-        install: true,
-        mode: EnvironmentSetupMode.automatic,
-      );
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
 
-      expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
-      expect(
-        readiness.steps[EnvironmentStep.tmux],
-        EnvironmentStepStatus.needsTerminal,
-      );
-      expect(terminalScript, isNotNull);
-      expect(calls.where((line) => line.contains('install.sh')), isEmpty);
-      final script = await File(terminalScript!).readAsString();
-      expect(script, contains('apt_as_root install -y tmux'));
-      expect(script, contains('if [ "\$(id -u)" -eq 0 ]'));
-      expect(script, contains('terminal.log'));
-      expect(script, contains('tmux -V'));
-      expect(
-        (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
-        0,
-      );
-    },
-  );
+    expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+    expect(
+      readiness.steps[EnvironmentStep.tmux],
+      EnvironmentStepStatus.needsTerminal,
+    );
+    expect(terminalScript, isNotNull);
+    expect(calls.where((line) => line.contains('install.sh')), isEmpty);
+    final script = await File(terminalScript!).readAsString();
+    expect(script, contains('apt_as_root install -y tmux'));
+    expect(script, contains('if [ "\$(id -u)" -eq 0 ]'));
+    expect(script, contains('terminal.log'));
+    expect(script, contains('tmux -V'));
+    expect(
+      (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
+      0,
+    );
+  });
 
   test(
     'X11 with tmux ready still opens Terminal when xclip needs sudo',
@@ -439,11 +399,7 @@ void main() {
         isLinux: true,
         platformEnvironment: const {'DISPLAY': ':0'},
         openTerminal: (path) async => terminalScript = path,
-        run: runner(
-          tmuxPresent: () => true,
-          gridPresent: () => true,
-          xclipPresent: () => false,
-        ),
+        run: runner(tmuxPresent: () => true, xclipPresent: () => false),
       );
 
       final readiness = await provisioner.ensureReady(
@@ -490,7 +446,6 @@ void main() {
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         wlCopyPresent: () => wlCopyPresent,
         passwordlessSudo: true,
         installLinuxPackages: (packages) async {
@@ -531,7 +486,6 @@ void main() {
       openTerminal: (path) async => terminalScript = path,
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         xclipPresent: () => false,
         passwordlessSudo: true,
         linuxInstallExitCode: 7,
@@ -561,7 +515,6 @@ void main() {
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         xclipPresent: () => false,
         passwordlessSudo: true,
         linuxInstallExitCode: 31,
@@ -592,7 +545,6 @@ void main() {
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         xclipPresent: () => false,
         passwordlessSudo: true,
         linuxInstallExitCode: 32,
@@ -623,7 +575,6 @@ void main() {
       openTerminal: (_) async => terminalLaunches++,
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         xclipPresent: () => false,
         aptPresent: false,
       ),
@@ -658,7 +609,6 @@ void main() {
       },
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         wlCopyPresent: () => true,
         xclipPresent: () => false,
         calls: calls,
@@ -689,7 +639,6 @@ void main() {
       platformEnvironment: const {},
       run: runner(
         tmuxPresent: () => true,
-        gridPresent: () => true,
         xclipPresent: () => false,
         wlCopyPresent: () => false,
         calls: calls,
@@ -719,11 +668,7 @@ void main() {
       isLinux: true,
       platformEnvironment: const {'DISPLAY': ':0'},
       openTerminal: (_) async => launches++,
-      run: runner(
-        tmuxPresent: () => true,
-        gridPresent: () => true,
-        xclipPresent: () => false,
-      ),
+      run: runner(tmuxPresent: () => true, xclipPresent: () => false),
     );
     final waiting = await provisioner.ensureReady(
       onProgress: (_) {},
@@ -752,11 +697,7 @@ void main() {
       isLinux: true,
       platformEnvironment: const {'DISPLAY': ':0'},
       openTerminal: (_) async => launches++,
-      run: runner(
-        tmuxPresent: () => true,
-        gridPresent: () => true,
-        xclipPresent: () => false,
-      ),
+      run: runner(tmuxPresent: () => true, xclipPresent: () => false),
     );
     final waiting = await provisioner.ensureReady(
       onProgress: (_) {},
@@ -793,11 +734,7 @@ void main() {
           launches++;
           terminalScript = path;
         },
-        run: runner(
-          tmuxPresent: () => false,
-          gridPresent: () => true,
-          xclipPresent: () => false,
-        ),
+        run: runner(tmuxPresent: () => false, xclipPresent: () => false),
       );
 
       final readiness = await provisioner.ensureReady(
@@ -829,7 +766,6 @@ void main() {
     var tmuxPresent = true;
     var curlPresent = false;
     var harnessInstalled = false;
-    var gridPresent = true;
     final missing = <String>{'curl'};
     final calls = <String>[];
     final provisioner = EnvironmentProvisioner(
@@ -839,7 +775,6 @@ void main() {
       platformEnvironment: const {},
       run: runner(
         tmuxPresent: () => tmuxPresent,
-        gridPresent: () => gridPresent,
         runAsRoot: true,
         missingCommands: missing,
         installLinuxPackages: (packages) async {
@@ -875,31 +810,6 @@ void main() {
     expect(harness, greaterThan(apt));
   });
 
-  test('Grid install failure is a blocking, actionable error', () async {
-    await createManagedHarness();
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: true,
-      run: runner(
-        tmuxPresent: () => true,
-        gridPresent: () => false,
-        gridInstallExitCode: 7,
-      ),
-    );
-
-    final readiness = await provisioner.ensureReady(
-      onProgress: (_) {},
-      install: true,
-      mode: EnvironmentSetupMode.automatic,
-    );
-
-    expect(readiness.isReady, isFalse);
-    expect(readiness.phase, EnvironmentSetupPhase.failed);
-    expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.failed);
-    expect(readiness.failure?.command, contains('grid --version'));
-    expect(readiness.failure?.detail, contains('network unavailable'));
-  });
-
   test(
     'a failed admin Terminal run surfaces its exit code and full log',
     () async {
@@ -909,7 +819,7 @@ void main() {
         isMacOS: false,
         isLinux: true,
         openTerminal: (_) async => launches++,
-        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+        run: runner(tmuxPresent: () => false),
       );
       final waiting = await provisioner.ensureReady(
         onProgress: (_) {},
@@ -942,7 +852,7 @@ void main() {
         isMacOS: false,
         isLinux: true,
         openTerminal: (_) async => launches++,
-        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+        run: runner(tmuxPresent: () => false),
       );
       final waiting = await provisioner.ensureReady(
         onProgress: (_) {},
@@ -979,7 +889,7 @@ void main() {
         isMacOS: false,
         isLinux: true,
         openTerminal: (_) async => launches++,
-        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+        run: runner(tmuxPresent: () => false),
       );
       final waiting = await provisioner.ensureReady(
         onProgress: (_) {},
@@ -1015,11 +925,7 @@ void main() {
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
-        run: runner(
-          tmuxPresent: () => true,
-          gridPresent: () => true,
-          calls: calls,
-        ),
+        run: runner(tmuxPresent: () => true, calls: calls),
       );
 
       final readiness = await provisioner.ensureReady(

@@ -26,9 +26,8 @@ enum TerminalSessionStatus {
 }
 
 /// Transient progress for an in-flight [TerminalSession.pasteImage]/[TerminalSession.pasteFile]
-/// chunked upload — mirrors `lib/share/model_pull.dart`'s `PullProgress`, the closest existing
-/// analog in this app for "a known-size transfer with a percentage". `bytesWritten` reflects the
-/// daemon's own per-chunk ACKs, not bytes merely handed to the local socket.
+/// chunked upload. `bytesWritten` reflects the daemon's own per-chunk ACKs, not bytes merely handed
+/// to the local socket.
 class UploadProgress {
   const UploadProgress({
     required this.label,

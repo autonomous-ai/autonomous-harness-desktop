@@ -17,12 +17,11 @@ import 'package:harness/settings/settings_section.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 import 'package:harness/shared/widgets/empty_state.dart';
 
-/// The probe every test here passes: the real one reads `~/.harness` and runs
-/// `which grid`, which no widget test may do.
+/// The probe every test here passes: the real one reads `~/.harness`, which no
+/// widget test may do.
 Future<DebugEnvironment> _fakeProbe() async => const DebugEnvironment(
   harnessCommand: '/tmp/node /tmp/cli.js',
   harnessSource: HarnessCliSource.managed,
-  gridExecutable: null,
   logsDirectory: '/tmp/logs',
 );
 
@@ -69,7 +68,7 @@ void main() {
     final stream = LogStream()
       ..add(AppLogLevel.debug, 'ws', '→ agent_create')
       ..add(AppLogLevel.warn, 'ws', '← agent_create failed')
-      ..add(AppLogLevel.error, 'api', 'GET /v1/grid/me → failed');
+      ..add(AppLogLevel.error, 'api', 'GET /api/machines → failed');
     await pumpDebug(tester, stream);
 
     await tester.tap(find.text('Failed'));
@@ -77,7 +76,7 @@ void main() {
 
     final tiles = tester.widgetList<DebugLogTile>(find.byType(DebugLogTile));
     expect(tiles.map((tile) => tile.entry.message), [
-      'GET /v1/grid/me → failed',
+      'GET /api/machines → failed',
       '← agent_create failed',
     ]);
   });
@@ -171,7 +170,7 @@ void main() {
       final id = stream.add(
         AppLogLevel.info,
         'cli',
-        'grid --remote join grid-abc',
+        'harness link create',
         command: LogCommand(),
       );
       stream.appendOutput(id, 'joined');
@@ -179,7 +178,7 @@ void main() {
 
       final text = debugEntryAsText(stream.entries.single);
 
-      expect(text, contains('grid --remote join grid-abc'));
+      expect(text, contains('harness link create'));
       expect(text, contains('FAILED exit=1 (2s)'));
       expect(text, contains('joined'));
     });

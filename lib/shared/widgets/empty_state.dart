@@ -30,7 +30,7 @@ class EmptyState extends StatelessWidget {
   /// One quiet line under the title. Keep it to a sentence.
   final String? message;
 
-  /// The action that makes the emptiness go away — "New grid", "Add plugin".
+  /// The action that makes the emptiness go away — "New agent", "Add plugin".
   final Widget? action;
 
   /// Tightens the spacing for an empty state inside a card or a narrow column

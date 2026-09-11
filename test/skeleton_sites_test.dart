@@ -5,54 +5,15 @@
 // for, so nothing on the page moves when the answer lands. They also guard
 // the two states that must never look alike — "still loading" and "answered
 // with nothing" — which is the bug a bare empty list always has.
-import 'dart:async';
-
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
-import 'package:harness/core/local_key_value_store.dart';
 import 'package:harness/core/models.dart';
-import 'package:harness/grid/grid_network.dart';
-import 'package:harness/grid/grid_networks_controller.dart';
-import 'package:harness/grid/grid_selection_store.dart';
-import 'package:harness/grid/provider_enablement_store.dart';
-import 'package:harness/settings/sections/provider_split_pane.dart';
-import 'package:harness/settings/sections/grid_section.dart';
 import 'package:harness/shared/theme/app_theme.dart';
 import 'package:harness/shared/widgets/skeleton.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/machine_rail.dart';
-
-import 'support/fake_grid_api.dart';
-
-class _MemoryStore implements LocalKeyValueStore {
-  final Map<String, String> values = {};
-
-  @override
-  Future<String?> read(String key) async => values[key];
-
-  @override
-  Future<void> write(String key, String value) async => values[key] = value;
-
-  @override
-  Future<void> delete(String key) async => values.remove(key);
-}
-
-/// A grid API that answers only when the test says so.
-class _HeldGridApi extends FakeGridApi {
-  final _gate = Completer<void>();
-
-  void release() => _gate.complete();
-
-  @override
-  Future<GridMe> me() async {
-    await _gate.future;
-    return super.me();
-  }
-}
 
 Widget _themed(Widget child) => MaterialApp(
   home: Builder(
@@ -73,63 +34,6 @@ const _machine = Machine(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  group('Settings ▸ Providers', () {
-    testWidgets(
-      'the split is a split before the providers arrive, and nothing moves '
-      'when they land',
-      (tester) async {
-        tester.view.physicalSize = const Size(1200, 800);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
-        final api = _HeldGridApi();
-        final controller = GridNetworksController(client: api);
-        addTearDown(controller.dispose);
-        final selection = GridSelectionStore(storage: _MemoryStore());
-
-        await tester.pumpWidget(
-          _themed(
-            GridSection(
-              controller: controller,
-              selection: selection,
-              // Its own file: the singleton writes the developer's real
-              // ~/.harness, and a test run must not.
-              enablement: ProviderEnablementStore(
-                file: File(
-                  '${Directory.systemTemp.createTempSync('providers').path}'
-                  '/providers_config.json',
-                ),
-              ),
-            ),
-          ),
-        );
-        await tester.pump();
-
-        // The frame and the header are known before the control plane answers,
-        // so they are drawn in ink around a placeholder of the right shape.
-        expect(
-          find.byKey(const Key('provider-split-skeleton')),
-          findsOneWidget,
-        );
-        // A count nobody knows yet is a bar, not the number 0.
-        expect(find.byKey(const Key('grid-count-skeleton')), findsOneWidget);
-        expect(find.textContaining('2 providers'), findsNothing);
-
-        final splitBefore = tester.getRect(
-          find.byKey(const Key('provider-split-skeleton')),
-        );
-
-        api.release();
-        await tester.pumpAndSettle();
-
-        expect(find.byKey(const Key('provider-split-skeleton')), findsNothing);
-        expect(find.text('2 providers · 2 enabled'), findsOneWidget);
-        expect(find.text('hp-1-1'), findsWidgets);
-        // Nothing moved: the answer landed in the room the placeholder held.
-        expect(tester.getRect(find.byType(ProviderSplitPane)), splitBefore);
-      },
-    );
-  });
 
   group('the machine rail', () {
     AppNotifier notifier() => AppNotifier(

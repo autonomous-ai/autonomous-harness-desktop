@@ -249,7 +249,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.failed,
           EnvironmentStep.tmux: EnvironmentStepStatus.ready,
-          EnvironmentStep.grid: EnvironmentStepStatus.failed,
         },
         phase: EnvironmentSetupPhase.review,
       );
@@ -304,7 +303,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.ready,
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
-          EnvironmentStep.grid: EnvironmentStepStatus.pending,
         },
         phase: EnvironmentSetupPhase.waitingForTerminal,
         mode: EnvironmentSetupMode.automatic,
@@ -353,7 +351,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.ready,
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
-          EnvironmentStep.grid: EnvironmentStepStatus.pending,
         },
         phase: EnvironmentSetupPhase.waitingForTerminal,
         mode: EnvironmentSetupMode.automatic,
@@ -390,7 +387,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.failed,
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
-          EnvironmentStep.grid: EnvironmentStepStatus.failed,
         },
         phase: EnvironmentSetupPhase.waitingForTerminal,
         mode: EnvironmentSetupMode.automatic,
@@ -402,7 +398,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.failed,
           EnvironmentStep.tmux: EnvironmentStepStatus.failed,
-          EnvironmentStep.grid: EnvironmentStepStatus.failed,
         },
       );
       final provisioner = _ScriptedEnvironmentProvisioner(
@@ -446,7 +441,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.failed,
           EnvironmentStep.tmux: EnvironmentStepStatus.ready,
-          EnvironmentStep.grid: EnvironmentStepStatus.failed,
         },
         phase: EnvironmentSetupPhase.waitingForTerminal,
         mode: EnvironmentSetupMode.automatic,
@@ -578,7 +572,6 @@ void main() {
         steps: {
           EnvironmentStep.harness: EnvironmentStepStatus.ready,
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
-          EnvironmentStep.grid: EnvironmentStepStatus.pending,
         },
         message:
             'Complete the setup in the terminal window, then click Recheck.',
@@ -608,7 +601,6 @@ void main() {
       steps: {
         EnvironmentStep.harness: EnvironmentStepStatus.failed,
         EnvironmentStep.tmux: EnvironmentStepStatus.ready,
-        EnvironmentStep.grid: EnvironmentStepStatus.failed,
       },
       phase: EnvironmentSetupPhase.review,
     );
@@ -623,7 +615,6 @@ void main() {
     expect(find.text('Here is exactly what is required'), findsOneWidget);
     expect(find.text('HOST DEPENDENCIES'), findsOneWidget);
     expect(find.text('HARNESS COMPONENTS'), findsOneWidget);
-    expect(find.text('Grid CLI'), findsWidgets);
     await tester.tap(find.text('Continue'));
     await tester.pump();
 
@@ -633,10 +624,6 @@ void main() {
     await tester.tap(find.text('Manual'));
     await tester.pump();
 
-    expect(
-      find.textContaining('grid.autonomous.ai/install.sh'),
-      findsOneWidget,
-    );
     expect(find.textContaining('/bin/sh -s -- --desktop'), findsOneWidget);
     expect(find.text('I ran these · Recheck'), findsOneWidget);
   });
@@ -649,7 +636,6 @@ void main() {
       steps: {
         EnvironmentStep.harness: EnvironmentStepStatus.ready,
         EnvironmentStep.tmux: EnvironmentStepStatus.ready,
-        EnvironmentStep.grid: EnvironmentStepStatus.ready,
       },
       phase: EnvironmentSetupPhase.review,
       systemReady: false,

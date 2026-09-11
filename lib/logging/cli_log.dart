@@ -3,17 +3,15 @@ import 'log_file.dart';
 /// Durable, append-only transcript of every CLI call this app makes, written per
 /// day to `~/.harness/logs/cli-YYYYMMDD.log`.
 ///
-/// Ported from Grid. It earns its own file here more than it did there: this app
-/// drives **two** CLIs — `harness` for everything, and `grid` for Share
-/// Intelligence — and "the CLI did something unexpected" is the single most
-/// common shape of a fault, because the app itself holds almost no logic.
+/// Ported from Grid. "The CLI did something unexpected" is the single most
+/// common shape of a fault here, because the app itself holds almost no logic.
 ///
 /// Concurrent calls interleave in the file, so each line is tagged with a
 /// per-call id (`#3`) to keep one command's output readable.
 ///
-/// **A command line is logged, its environment is not.** Secrets travel in the
-/// child's environment precisely so they stay out of argv (see `GridCli.start`);
-/// writing the environment here would undo that and put a key on disk.
+/// **A command line is logged, its environment is not.** A secret handed to a
+/// child travels in its environment precisely so it stays out of argv; writing
+/// the environment here would undo that and put a key on disk.
 abstract interface class CliLog {
   /// Opens a section for one invocation. [command] is the display line
   /// (`harness link create`). Returns a handle to append output and close it.

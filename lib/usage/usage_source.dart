@@ -23,8 +23,7 @@ abstract class UsageSource {
 /// A Dio configured the way every usage call wants it.
 ///
 /// `validateStatus` lets 4xx through so a 401 can be read as "sign in" rather
-/// than surfacing as a transport failure — the split [ApiClient] and
-/// [GridApiClient] both draw.
+/// than surfacing as a transport failure — the split [ApiClient] draws too.
 Dio buildUsageDio({String? baseUrl}) => Dio(
   BaseOptions(
     baseUrl: baseUrl ?? '',

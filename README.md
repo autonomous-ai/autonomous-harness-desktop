@@ -71,7 +71,7 @@ The selected directory supplies that agent’s Codex login, configuration, hooks
 history and model cache, and stays attached across restarts. The terminal header
 shows its folder name and exposes the full path in a tooltip. **Default** keeps
 the machine’s normal launch behavior. This picker applies to local agents using
-Codex’s own account; remote machines and Grid launches use their existing flows.
+Codex’s own account; remote machines use their existing flow.
 The rail’s Codex usage panel still reports the default `~/.codex` profile.
 
 This requires the companion CLI support for `agent_create.codexHome`. Older CLIs

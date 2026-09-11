@@ -304,8 +304,8 @@ builds, Developer ID signed, notarized, stapled and checked by Gatekeeper — an
 no running app and no public page will ever look:
 
 ```bash
-git push origin HEAD:internal/<name>     # builds that commit: Grid on, Debug off
-gh workflow run internal-build.yml --ref <branch> -f grid_surface=true -f debug_surface=false
+git push origin HEAD:internal/<name>     # builds that commit: Debug off
+gh workflow run internal-build.yml --ref <branch> -f debug_surface=false
 ```
 
 (`workflow_dispatch` only exists once the file is on `main`; the `internal/**` push works from any

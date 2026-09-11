@@ -299,13 +299,6 @@ class _MachineRailState extends State<MachineRail> {
                         ),
                       ),
               ),
-              // ⚠️ The provider pill used to sit here, above the account row. It is
-              // gone from the rail entirely: the way to a provider is now the
-              // account menu's own row, which opens Settings ▸ Providers. The rail
-              // is a list of MACHINES, and a second, unrelated picker standing on
-              // its floor was one permanent row spent on a setting most people
-              // change once. `GridTargetPill` is kept in the tree for the reason
-              // `GridHero` is — see `settings/sections/provider_split_pane.dart`.
               AccountFooter(notifier: widget.notifier),
             ],
           ),

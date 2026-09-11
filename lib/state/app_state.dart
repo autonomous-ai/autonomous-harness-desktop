@@ -14,13 +14,9 @@ import '../auth/cli_login.dart';
 import '../bootstrap/environment_provisioner.dart';
 import '../core/config.dart';
 import '../core/engine_availability.dart';
+import '../core/local_hostname.dart';
 import '../core/models.dart';
 import '../core/retry.dart';
-import '../grid/grid_agent_override.dart';
-import '../grid/grid_selection_store.dart';
-import '../grid/grid_session.dart';
-import '../share/node_identity.dart';
-import '../logging/app_log.dart';
 import '../settings/config_store.dart';
 import '../stats/harness_stats.dart';
 import '../terminal/terminal_session.dart';
@@ -1007,10 +1003,7 @@ class AppNotifier extends ChangeNotifier {
     if (!quiet ||
         result.isReady ||
         result.phase == EnvironmentSetupPhase.failed) {
-      analytics.environmentPrepared(
-        ready: result.isReady,
-        grid: result.steps[EnvironmentStep.grid] == EnvironmentStepStatus.ready,
-      );
+      analytics.environmentPrepared(ready: result.isReady);
     }
     return result;
   }
@@ -1288,9 +1281,6 @@ class AppNotifier extends ChangeNotifier {
     } catch (error) {
       debugPrint('bootstrap: profile unavailable: $error');
     }
-    // Not awaited: the Grid sign-in is a child process on a network, and the
-    // machine list is what the window is waiting to draw.
-    unawaited(_ensureGridSession());
     try {
       await refreshMachines();
     } catch (error) {
@@ -1298,50 +1288,6 @@ class AppNotifier extends ChangeNotifier {
       _lastErrorRetryable = true;
     }
     notifyListeners();
-  }
-
-  /// Signs this computer in to Grid once the Harness sign-in has resolved — but
-  /// ONLY when it has no Grid session at all.
-  ///
-  /// The two accounts are one person, and `harness grid login` needs no browser
-  /// and about a second, so making somebody go and ask for a second sign-in is
-  /// asking them to care about a split they did not create.
-  ///
-  /// **Only when there is none, or when the one there belongs to a DIFFERENT
-  /// account, and that guard is the whole design.** Every run mints a fresh
-  /// 365-day session and revokes nothing, so a sign-in on every launch would
-  /// pile sessions onto the account forever — and the only cleanup is
-  /// `grid logout --everywhere`, which is all-or-nothing and signs out every
-  /// other machine too. A session that matches this Harness account is
-  /// therefore left exactly alone.
-  ///
-  /// The mismatch case is not an exception to that rule but the reason it needs
-  /// one. `harness logout` deliberately never deletes `~/.grid/credentials.toml`
-  /// (no cascade, in either direction), so signing out and back in as somebody
-  /// else left the previous person's session on disk — and this app went on
-  /// listing THEIR grids, with no action anywhere in the UI that could correct
-  /// it. Replacing then is what earns the new session; Settings ▸ Grid still
-  /// says the mismatch out loud for the window between the two.
-  ///
-  /// Silent either way. This is a convenience on top of a Harness sign-in that
-  /// already succeeded, and a machine with no `grid` on PATH (or no network)
-  /// must not have its login reported as a failure over it — the Grid pane
-  /// still has its own button, and says why when it cannot.
-  Future<void> _ensureGridSession() async {
-    try {
-      // `signIn` is "make sure there is one FOR THIS ACCOUNT" — it re-reads and
-      // returns early on a machine already signed in as `account`, so the guard
-      // lives in one place rather than once here and once in the pane's button.
-      // The address comes from the profile fetched a few lines above this
-      // call's site; null while that call failed, which reads as "leave
-      // whatever is there alone" rather than as a mismatch.
-      final failure = await gridSessionStore.signIn(
-        account: currentUser?.email,
-      );
-      if (failure != null) debugPrint('grid sign-in skipped: $failure');
-    } catch (error) {
-      debugPrint('grid sign-in skipped: $error');
-    }
   }
 
   /// The local daemon (`harness start`) must be up before any local REST/WS call can work — unlike
@@ -1543,22 +1489,6 @@ class AppNotifier extends ChangeNotifier {
     // process could be reached, but a real `harness logout` clears its saved session so the NEXT
     // launch doesn't silently sign back in without ever showing the login screen.
     unawaited(cliLogin.logout());
-    // Grid goes with it. `harness logout` itself never touches
-    // `~/.grid/credentials.toml` — there is no cascade inside the CLI, in
-    // either direction — so without this a sign-out left a live 365-day Grid
-    // token on the machine, and the next person to sign in inherited the
-    // previous one's grids.
-    //
-    // Not awaited, and its failure never stops the sign-out: refusing to sign
-    // somebody out of Harness because a Grid command failed would trap them in
-    // the account they asked to leave. Said out loud rather than swallowed —
-    // when it fails the credential is still there, which is exactly the thing
-    // the user needs to know.
-    unawaited(
-      gridSessionStore.signOut().then((failure) {
-        if (failure != null) appLog.warn('app', 'Grid sign-out: $failure');
-      }),
-    );
     _stopAllOfflineRetries();
     _stopAllLinkRetries();
     _stopAllAgentSyncTimers();
@@ -1748,12 +1678,6 @@ class AppNotifier extends ChangeNotifier {
         unawaited(_applyNodeStatus(state, reportedOnline));
       }
     }
-    // Now that the list has landed, the local machine has the name the sidebar
-    // prints — better than the OS hostname `loadPersistedSettings` seeded this
-    // with, because it is the name the user sees everywhere else. Ignored if it
-    // resolves to nothing, so a machine list without a local row leaves the
-    // seeded name standing rather than reverting to "This computer".
-    resolveThisComputerLabel(thisMachineName);
     _autoConnectAndLoadMachines();
     notifyListeners();
   }
@@ -1880,10 +1804,7 @@ class AppNotifier extends ChangeNotifier {
   /// ⚠️ Every field of [Agent] that the UI reads belongs here. This list is hand-maintained, and the
   /// cost of forgetting one is silent: the poll fetches the truth, compares it, decides nothing
   /// happened, and throws it away — so the field stays frozen at whatever it was for as long as the
-  /// app runs. That is exactly what `grid` did. An agent moved onto another grid by anything other
-  /// than this app's own foreground path kept its old assignment on screen, and every control that
-  /// reads `agent.grid` — the header's model menu included — went on describing an agent as still
-  /// where it started. Add the field here in the same commit you add it to [Agent].
+  /// app runs. Add the field here in the same commit you add it to [Agent].
   @visibleForTesting
   static bool agentsEqual(List<Agent> a, List<Agent> b) {
     if (a.length != b.length) return false;
@@ -1900,8 +1821,7 @@ class AppNotifier extends ChangeNotifier {
           prev.parentAgentId != agent.parentAgentId ||
           prev.status != agent.status ||
           prev.terminalAvailable != agent.terminalAvailable ||
-          prev.terminalUnavailableReason != agent.terminalUnavailableReason ||
-          prev.grid != agent.grid) {
+          prev.terminalUnavailableReason != agent.terminalUnavailableReason) {
         return false;
       }
     }
@@ -2821,14 +2741,13 @@ class AppNotifier extends ChangeNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
-    GridAgentOverride? grid,
     String? codexHome,
   }) async {
     final machine = machineStates[machineId];
     if (machine == null) return 'Machine not found';
     if (codexHome != null) {
-      if (engine != 'codex' || grid != null) {
-        return 'Choose a Codex profile only for Codex, without a provider selected';
+      if (engine != 'codex') {
+        return 'Choose a Codex profile only for Codex';
       }
       if (machine.engines['codex']?.supportsCodexHome != true) {
         return 'Update the harness CLI on this machine to choose a Codex profile';
@@ -2843,10 +2762,6 @@ class AppNotifier extends ChangeNotifier {
           'engine': engine,
           'cwd': folder,
           'bypassPermission': bypassPermission,
-          // Only when the user picked a grid, so a build with no selection
-          // sends byte for byte the frame it sent before this existed — see
-          // GridAgentOverride for what the CLI still has to do with it.
-          if (grid != null) 'grid': grid.toJson(),
           'codexHome': ?codexHome,
         },
         timeout: const Duration(seconds: 20),
@@ -2872,132 +2787,9 @@ class AppNotifier extends ChangeNotifier {
     // agents another client made on the same machine. "Agents spawned" is a
     // count of what this app launched.
     harnessStats.onAgentSpawned();
-    // Only when a grid was actually picked: an agent on the engine's own login
-    // is the old behaviour, and counting it here would make the grid funnel
-    // report every agent this app has ever created.
-    if (grid != null) {
-      analytics.gridAgentLaunched(
-        engine: engine,
-        model: grid.model,
-        networkId: grid.networkId,
-      );
-    }
     notifyListeners();
     await selectAgent(machineId, agent.id);
     return null;
-  }
-
-  /// Moves an already-running agent onto [grid], or — when [grid] is null — back onto the engine's
-  /// own login.
-  ///
-  /// This RESTARTS the agent. A process's environment is fixed when it is exec'd, so a live engine
-  /// cannot be re-pointed — the CLI respawns the pane in place (same pane, same agent id, same
-  /// scrollback) with the grid's environment and `--resume`, which brings the conversation back but
-  /// not a turn that was in flight. That is why the CLI refuses a busy agent rather than deciding for
-  /// the user, and why nothing here is automatic.
-  ///
-  /// Returns null on success, or a message to show the user.
-  Future<String?> moveAgentToGrid(
-    String machineId,
-    String agentId,
-    GridAgentOverride? grid,
-  ) async {
-    final machine = machineStates[machineId];
-    if (machine == null) return 'Machine not found';
-    // Read before the move: on success the agent list is reloaded, and a lookup
-    // afterwards would be racing the answer it depends on.
-    final engine = machine.agents
-        .where((agent) => agent.id == agentId)
-        .map((agent) => agent.engine)
-        .firstOrNull;
-    try {
-      // The reply's body says only `{retargeted: true}`; a refusal throws. Nothing here reads it.
-      await _conn(machineId).request(
-        'agent_retarget',
-        payload: retargetPayload(agentId, grid),
-        timeout: const Duration(seconds: 20),
-      );
-    } on WsRequestFailure catch (failure) {
-      // The CLI's own code, not the sentence built from it: `UNSUPPORTED` (a
-      // published CLI that predates agent_retarget) and a genuine refusal have
-      // to stop looking like one number.
-      analytics.gridAgentRetargeted(
-        outcome: failure.code,
-        engine: engine,
-        model: grid?.model,
-      );
-      return retargetMessage(failure.code, failure.detail);
-    } catch (error) {
-      analytics.gridAgentRetargeted(
-        outcome: 'error',
-        engine: engine,
-        model: grid?.model,
-      );
-      return 'Move failed: $error';
-    }
-    analytics.gridAgentRetargeted(
-      outcome: 'ok',
-      engine: engine,
-      model: grid?.model,
-    );
-    // The pane now runs a different process, and its grid is re-read by the CLI's next discovery
-    // pass. Ask for the list rather than guessing here: this method must not be the second place
-    // that has an opinion about which grid an agent is on.
-    await _loadMachineData(machine, force: true);
-    return null;
-  }
-
-  /// The `agent_retarget` payload for moving [agentId] onto [grid] — or, when [grid] is null, back
-  /// onto its own login.
-  ///
-  /// Pulled out of [moveAgentToGrid] so the one constraint this wire change exists to protect —
-  /// `grid` and `clearGrid` are mutually exclusive, and the CLI's parser reads an absent `grid` and
-  /// a null one the same way, so own login has to say so in its own field — is guaranteed by a
-  /// function under test rather than only by reading the code.
-  @visibleForTesting
-  static Map<String, dynamic> retargetPayload(
-    String agentId,
-    GridAgentOverride? grid,
-  ) => {
-    'agentId': agentId,
-    if (grid != null) 'grid': grid.toJson() else 'clearGrid': true,
-  };
-
-  /// [moveAgentToGrid]'s answer when the agent was already gone.
-  ///
-  /// A sentinel rather than an error string because nobody can act on it, and rather than null
-  /// because it did not move either — the caller must be able to leave it out of both tallies.
-  static const String agentVanished = 'AGENT_GONE';
-
-  /// Turns a retarget refusal into something the user can act on.
-  ///
-  /// Every one of these is a deliberate refusal in the CLI, not a crash, so each has a way out worth
-  /// naming. `detail`, when present, already reads as a sentence and is preferred to anything
-  /// rewritten here.
-  @visibleForTesting
-  static String retargetMessage(String error, Object? detail) {
-    if (error == 'AGENT_NOT_FOUND') return agentVanished;
-    if (error == 'AGENT_BUSY') {
-      return 'It is running a turn. Move it when the turn finishes.';
-    }
-    const update =
-        'Update the harness CLI on this machine to move running agents.';
-    // UNSUPPORTED_ON_REMOTE is the handler being unwired; a bare UNSUPPORTED is the CLI not knowing
-    // the frame AT ALL — a build that predates agent_retarget, which is what a stock release still is.
-    // Same sentence: the way out of both is the same update.
-    if (error == 'UNSUPPORTED_ON_REMOTE' || error == 'UNSUPPORTED') {
-      return update;
-    }
-    // A CLI old enough to know agent_retarget but not `clearGrid` reads "own login" (no `grid` field
-    // on the wire) as a forgotten one and answers this exact sentence — see backendSocket.ts's
-    // `!clear && target.state !== 'ok'` branch on the CLI side. The app and the CLI ship separately,
-    // so this is the one user-visible shape a mixed deployment takes; any other INVALID_GRID detail
-    // is a real refusal and falls through to the generic case below.
-    if (error == 'INVALID_GRID' && detail == 'grid is required') {
-      return update;
-    }
-    if (detail is String && detail.isNotEmpty) return detail;
-    return 'Move failed: $error';
   }
 
   /// Renames a machine via `PATCH /api/machines/:machineId` (control-plane REST — the machine's

@@ -4,10 +4,8 @@
 // the only way to see a drop at all.
 //
 // What is pinned here is the part that is easy to get subtly wrong: which door
-// a dialog says it was opened by, the difference between Auto and the engine's
-// own login (both reach the notifier as a null override), and that the first
-// message is reported once per SESSION rather than per agent, and never with
-// any of what was typed.
+// a dialog says it was opened by, and that the first message is reported once
+// per SESSION rather than per agent, and never with any of what was typed.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:harness/analytics/analytics.dart';
@@ -15,8 +13,6 @@ import 'package:harness/analytics/analytics_sink.dart';
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/core/config.dart';
 import 'package:harness/core/models.dart';
-import 'package:harness/grid/grid_agent_override.dart';
-import 'package:harness/grid/grid_selection_store.dart';
 import 'package:harness/state/app_state.dart';
 import 'package:harness/widgets/new_agent_dialog.dart';
 
@@ -62,7 +58,6 @@ class FakeCreateAgentNotifier extends AppNotifier {
     required String engine,
     required String folder,
     bool bypassPermission = false,
-    GridAgentOverride? grid,
     String? codexHome,
   }) async => null;
 }
@@ -140,13 +135,6 @@ void main() {
   });
 
   group('agent_created', () {
-    // The store is still set by these tests — not because the dialog reads it
-    // (it no longer does), but because the ONE thing worth asserting now is
-    // that it does not: a default provider sitting in the store must not turn
-    // up in this event.
-    final before = gridSelectionStore.value;
-    tearDown(() => gridSelectionStore.value = before);
-
     Future<void> create(WidgetTester tester) async {
       final notifier = FakeCreateAgentNotifier();
       addTearDown(notifier.dispose);
@@ -181,48 +169,16 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('carries the engine, and never a grid', (tester) async {
+    testWidgets('carries the engine and the bypass flag', (tester) async {
       await create(tester);
 
-      final params = tracked.paramsOf('agent_created');
-      expect(params['engine'], 'claude');
-      // A create is always the engine's own login now, so this is the one
-      // shape the event ever has from this door. Grid launches are reported
-      // from the agent view's model menu instead.
-      expect(params['on_grid'], isFalse);
-      expect(params['network_id'], isNull);
-      expect(params['model'], isNull);
-      expect(params['bypass_permission'], isFalse);
-    });
-
-    testWidgets('a default provider does not leak into the event', (
-      tester,
-    ) async {
-      // The regression this whole change is about, stated as an assertion: a
-      // grid sitting in the store as the default provider used to BE the
-      // launch target, and this event named it. It must now be invisible from
-      // here — if this ever goes back to reading the store, this is the test
-      // that says so rather than a user finding their agent on the wrong
-      // account.
-      gridSelectionStore.value = const GridSelection(
-        networkId: 'grid-3378218621364f16',
-        networkName: 'autonomous.ai',
-      );
-      await create(tester);
-
-      final params = tracked.paramsOf('agent_created');
-      expect(params['on_grid'], isFalse);
-      expect(params['network_id'], isNull);
-      expect(params['model'], isNull);
-      expect(
-        params.values.join(' '),
-        isNot(contains('autonomous.ai')),
-        reason: 'the default provider is not what this agent launched on',
-      );
+      expect(tracked.paramsOf('agent_created'), {
+        'engine': 'claude',
+        'bypass_permission': false,
+      });
     });
 
     testWidgets('the working folder is never sent', (tester) async {
-      gridSelectionStore.value = GridSelection.none;
       await create(tester);
 
       // An absolute path names the person as surely as their email does.

@@ -21,8 +21,7 @@ class SelectOption<T> {
   final String label;
 
   /// A sentence UNDER the label, for a list whose labels alone do not say what
-  /// picking one does — the three access rules on a grid, where the whole
-  /// choice is what each admits.
+  /// picking one does.
   ///
   /// Distinct from [note], which sits beside the label and qualifies the same
   /// noun. A sentence cannot go there: the closed field is only as wide as the

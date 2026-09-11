@@ -59,7 +59,7 @@ void main() {
         final id = stream.add(
           AppLogLevel.info,
           'cli',
-          'grid --remote join',
+          'harness link create',
           command: LogCommand(),
         );
 
@@ -75,7 +75,7 @@ void main() {
       final id = stream.add(
         AppLogLevel.info,
         'cli',
-        'grid --remote pull',
+        'harness update',
         command: LogCommand(),
       );
 

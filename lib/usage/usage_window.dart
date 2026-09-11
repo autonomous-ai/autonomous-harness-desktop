@@ -17,8 +17,8 @@ const String kWeeklyWindowLabel = 'Weekly';
 
 /// Which account a reading belongs to.
 ///
-/// Only the two whose usage endpoints are known. The other five grid-capable
-/// engines (copilot, grok, hermes, opencode, pi) publish nothing comparable, so
+/// Only the two whose usage endpoints are known. The other engines (copilot,
+/// grok, hermes, opencode, pi) publish nothing comparable, so
 /// they are absent rather than listed as perpetually unavailable — a row that
 /// can only ever say "unsupported" is a row that costs a glance and returns
 /// nothing.
@@ -42,8 +42,7 @@ enum UsageProvider {
 ///
 /// [signedOut] is deliberately kept apart from [failed]: signing in fixes the
 /// first and retrying fixes the second, and offering a Retry for a missing
-/// session fails identically forever. The same split Grid draws between
-/// `GridNetworksSignedOut` and `GridNetworksFailed`.
+/// session fails identically forever.
 enum UsageStatus { loading, ok, signedOut, failed }
 
 /// One rate-limit window: how much of it is spent, and when it starts over.
