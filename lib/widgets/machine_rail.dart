@@ -540,6 +540,13 @@ class _MachineNodeState extends State<_MachineNode> {
     // while the offline-guide panel is (or is about to be) blocking the same machine.
     final connectionColor = state.nodeOnline == false
         ? grid.AppPalette.textFaint
+        : state.needsLink
+        // The NO_PEER_LINK close that got us here is itself proof the daemon
+        // answered — this reads as online even though OUR socket sits at
+        // disconnected/reconnecting for as long as the machine stays
+        // unlinked (see WsConn._onDone's 4404 branch). Offline, above,
+        // still wins.
+        ? grid.AppPalette.online
         : switch (state.connectionStatus) {
             ConnectionStatus.connected => grid.AppPalette.online,
             ConnectionStatus.connecting ||
@@ -670,8 +677,32 @@ class _MachineNodeState extends State<_MachineNode> {
                         // A computer that is not answering, said once, where the
                         // computer is named. It replaces two lines of red further
                         // down: a machine being off is a STATE, and red is for
-                        // something that went wrong.
-                        if (state.nodeOnline == false) const _OfflineWord(),
+                        // something that went wrong. Mutually exclusive with the
+                        // link affordance below: a daemon that is not running
+                        // cannot shake hands, so offline still wins (see
+                        // _AgentTree's own "OFFLINE WINS").
+                        if (state.nodeOnline == false)
+                          const _OfflineWord()
+                        else if (state.needsLink)
+                          // Reachable but never linked with this app instance —
+                          // the one click that fixes it, ALWAYS visible rather
+                          // than hidden behind hover like _CaptionActions: that
+                          // was the whole reason an unlinked-but-alive machine
+                          // read as unreachable in the first place.
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: AppIconButton(
+                              key: const ValueKey('machine-link-affordance'),
+                              icon: LucideIcons.link2300,
+                              size: 13,
+                              color: grid.AppPalette.accentOnSurface,
+                              hoverColor: grid.AppPalette.accentOnSurface,
+                              tooltip: 'Link this machine…',
+                              onPressed: () => notifier.selectMachineForSetup(
+                                machine.machineId,
+                              ),
+                            ),
+                          ),
                         // How many agents are inside something you have closed.
                         // Only when closed: with the list open you can count
                         // them, and a number beside a list you can see is noise.

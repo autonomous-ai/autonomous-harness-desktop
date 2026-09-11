@@ -1658,7 +1658,15 @@ class AppNotifier extends ChangeNotifier {
           // terminal (if any) so the connected branch above can reattach it, for every machine — this
           // used to be local-only, which is why a remote machine's terminal never came back on its own
           // after `harness start` on that machine, even though the guide screen promised it would.
-          unawaited(_applyNodeStatus(machine, false));
+          //
+          // NOT when this disconnect IS the machine's own NO_PEER_LINK: needsLink is only ever set by
+          // onLocalFailure, which now runs before this branch for close code 4404 (see WsConn._onDone) —
+          // a NO_PEER_LINK rejection is proof the relay/daemon answered. Forcing nodeOnline false here
+          // would fight the REST status and node_status push, the only signals honest about real
+          // reachability; a machine merely unlinked from THIS app instance is not offline.
+          if (!machine.needsLink) {
+            unawaited(_applyNodeStatus(machine, false));
+          }
         }
         notifyListeners();
       },
