@@ -75,7 +75,12 @@ class TerminalPanel extends StatefulWidget {
     this.onRendererFocus,
     this.paneDrag,
     this.linkOpener,
+    this.showHeader = true,
   });
+
+  /// The tile's own header strip — engine, title, status, pin, close. Off on a phone, whose
+  /// page draws its own header and has no tile to pin, close or drag.
+  final bool showHeader;
 
   @override
   State<TerminalPanel> createState() => _TerminalPanelState();
@@ -611,16 +616,17 @@ class _TerminalPanelState extends State<TerminalPanel>
       color: grid.AppPalette.windowBg,
       child: Column(
         children: [
-          _TerminalHeader(
-            notifier: widget.notifier,
-            session: session,
-            onClose: widget.onClose,
-            pinned: widget.pinned,
-            onTogglePin: widget.onTogglePin,
-            paneDrag: widget.paneDrag,
-          ),
-
-          Divider(height: 1, color: AppColors.border),
+          if (widget.showHeader) ...[
+            _TerminalHeader(
+              notifier: widget.notifier,
+              session: session,
+              onClose: widget.onClose,
+              pinned: widget.pinned,
+              onTogglePin: widget.onTogglePin,
+              paneDrag: widget.paneDrag,
+            ),
+            Divider(height: 1, color: AppColors.border),
+          ],
           Expanded(
             child: Stack(
               children: [

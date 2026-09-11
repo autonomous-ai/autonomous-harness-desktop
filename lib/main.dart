@@ -20,6 +20,8 @@ import 'widgets/flash_firmware_dialog.dart';
 import 'core/startup.dart';
 import 'logging/app_log.dart';
 import 'logging/install.dart';
+import 'phone/phone_layout.dart';
+import 'phone/phone_shell.dart';
 import 'widgets/shortcuts_sheet.dart';
 import 'widgets/update_notice.dart';
 import 'widgets/window_chrome.dart';
@@ -228,7 +230,11 @@ class _RootShellState extends ConsumerState<RootShell> {
           case AppStatus.unauthenticated:
             screen = LoginScreen(notifier: app);
           case AppStatus.authenticated:
-            screen = HomeScreen(notifier: app);
+            // A phone gets one agent at a time, reached machine → agents → terminal: the
+            // desktop's rail beside a grid of tiles does not fit in its width.
+            screen = usePhoneLayout(context)
+                ? PhoneShell(notifier: app)
+                : HomeScreen(notifier: app);
         }
         // Only the home shell carries its own drag handle and traffic-light
         // clearance (the rail's head). Every other screen fills the window
