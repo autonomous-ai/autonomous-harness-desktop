@@ -88,3 +88,12 @@ it if one is dropped.
    (`'copied text keeps cursor-positioned gaps as spaces...'` and the
    erase-left test, which now expects a leading space where the erased cell
    is).
+
+8. **Shift+Left/Right reach the TUI in both screen buffers**
+   (`lib/src/core/input/keytab/keytab_default.dart`). The upstream mapping
+   required the alternate screen, so a normal-screen Codex terminal emitted
+   no input for its "shift + left to answer" queued-question shortcut. Both
+   horizontal chords now send the xterm modifier sequence in either buffer;
+   vertical scrolling and app-owned Meta shortcuts keep their bindings.
+   Regression: the macOS/Linux pair in `test/terminal_panel_focus_test.dart`
+   exercises physical key events through `TerminalPanel` to binary PTY input.
