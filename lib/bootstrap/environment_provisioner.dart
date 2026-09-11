@@ -4,10 +4,6 @@ import 'dart:io';
 
 import '../core/harness_cli_runner.dart';
 
-/// Persists the setup contract version for migration/analytics. Readiness itself
-/// is still checked on every launch because installed tools can disappear.
-const int kEnvironmentSetupVersion = 3;
-
 /// The CLI-only installer contract for callers that already own host setup.
 /// Desktop verifies system tools and tmux before reaching this command, then
 /// performs its own complete verification again after Harness and Grid land.

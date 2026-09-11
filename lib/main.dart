@@ -15,6 +15,7 @@ import 'shared/theme/app_theme.dart' as grid;
 import 'shared/theme/appearance_prefs_store.dart';
 import 'terminal/terminal_font_store.dart';
 import 'widgets/layout_palette.dart';
+import 'widgets/environment_preflight_screen.dart';
 import 'widgets/environment_setup_screen.dart';
 import 'widgets/flash_firmware_dialog.dart';
 import 'core/startup.dart';
@@ -225,6 +226,10 @@ class _RootShellState extends ConsumerState<RootShell> {
                       ),
                     ),
                   );
+          case AppStatus.checkingEnvironment:
+            screen = EnvironmentPreflightScreen(
+              readiness: app.environmentReadiness,
+            );
           case AppStatus.preparingEnvironment:
             screen = EnvironmentSetupScreen(notifier: app);
           case AppStatus.unauthenticated:
@@ -247,6 +252,7 @@ class _RootShellState extends ConsumerState<RootShell> {
           children: [
             if (app.hasAvailableUpdate &&
                 app.status != AppStatus.bootstrapping &&
+                app.status != AppStatus.checkingEnvironment &&
                 app.status != AppStatus.preparingEnvironment)
               UpdateNotice(notifier: app),
             Expanded(child: framed),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:harness/auth/auth_session.dart';
 import 'package:harness/auth/cli_login.dart';
 import 'package:harness/bootstrap/environment_provisioner.dart';
@@ -45,6 +47,13 @@ class _FakeCliLogin extends CliLogin {
   @override
   Future<CliAuthStatus> checkStatus() async =>
       CliAuthStatus(loggedIn: loggedIn);
+}
+
+class _ControlledCliLogin extends CliLogin {
+  final Completer<CliAuthStatus> status = Completer<CliAuthStatus>();
+
+  @override
+  Future<CliAuthStatus> checkStatus() => status.future;
 }
 
 class _BrokenConfigStore extends ConfigStore {
@@ -190,51 +199,31 @@ void main() {
     },
   );
 
-  test('a machine confirmed once still gets a quick readiness probe on next launch', () async {
-    final storage = _FakeKeyValueStore()
-      ..values['environment_setup_version'] = kEnvironmentSetupVersion
-          .toString();
-    final provisioner = _ReadyEnvironmentProvisioner();
-    final app = AppNotifier(
-      config: AppConfig.dev,
-      authSession: AuthSession(),
-      configStore: ConfigStore(storage: storage),
-      cliLogin: _FakeCliLogin(loggedIn: false),
-      environmentProvisioner: provisioner,
-    );
+  test(
+    'a legacy setup version never bypasses the live readiness probe',
+    () async {
+      final storage = _FakeKeyValueStore()
+        ..values['environment_setup_version'] = '3';
+      final provisioner = _ReadyEnvironmentProvisioner();
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: storage),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
 
-    await app.bootstrap();
+      await app.bootstrap();
 
-    expect(provisioner.called, isTrue);
-    expect(app.environmentReadiness.isReady, isTrue);
-    // Reached the login check rather than getting stuck on preparingEnvironment.
-    expect(app.status, AppStatus.unauthenticated);
-  });
-
-  test('a machine on an older environment-setup version reruns provisioning and then persists the current version', () async {
-    final storage = _FakeKeyValueStore()
-      ..values['environment_setup_version'] = (kEnvironmentSetupVersion - 1)
-          .toString();
-    final provisioner = _ReadyEnvironmentProvisioner();
-    final app = AppNotifier(
-      config: AppConfig.dev,
-      authSession: AuthSession(),
-      configStore: ConfigStore(storage: storage),
-      cliLogin: _FakeCliLogin(loggedIn: false),
-      environmentProvisioner: provisioner,
-    );
-
-    await app.bootstrap();
-
-    expect(provisioner.called, isTrue);
-    expect(
-      storage.values['environment_setup_version'],
-      kEnvironmentSetupVersion.toString(),
-    );
-  });
+      expect(provisioner.called, isTrue);
+      expect(app.environmentReadiness.isReady, isTrue);
+      // Reached the login check rather than getting stuck on preparingEnvironment.
+      expect(app.status, AppStatus.unauthenticated);
+    },
+  );
 
   test(
-    'environment setup, once it succeeds, is remembered for next time',
+    'a successful readiness probe does not persist a setup version',
     () async {
       final storage = _FakeKeyValueStore();
       final provisioner = _ReadyEnvironmentProvisioner();
@@ -249,10 +238,7 @@ void main() {
       await app.bootstrap();
 
       expect(provisioner.called, isTrue);
-      expect(
-        storage.values['environment_setup_version'],
-        kEnvironmentSetupVersion.toString(),
-      );
+      expect(storage.values['environment_setup_version'], isNull);
     },
   );
 
@@ -287,12 +273,26 @@ void main() {
 
       await app.bootstrap();
       expect(provisioner.installCalls, [isFalse]);
+      expect(app.status, AppStatus.preparingEnvironment);
 
       app.selectEnvironmentSetupMode(EnvironmentSetupMode.automatic);
+      final painted = <(AppStatus, EnvironmentSetupPhase)>[];
+      app.addListener(
+        () => painted.add((app.status, app.environmentReadiness.phase)),
+      );
       await app.startEnvironmentSetup();
       expect(provisioner.installCalls, [isFalse, isTrue]);
-      expect(app.status, AppStatus.preparingEnvironment);
+      expect(app.status, AppStatus.unauthenticated);
       expect(app.environmentReadiness.phase, EnvironmentSetupPhase.ready);
+      expect(
+        painted,
+        isNot(
+          contains((
+            AppStatus.preparingEnvironment,
+            EnvironmentSetupPhase.ready,
+          )),
+        ),
+      );
       app.dispose();
     },
   );
@@ -339,13 +339,8 @@ void main() {
       // what lets the provisioner skip the already-`ready` harness step during the recheck.
       expect(provisioner.resumeFromCalls.last, same(stuck));
       expect(app.environmentReadiness.isReady, isTrue);
-      expect(app.status, AppStatus.preparingEnvironment);
-      await app.continueAfterEnvironmentSetup();
       expect(app.status, AppStatus.unauthenticated);
-      expect(
-        storage.values['environment_setup_version'],
-        kEnvironmentSetupVersion.toString(),
-      );
+      expect(storage.values['environment_setup_version'], isNull);
       expect(app.environmentRecheckPending, isFalse);
       app.dispose();
     },
@@ -480,6 +475,60 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('Sign in'), findsNothing);
   });
+
+  testWidgets('live pre-flight has its own quiet screen', (tester) async {
+    final app = makeNotifier(AppStatus.checkingEnvironment);
+    app.environmentReadiness = EnvironmentReadiness.initial();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Checking this computer'), findsOneWidget);
+    expect(find.textContaining('read-only'), findsOneWidget);
+    expect(find.text('ENVIRONMENT SETUP'), findsNothing);
+    expect(find.text('Pre-flight check'), findsNothing);
+  });
+
+  testWidgets(
+    'ready pre-flight is visible while auth resolves, then opens login',
+    (tester) async {
+      final cliLogin = _ControlledCliLogin();
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: _FakeKeyValueStore()),
+        cliLogin: cliLogin,
+        environmentProvisioner: _ReadyEnvironmentProvisioner(),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [appStateProvider.overrideWithValue(app)],
+          child: const DesktopApp(),
+        ),
+      );
+
+      final bootstrap = app.bootstrap();
+      await tester.pump();
+      await tester.pump();
+
+      expect(app.status, AppStatus.checkingEnvironment);
+      expect(find.text('Environment ready'), findsOneWidget);
+      expect(find.text('Continue to sign in'), findsNothing);
+      expect(find.text('ENVIRONMENT SETUP'), findsNothing);
+
+      cliLogin.status.complete(const CliAuthStatus(loggedIn: false));
+      await bootstrap;
+      await tester.pump();
+
+      expect(app.status, AppStatus.unauthenticated);
+      expect(find.text('Sign in'), findsOneWidget);
+      app.dispose();
+    },
+  );
 
   testWidgets(
     'environment setup exposes per-step guidance and a scoped recheck',

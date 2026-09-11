@@ -40,6 +40,7 @@ import '../usage/usage_accounts.dart';
 
 enum AppStatus {
   bootstrapping,
+  checkingEnvironment,
   preparingEnvironment,
   unauthenticated,
   authenticated,
@@ -778,7 +779,7 @@ class AppNotifier extends ChangeNotifier {
   Future<bool> _prepareEnvironment() async {
     if (_environmentSetupInFlight) return false;
     _environmentSetupInFlight = true;
-    status = AppStatus.preparingEnvironment;
+    status = AppStatus.checkingEnvironment;
     environmentReadiness = EnvironmentReadiness.initial();
     notifyListeners();
     try {
@@ -790,7 +791,6 @@ class AppNotifier extends ChangeNotifier {
         return false;
       }
       _cancelEnvironmentRecheckTimer();
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
       return true;
     } finally {
       _environmentSetupInFlight = false;
@@ -824,6 +824,10 @@ class AppNotifier extends ChangeNotifier {
         } else {
           environmentReadiness = value;
         }
+        // A successful probe belongs to the quiet pre-flight surface, never
+        // the installation wizard. This also prevents the setup screen from
+        // flashing its own ready phase for one frame after an install/recheck.
+        if (value.isReady) status = AppStatus.checkingEnvironment;
         notifyListeners();
       },
       resumeFrom: resumeFrom,
@@ -846,17 +850,32 @@ class AppNotifier extends ChangeNotifier {
   /// [recheckEnvironmentStep] can reach the same destination without repeating `bootstrap()`'s config
   /// load and update-check startup, which already ran on the launch that got stuck here.
   Future<void> _continueAfterEnvironmentReady() async {
+    _cancelEnvironmentRecheckTimer();
+    status = AppStatus.checkingEnvironment;
+    notifyListeners();
     // Auth now lives entirely with the local `harness` CLI — it owns the SSO session on disk and
     // refreshes it itself. This app never reads, stores, or refreshes a token of its own; it just
     // asks the CLI whether this computer is currently signed in.
-    final authStatus = await cliLogin.checkStatus();
-    if (!authStatus.loggedIn) {
+    try {
+      final authStatus = await cliLogin.checkStatus();
+      if (!authStatus.loggedIn) {
+        currentUser = null;
+        status = AppStatus.unauthenticated;
+        notifyListeners();
+        return;
+      }
+      status = AppStatus.bootstrapping;
+      notifyListeners();
+      await _finishBootstrapSignedIn();
+    } catch (error, stack) {
+      debugPrint(
+        'continueAfterEnvironmentReady: fallback to login after error: '
+        '$error\n$stack',
+      );
       currentUser = null;
       status = AppStatus.unauthenticated;
       notifyListeners();
-      return;
     }
-    await _finishBootstrapSignedIn();
   }
 
   void showEnvironmentReview() {
@@ -898,7 +917,7 @@ class AppNotifier extends ChangeNotifier {
         _scheduleEnvironmentRecheck();
         return;
       }
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
+      await _continueAfterEnvironmentReady();
     } finally {
       _environmentSetupInFlight = false;
       notifyListeners();
@@ -920,11 +939,7 @@ class AppNotifier extends ChangeNotifier {
         install: false,
         mode: environmentReadiness.mode,
       );
-      if (result.isReady) {
-        unawaited(
-          _store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion),
-        );
-      }
+      if (result.isReady) await _continueAfterEnvironmentReady();
     } finally {
       _environmentSetupInFlight = false;
       notifyListeners();
@@ -977,7 +992,7 @@ class AppNotifier extends ChangeNotifier {
         _scheduleEnvironmentRecheck();
         return;
       }
-      unawaited(_store?.saveEnvironmentSetupVersion(kEnvironmentSetupVersion));
+      await _continueAfterEnvironmentReady();
     } catch (error, stack) {
       debugPrint(
         'recheckEnvironmentStep: fallback to login after error: $error\n$stack',
