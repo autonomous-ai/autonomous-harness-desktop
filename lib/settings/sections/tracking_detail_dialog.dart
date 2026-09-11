@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../analytics/analytics_log.dart';
 import '../../logging/log_file.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/app_dialog.dart';
 import 'debug_log_tile.dart';
 import 'tracking_tile.dart';
 
@@ -17,7 +18,7 @@ Future<void> showTrackingDetailDialog(
   BuildContext context,
   AnalyticsLogEntry entry,
 ) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) => _TrackingDetailDialog(entry: entry),
   );

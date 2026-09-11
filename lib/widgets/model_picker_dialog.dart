@@ -25,6 +25,7 @@ import '../grid/model_picker_options.dart';
 import '../grid/model_recents_store.dart';
 import '../grid/provider_enablement_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_menu.dart';
 import '../shared/widgets/empty_state.dart';
 import 'model_picker_chrome.dart';
@@ -39,7 +40,7 @@ import 'model_picker_chrome.dart';
 Future<ModelChoice?> showModelPickerDialog(
   BuildContext context, {
   required ModelChoice? current,
-}) => showDialog<ModelChoice>(
+}) => showAppDialog<ModelChoice>(
   context: context,
   builder: (_) => ModelPickerDialog(current: current),
 );
@@ -228,44 +229,76 @@ class _ModelPickerDialogState extends State<ModelPickerDialog> {
     }
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: modelPickerListHeightIn(context)),
-      child: ListView.builder(
-        controller: _scroll,
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: kModelPickerListPadding),
-        itemCount: _items.length + (note == null ? 0 : 1),
-        itemExtentBuilder: (index, _) => index < _items.length
-            ? modelPickerItemExtent(_items[index])
-            : kModelPickerNoteExtent,
-        itemBuilder: (context, index) => index < _items.length
-            ? _row(_items[index], highlighted: index == highlighted)
-            // The account's state, under the providers that did load: on a
-            // failed refresh the list still holds the subscription row and whatever
-            // was cached, and a panel that said nothing would look like an
-            // account with one row.
-            : AppMenuNote(note!, metrics: AppMenuRowMetrics.roomy),
+      // ⚠️ The scrollbar is drawn OVER the list, not beside it, and a group
+      // header's rule is why.
+      //
+      // On desktop Material's default `ScrollBehavior` wraps a scrollable in a
+      // [Scrollbar] that RESERVES its channel: every child inside the list is
+      // laid out that much narrower than the panel, scrolling or not. A rule
+      // asked to run "the full width" therefore stopped short of the panel's
+      // edge on every group, and no amount of padding, negative padding or
+      // [OverflowBox] guessing at the channel's width fixed it — the width was
+      // gone before the header was measured.
+      //
+      // Turning the automatic one off hands the list the panel's real width;
+      // the [Scrollbar] here then floats over it. The thumb may cross a rule,
+      // which costs nothing: a line under a thumb is still a line.
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: Scrollbar(
+          controller: _scroll,
+          child: ListView.builder(
+            controller: _scroll,
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(
+              vertical: kModelPickerListPadding,
+            ),
+            itemCount: _items.length + (note == null ? 0 : 1),
+            itemExtentBuilder: (index, _) => index < _items.length
+                ? modelPickerItemExtent(_items[index])
+                : kModelPickerNoteExtent,
+            itemBuilder: (context, index) => index < _items.length
+                ? _row(_items[index], highlighted: index == highlighted)
+                // The account's state, under the providers that did load: on a
+                // failed refresh the list still holds the subscription row and
+                // whatever was cached, and a panel that said nothing would look
+                // like an account with one row.
+                : AppMenuNote(note!, metrics: AppMenuRowMetrics.roomy),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _row(ModelPickerItem item, {required bool highlighted}) =>
-      switch (item) {
-        ModelPickerHeader(:final title) => ModelPickerGroupHeader(title),
-        ModelPickerNote(:final message) => AppMenuNote(
-          message,
-          metrics: AppMenuRowMetrics.roomy,
-        ),
-        ModelPickerRow(:final choice, :final note) => AppMenuItem(
-          label: item.label,
-          note: note,
-          metrics: AppMenuRowMetrics.roomy,
-          // Two marks that mean different things and can sit on different rows:
-          // the tick says where the agent IS, the highlight says what Enter
-          // would do next.
-          selected: choice == widget.current,
-          highlighted: highlighted,
-          onPressed: () => Navigator.of(context).pop(choice),
-        ),
-      };
+  Widget _row(
+    ModelPickerItem item, {
+    required bool highlighted,
+  }) => switch (item) {
+    ModelPickerHeader(:final title, :final count) => ModelPickerGroupHeader(
+      title,
+      count: count,
+    ),
+    ModelPickerNote(:final message) => AppMenuNote(
+      message,
+      metrics: AppMenuRowMetrics.roomy,
+    ),
+    ModelPickerRow(:final choice, :final note, :final detail) => AppMenuItem(
+      label: item.label,
+      note: note,
+      detail: detail,
+      metrics: AppMenuRowMetrics.roomy,
+      // This list IS the control, so the tick carries the accent — see
+      // [AppMenuItem.accentSelection]. Asked for here rather than inferred
+      // from `roomy`, which Settings' select fields also pass.
+      accentSelection: true,
+      // Two marks that mean different things and can sit on different rows:
+      // the tick says where the agent IS, the highlight says what Enter
+      // would do next.
+      selected: choice == widget.current,
+      highlighted: highlighted,
+      onPressed: () => Navigator.of(context).pop(choice),
+    ),
+  };
 
   /// Opens on the row the agent is actually on, as soon as that row exists.
   ///

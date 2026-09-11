@@ -12,6 +12,7 @@ import '../grid/grid_api_client.dart';
 import '../grid/grid_selection_store.dart';
 import '../shared/theme/app_theme.dart' as grid;
 import '../shared/widgets/app_checkbox.dart';
+import '../shared/widgets/app_dialog.dart';
 import '../shared/widgets/app_select_field.dart';
 import '../shared/widgets/labeled_field.dart';
 import '../state/app_state.dart';
@@ -50,7 +51,7 @@ Future<void> showNewAgentDialog(
   // growing, and one that forgets to track is a hole in the funnel that only
   // shows up as a number quietly being too small.
   analytics.newAgentOpened(source: source);
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) => _NewAgentDialog(
       notifier: notifier,

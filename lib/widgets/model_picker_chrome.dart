@@ -130,40 +130,98 @@ class ModelPickerFooter extends StatelessWidget {
 /// group title: inside a list this size that reads as a new screen starting
 /// every few rows.
 class ModelPickerGroupHeader extends StatelessWidget {
-  const ModelPickerGroupHeader(this.title, {super.key});
+  const ModelPickerGroupHeader(this.title, {super.key, this.count});
 
   final String title;
+
+  /// How many rows follow — printed past the rule. See [ModelPickerHeader.count].
+  final int? count;
 
   @override
   Widget build(BuildContext context) {
     grid.AppTheme.watch(context);
+    final label = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontFamily: grid.AppFont.sans,
+        fontFamilyFallback: grid.AppFont.sansFallback,
+        color: grid.AppPalette.textFaint,
+        fontSize: 11,
+        fontWeight: grid.AppFont.semibold,
+        letterSpacing: 0.4,
+        height: 1.2,
+      ),
+    );
     return Padding(
-      // Aligned with the column an [AppMenuItem]'s label starts on, so a header
-      // sits over its rows rather than beside them: the row's own gutter, plus
-      // its padding, plus the empty icon slot and the gap after it.
+      // Aligned with the column a row's own INK starts on — its gutter plus its
+      // padding — not with the label column further in.
+      //
+      // ⚠️ This used to add the empty icon slot and the gap after it, landing
+      // the header at 44px on the theory that a header should sit over its
+      // labels. On screen that read as a header floating in from the panel's
+      // edge: every row draws a hover fill from 6px, so the list has a visible
+      // left edge there, and the header was the one thing not on it. A header
+      // is the group's own line, not a taller row.
       padding: EdgeInsets.only(
-        left:
-            6 +
-            AppMenuRowMetrics.roomy.padding.left +
-            AppMenuRowMetrics.roomy.iconSize +
-            9,
-        right: 12,
+        left: 6 + AppMenuRowMetrics.roomy.padding.left,
         top: 10,
         bottom: 2,
       ),
-      child: Text(
-        title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontFamily: grid.AppFont.sans,
-          fontFamilyFallback: grid.AppFont.sansFallback,
-          color: grid.AppPalette.textFaint,
-          fontSize: 11,
-          fontWeight: grid.AppFont.semibold,
-          letterSpacing: 0.4,
-          height: 1.2,
-        ),
+      // Provider, rule, count — the rule taking whatever the two ends leave.
+      //
+      // ⚠️ This ran short of the panel's edge for three attempts, and the fix
+      // was NOT here: the picker's `ListView` used to sit under Material's
+      // automatic desktop [Scrollbar], which RESERVES its channel and so laid
+      // every child out narrower than the panel. Padding, negative padding and
+      // an [OverflowBox] all chased that missing strip; the dialog now turns
+      // the automatic scrollbar off and floats its own over the list, which
+      // hands this row the panel's real width. Plain [Expanded] is enough.
+      child: Row(
+        children: [
+          // Capped rather than [Flexible]: a hard ceiling keeps a very long
+          // provider name from eating the row, without making the name a
+          // second flex child competing with the rule for the gap.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: label,
+          ),
+          const SizedBox(width: 9),
+          // ⚠️ [Expanded], and the rule is the ONLY flexible child on the row.
+          //
+          // It shared the row with a `Flexible` name for several attempts and
+          // came up short every time: two flex children split the free space
+          // between them, so the rule only ever got a fraction of the gap it
+          // was supposed to fill. The name is laid out at its natural width
+          // instead — provider names are short, and one long enough to crowd
+          // the count is a better problem than a rule that never reaches.
+          Expanded(
+            child: SizedBox(
+              height: 1,
+              child: ColoredBox(color: grid.AppPalette.divider),
+            ),
+          ),
+          if (count case final count?) ...[
+            const SizedBox(width: 9),
+            Text(
+              '$count',
+              style: TextStyle(
+                fontFamily: grid.AppFont.sans,
+                fontFamilyFallback: grid.AppFont.sansFallback,
+                color: grid.AppPalette.textFaint,
+                fontSize: 11,
+                // Lining figures, so a column of counts down a panel of
+                // providers lines up digit over digit instead of shuffling.
+                fontFeatures: const [FontFeature.tabularFigures()],
+                height: 1.2,
+              ),
+            ),
+          ],
+          // Ends where a ROW's text ends: its gutter plus its own padding. The
+          // count and a model name then sit on one right-hand column.
+          SizedBox(width: 6 + AppMenuRowMetrics.roomy.padding.right),
+        ],
       ),
     );
   }
@@ -171,7 +229,12 @@ class ModelPickerGroupHeader extends StatelessWidget {
 
 /// Wider than the dropdown it replaces: this list carries a model id AND the
 /// provider it is served by, and the ids are long.
-const double kModelPickerWidth = 520;
+///
+/// 460 rather than the 520 it opened at. The longest id the panel actually
+/// shows — `DeepSeek-V4-Flash-0731-Vision` — measures about 205px at the row's
+/// 14px, which the label column clears with room to spare; the rest was air,
+/// and a dialog wider than its content reads as a window rather than a menu.
+const double kModelPickerWidth = 460;
 
 /// The list's own cap. The panel is `mainAxisSize.min`, so a short list keeps a
 /// short panel and only a long one scrolls.
@@ -202,10 +265,19 @@ const double _panelChromeHeight = 190;
 /// How tall one row lays out — stated rather than measured at layout time so
 /// ↑/↓ can scroll the highlight into view by arithmetic: a keyboard-driven list
 /// has no built row to call `ensureVisible` on until it is already on screen.
+///
+/// ⚠️ A row with a [ModelPickerRow.detail] lays out TALLER, and this is the
+/// only place that knows it: `itemExtentBuilder` positions every row from these
+/// numbers, so a row measured at 40 while it draws at 57.6 puts the list's
+/// arithmetic 17.6px out from the first detail row down — which is what
+/// `_offsetOf` scrolls the highlight by.
 double modelPickerItemExtent(ModelPickerItem item) => switch (item) {
   ModelPickerHeader() => _headerExtent,
   ModelPickerNote() => kModelPickerNoteExtent,
-  ModelPickerRow() => AppMenuRowMetrics.roomy.extent,
+  ModelPickerRow(:final detail) =>
+    detail == null
+        ? AppMenuRowMetrics.roomy.extent
+        : AppMenuRowMetrics.roomy.detailExtent,
 };
 
 /// [kModelPickerWidth], or as much of a narrow window as the dialog's own inset

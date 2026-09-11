@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../grid/grid_overview_controller.dart';
 import '../../grid/node_dashboard_view.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/app_icon_button.dart';
 import 'node_dashboard_body.dart';
 
@@ -21,11 +22,8 @@ Future<void> showNodeDashboard(
   NodeDashboardViewStore? store,
   VoidCallback? onShareIntelligence,
   VoidCallback? onInvite,
-}) => showDialog<void>(
+}) => showAppDialog<void>(
   context: context,
-  // The same scrim the app's other full dialogs dim behind, rather than
-  // Material's heavier default.
-  barrierColor: const Color(0x66000000),
   builder: (_) => NodeDashboardDialog(
     controller: controller,
     store: store ?? nodeDashboardViewStore,

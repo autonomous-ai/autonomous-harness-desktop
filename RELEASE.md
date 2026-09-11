@@ -297,6 +297,42 @@ gh workflow run release.yml -f version=1.3.0 -f metadata_path=harness/desktop/me
 flutter run -d macos --dart-define=DESKTOP_UPDATE_METADATA_URL=https://storage.googleapis.com/s3-autonomous-upgrade-3/harness/desktop/metadata-test.json
 ```
 
+## Internal builds — an unlisted link, not a release
+
+`.github/workflows/internal-build.yml` builds any branch the way a release would — both macOS
+builds, Developer ID signed, notarized, stapled and checked by Gatekeeper — and uploads them where
+no running app and no public page will ever look:
+
+```bash
+git push origin HEAD:internal/<name>     # builds that commit: Grid on, Debug off
+gh workflow run internal-build.yml --ref <branch> -f grid_surface=true -f debug_surface=false
+```
+
+(`workflow_dispatch` only exists once the file is on `main`; the `internal/**` push works from any
+branch that carries it.) The run prints one `.dmg` link per build — as a notice at the top of the run
+page, and in its summary — named `Harness-macos[-arm64]-<next version>-<commit>.dmg`.
+
+- **Unlisted, not private — and this repository is public.** The files sit under
+  `harness/desktop-internal/<128 random bits>/` and the bucket refuses anonymous listing, so a build
+  cannot be found by guessing. The run page that prints its link is public, though, so anyone who
+  opens it can download the build. The team chose that on 2026-09-10 over a key-derived link that only
+  key holders could work out; if it stops being acceptable, that is the design to go back to.
+- Take a build back with `gsutil -m rm -r gs://s3-autonomous-upgrade-3/harness/desktop-internal/<token>`
+  (the summary prints it); the workflow strips the release's year-long cache headers from these files
+  so a deletion sticks.
+- **It never updates itself.** `DESKTOP_UPDATE_METADATA_URL` points at a manifest nothing writes,
+  so a tester stays on the build they were asked to test rather than being moved onto the next
+  public release. The next internal build is installed by its own link.
+- **Same code path as a release, flags aside.** `publish-macos-variant.sh --build-only` builds and
+  pins the renderer (its `--dart-define=` arguments go to `flutter build` and nowhere else), then
+  `upload-desktop.sh --no-build` packages, notarizes and uploads, moved onto the internal prefix by
+  its existing env overrides (`GCS_PATH`, `DMG_GCS_PATH`, `METADATA_PATH`). Its signing steps are the
+  release's own `.github/actions/macos-signing`, so an internal build also proves those before a
+  release depends on them.
+- **Why not by hand.** An Info.plist edited and re-signed on a laptop reached a tester as "The
+  application "Harness" can't be opened", and a laptop without the notarytool profile cannot
+  notarize at all — which is what makes a copy downloaded fresh on another Mac open cleanly.
+
 ## Rollback
 
 The relaunch-health check (step 6 above) only guards against a build that fails to start. To roll back

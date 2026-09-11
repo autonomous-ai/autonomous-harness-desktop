@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../shared/theme/app_theme.dart' as grid;
+import '../shared/widgets/app_dialog.dart';
 import '../state/app_state.dart';
 import '../state/pane_preset.dart';
 import '../theme/app_theme.dart';
@@ -16,12 +17,19 @@ import '../theme/app_theme.dart';
 /// above that the choice is the column count, with "Auto" — as many columns as
 /// the width carries at the forty-column floor — sitting among them as the
 /// measured answer rather than as the only one.
+/// Guards against a second ⌘S while the palette is already up. Without this,
+/// each press stacked another dialog route — and another 30%-black barrier —
+/// on top of the last, so holding or repeatedly pressing ⌘S read as the whole
+/// window fading to black rather than as "already open".
+bool _layoutPaletteOpen = false;
+
 Future<void> showLayoutPalette(BuildContext context, AppNotifier notifier) {
-  return showDialog<void>(
+  if (_layoutPaletteOpen) return Future<void>.value();
+  _layoutPaletteOpen = true;
+  return showAppDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.3),
     builder: (context) => _LayoutPalette(notifier: notifier),
-  );
+  ).whenComplete(() => _layoutPaletteOpen = false);
 }
 
 class _LayoutPalette extends StatefulWidget {

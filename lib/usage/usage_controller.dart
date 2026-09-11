@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/test_run.dart';
 import 'claude_usage_source.dart';
 import 'codex_usage_source.dart';
+import 'usage_accounts.dart';
 import 'usage_source.dart';
 import 'usage_window.dart';
 
@@ -22,6 +23,7 @@ import 'usage_window.dart';
 class UsageController extends ChangeNotifier {
   UsageController({
     List<UsageSource>? sources,
+    this.remote,
     this.interval = const Duration(seconds: 60),
     bool autoStart = true,
   }) : _sources =
@@ -36,6 +38,14 @@ class UsageController extends ChangeNotifier {
   }
 
   final List<UsageSource> _sources;
+
+  /// Asks every connected remote machine what ITS accounts have spent
+  /// (`AppNotifier.readRemoteUsage`). Null reads this computer only — every
+  /// test, and anything that has no machines to ask.
+  final Future<List<MachineUsage>> Function()? remote;
+
+  List<MachineUsage> _remote = const [];
+  int _remoteRequest = 0;
 
   /// How often to ask again.
   final Duration interval;
@@ -74,6 +84,13 @@ class UsageController extends ChangeNotifier {
       if (reading.hasFigures) reading,
   ];
 
+  /// One figure per ACCOUNT, this computer's first — see [groupUsageAccounts].
+  ///
+  /// [readings] stays this computer's alone, on purpose: the limit notice and
+  /// the panel's offer act on agents by ENGINE across every machine, and a
+  /// remote account at 95% is no reason to move this Mac's agents anywhere.
+  List<UsageAccount> get accounts => groupUsageAccounts(readings, _remote);
+
   /// Whether the rail has anything at all to say — figures, or a reason there
   /// are none. False only before the first cycle resolves.
   bool get hasAnswer => readings.any((r) => r.status != UsageStatus.loading);
@@ -85,7 +102,33 @@ class UsageController extends ChangeNotifier {
     _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
   }
 
+  /// This computer's accounts and every remote machine's, asked at once — and
+  /// landing apart. A remote machine is a relay round trip away and may never
+  /// answer at all (see `AppNotifier.readRemoteUsage`), so it must not hold up
+  /// figures this computer already has. Each half notifies when it lands;
+  /// the future completes when both have.
   Future<void> refresh() async {
+    await Future.wait([_refreshLocal(), _refreshRemote()]);
+  }
+
+  Future<void> _refreshRemote() async {
+    final ask = remote;
+    if (ask == null) return;
+    final request = ++_remoteRequest;
+    final List<MachineUsage> answers;
+    try {
+      answers = await ask();
+    } catch (_) {
+      // Keep the last good answer, the same rule the local half follows.
+      return;
+    }
+    // A slower, older answer must not overwrite a newer one.
+    if (_disposed || request != _remoteRequest) return;
+    _remote = answers;
+    notifyListeners();
+  }
+
+  Future<void> _refreshLocal() async {
     _started = true;
     final request = ++_request;
     final results = await Future.wait(_sources.map((s) => s.read()));

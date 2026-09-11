@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../shared/widgets/app_dialog.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
@@ -16,7 +17,7 @@ Future<void> showLinkMachineScreenDialog(
   AppNotifier notifier,
   String machineId,
 ) async {
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     builder: (context) => Dialog(
       backgroundColor: Colors.transparent,
@@ -116,162 +117,153 @@ class _LinkMachineScreenState extends State<LinkMachineScreen> {
         color: AppColors.surface,
       ),
       child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.link, size: 32, color: AppColors.accent),
+          const SizedBox(height: 6),
+          Text(
+            'Link this machine',
+            style: TextStyle(
+              fontFamily: AppFonts.sans,
+              fontFamilyFallback: AppFonts.sansFallback,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "This computer isn't linked to $machineName yet. Enter the remote password set "
+            'on that machine to connect.',
+            style: TextStyle(
+              fontFamily: AppFonts.sans,
+              fontFamilyFallback: AppFonts.sansFallback,
+              fontSize: 11.2,
+              color: AppColors.mutedStrong,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            key: const Key('remote-password-connect-field'),
+            controller: _passwordController,
+            obscureText: _obscure,
+            style: TextStyle(
+              fontFamily: AppFonts.mono,
+              fontSize: 12.5,
+              color: AppColors.textSoft,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Remote password for $machineName',
+              hintStyle: TextStyle(fontFamily: AppFonts.mono, fontSize: 12.5),
+              prefixIcon: const Icon(Icons.password, size: 17),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscure ? Icons.visibility : Icons.visibility_off,
+                  size: 17,
+                ),
+                onPressed: () => setState(() => _obscure = !_obscure),
+              ),
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _error!,
+              style: TextStyle(
+                fontFamily: AppFonts.sans,
+                fontFamilyFallback: AppFonts.sansFallback,
+                fontSize: 11.2,
+                color: AppColors.danger,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Icon(Icons.link, size: 32, color: AppColors.accent),
-              const SizedBox(height: 6),
-              Text(
-                'Link this machine',
-                style: TextStyle(
-                  fontFamily: AppFonts.sans,
-                  fontFamilyFallback: AppFonts.sansFallback,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                "This computer isn't linked to $machineName yet. Enter the remote password set "
-                'on that machine to connect.',
-                style: TextStyle(
-                  fontFamily: AppFonts.sans,
-                  fontFamilyFallback: AppFonts.sansFallback,
-                  fontSize: 11.2,
-                  color: AppColors.mutedStrong,
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                key: const Key('remote-password-connect-field'),
-                controller: _passwordController,
-                obscureText: _obscure,
-                style: TextStyle(
-                  fontFamily: AppFonts.mono,
-                  fontSize: 12.5,
-                  color: AppColors.textSoft,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Remote password for $machineName',
-                  hintStyle: TextStyle(
-                    fontFamily: AppFonts.mono,
-                    fontSize: 12.5,
-                  ),
-                  prefixIcon: const Icon(Icons.password, size: 17),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscure ? Icons.visibility : Icons.visibility_off,
-                      size: 17,
-                    ),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                  ),
-                ),
-                onSubmitted: (_) => _submit(),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 6),
+              if (_submitting && _stage != null) ...[
                 Text(
-                  _error!,
+                  _stage!,
                   style: TextStyle(
                     fontFamily: AppFonts.sans,
                     fontFamilyFallback: AppFonts.sansFallback,
                     fontSize: 11.2,
-                    color: AppColors.danger,
+                    color: AppColors.mutedStrong,
                   ),
                 ),
+                const SizedBox(width: 10),
               ],
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (_submitting && _stage != null) ...[
-                    Text(
-                      _stage!,
-                      style: TextStyle(
-                        fontFamily: AppFonts.sans,
-                        fontFamilyFallback: AppFonts.sansFallback,
-                        fontSize: 11.2,
-                        color: AppColors.mutedStrong,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                  FilledButton(
-                    key: const Key('remote-password-connect-button'),
-                    onPressed: _submitting ? null : _submit,
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            'Link machine',
-                          ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Your previous agent will reconnect automatically after linking.',
-                style: TextStyle(
-                  fontFamily: AppFonts.sans,
-                  fontSize: 11.2,
-                  color: AppColors.mutedStrong,
-                ),
-              ),
-              const SizedBox(height: 4),
-              TextButton.icon(
-                key: const Key('link-troubleshooting-details'),
-                onPressed: () => setState(
-                  () => _showTroubleshootingDetails =
-                      !_showTroubleshootingDetails,
-                ),
-                icon: Icon(
-                  _showTroubleshootingDetails
-                      ? Icons.expand_less
-                      : Icons.expand_more,
-                  size: 16,
-                ),
-                label: const Text('Troubleshooting details'),
-              ),
-              if (_showTroubleshootingDetails)
-                Padding(
-                  padding: const EdgeInsets.only(left: 12),
-                  child: SelectableText(
-                    'Machine ID: $machineId',
-                    style: TextStyle(
-                      fontFamily: AppFonts.mono,
-                      fontSize: 11.2,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                ),
-              // An explicit way out, in addition to the barrier tap/Escape that
-              // showLinkMachineScreenDialog already treats as an implicit dismiss. Closing does
-              // not pretend the machine is linked: it still cannot be read and the rail still
-              // says so. It only stops the popup from insisting, and choosing that machine again
-              // brings it straight back. Bottom-right text button, matching every other dialog in
-              // the app (see link_machine_dialog.dart's 'Close').
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: () => widget.notifier.dismissLinkPrompt(machineId),
-                  child: const Text('Close'),
-                ),
+              FilledButton(
+                key: const Key('remote-password-connect-button'),
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Link machine'),
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Your previous agent will reconnect automatically after linking.',
+            style: TextStyle(
+              fontFamily: AppFonts.sans,
+              fontSize: 11.2,
+              color: AppColors.mutedStrong,
+            ),
+          ),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            key: const Key('link-troubleshooting-details'),
+            onPressed: () => setState(
+              () => _showTroubleshootingDetails = !_showTroubleshootingDetails,
+            ),
+            icon: Icon(
+              _showTroubleshootingDetails
+                  ? Icons.expand_less
+                  : Icons.expand_more,
+              size: 16,
+            ),
+            label: const Text('Troubleshooting details'),
+          ),
+          if (_showTroubleshootingDetails)
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: SelectableText(
+                'Machine ID: $machineId',
+                style: TextStyle(
+                  fontFamily: AppFonts.mono,
+                  fontSize: 11.2,
+                  color: AppColors.muted,
+                ),
+              ),
+            ),
+          // An explicit way out, in addition to the barrier tap/Escape that
+          // showLinkMachineScreenDialog already treats as an implicit dismiss. Closing does
+          // not pretend the machine is linked: it still cannot be read and the rail still
+          // says so. It only stops the popup from insisting, and choosing that machine again
+          // brings it straight back. Bottom-right text button, matching every other dialog in
+          // the app (see link_machine_dialog.dart's 'Close').
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => widget.notifier.dismissLinkPrompt(machineId),
+              child: const Text('Close'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

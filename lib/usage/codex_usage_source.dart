@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../logging/http_log.dart';
+import 'usage_account_key.dart';
 import 'usage_credentials.dart';
 import 'usage_source.dart';
 import 'usage_window.dart';
@@ -44,23 +45,22 @@ class CodexUsageSource implements UsageSource {
           },
         ),
       );
-      final failure = usageFailureFor(provider, response.statusCode);
-      if (failure != null) return failure;
-      final data = response.data;
-      if (data is! Map) {
-        return ProviderUsage(
-          provider: provider,
-          status: UsageStatus.failed,
-          message: 'Codex answered in a shape this build cannot read',
-        );
-      }
-      return _mapWindows(data);
+      return codexUsageFromAnswer(
+        statusCode: response.statusCode,
+        body: response.data,
+        account: accountId == null
+            ? null
+            : usageAccountKey(provider, accountId),
+      );
     } on DioException {
       return usageFailureFor(provider, null)!;
     }
   }
 
-  ProviderUsage _mapWindows(Map<Object?, Object?> data) {
+  static ProviderUsage _mapWindows(
+    Map<Object?, Object?> data, {
+    String? account,
+  }) {
     final limits = data['rate_limit'];
     final windows = limits is Map
         ? <UsageWindow>[
@@ -69,21 +69,22 @@ class CodexUsageSource implements UsageSource {
           ]
         : const <UsageWindow>[];
     if (windows.isEmpty) {
-      return ProviderUsage(
-        provider: provider,
+      return const ProviderUsage(
+        provider: UsageProvider.codex,
         status: UsageStatus.failed,
         message: 'Codex reported no limits',
       );
     }
     return ProviderUsage(
-      provider: provider,
+      provider: UsageProvider.codex,
       status: UsageStatus.ok,
       windows: windows,
       fetchedAt: DateTime.now(),
+      account: account,
     );
   }
 
-  UsageWindow? _window(Object? raw) {
+  static UsageWindow? _window(Object? raw) {
     if (raw is! Map) return null;
     final used = parseUsedPercent([raw['used_percent']]);
     if (used == null) return null;
@@ -110,4 +111,24 @@ class CodexUsageSource implements UsageSource {
     final days = hours ~/ 24;
     return days == 7 ? kWeeklyWindowLabel : '${days}d';
   }
+}
+
+/// What Codex's usage endpoint said, as the rail draws it — shared by this
+/// computer's own reading and a remote machine's, for the reason
+/// [claudeUsageFromAnswer] gives.
+ProviderUsage codexUsageFromAnswer({
+  required int? statusCode,
+  required Object? body,
+  String? account,
+}) {
+  final failure = usageFailureFor(UsageProvider.codex, statusCode);
+  if (failure != null) return failure;
+  if (body is! Map) {
+    return const ProviderUsage(
+      provider: UsageProvider.codex,
+      status: UsageStatus.failed,
+      message: 'Codex answered in a shape this build cannot read',
+    );
+  }
+  return CodexUsageSource._mapWindows(body, account: account);
 }

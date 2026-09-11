@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../autonomous_device/autonomous_device_cli.dart';
 import '../../core/test_run.dart';
+import '../../shared/widgets/app_dialog.dart';
 import '../../shared/widgets/app_icon_button.dart';
 import '../../shared/widgets/app_select_field.dart';
 import '../../shared/widgets/labeled_field.dart';
@@ -125,7 +126,7 @@ class _DevicesSectionState extends State<DevicesSection> {
   }
 
   Future<bool> _confirm(String title, String detail, String action) async =>
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(title),
@@ -335,7 +336,9 @@ class _DevicesSectionState extends State<DevicesSection> {
               SettingRow(
                 // The CLI's pair store is a map with no cap, so a paired device
                 // is never replaced by the next one — say which act this is.
-                title: _devices.isEmpty ? 'Pair a device' : 'Pair another device',
+                title: _devices.isEmpty
+                    ? 'Pair a device'
+                    : 'Pair another device',
                 alignTop: true,
                 detail: _discovered.isEmpty
                     ? 'No Autonomous devices found. Keep your device on the same network, then refresh.'
