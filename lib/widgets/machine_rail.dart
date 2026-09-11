@@ -534,12 +534,16 @@ class _MachineNodeState extends State<_MachineNode> {
     final connectionColor = state.nodeOnline == false
         ? grid.AppPalette.textFaint
         : state.needsLink
-        // The NO_PEER_LINK close that got us here is itself proof the daemon
-        // answered — this reads as online even though OUR socket sits at
-        // disconnected/reconnecting for as long as the machine stays
-        // unlinked (see WsConn._onDone's 4404 branch). Offline, above,
-        // still wins.
-        ? grid.AppPalette.online
+        // Unlinked, our socket never reaches this machine: NO_PEER_LINK is the
+        // local CLI's own peer table saying no, before anything is dialled, and
+        // the link-retry loop then bounces connecting/disconnected every few
+        // seconds — none of which is a fact about the other computer. Only the
+        // REST status is, so green needs an explicit `true` from it; unknown
+        // stays grey rather than promising a machine that may be off. Offline,
+        // above, still wins.
+        ? (state.nodeOnline == true
+              ? grid.AppPalette.online
+              : grid.AppPalette.textFaint)
         : switch (state.connectionStatus) {
             ConnectionStatus.connected => grid.AppPalette.online,
             ConnectionStatus.connecting ||
@@ -677,11 +681,12 @@ class _MachineNodeState extends State<_MachineNode> {
                         if (state.nodeOnline == false)
                           const _OfflineWord()
                         else if (state.needsLink)
-                          // Reachable but never linked with this app instance —
-                          // the one click that fixes it, ALWAYS visible rather
-                          // than hidden behind hover like _CaptionActions: that
-                          // was the whole reason an unlinked-but-alive machine
-                          // read as unreachable in the first place.
+                          // Not known to be off, and never linked with this app
+                          // instance — the one click that fixes it, ALWAYS
+                          // visible rather than hidden behind hover like
+                          // _CaptionActions: that was the whole reason an
+                          // unlinked-but-alive machine read as unreachable in
+                          // the first place. Same gate as _LinkMachineRow.
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
                             child: AppIconButton(

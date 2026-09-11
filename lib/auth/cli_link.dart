@@ -164,8 +164,12 @@ class CliLink {
         fingerprint: json['fingerprint'] as String?,
       );
     }
+    // `message` is the CLI's human sentence for the code (what it prints without --json); `error`
+    // is the bare code and only a fallback for a CLI too old to send one.
     return CliLinkConnectResult(
-      error: json['error'] as String? ?? 'harness link connect failed',
+      error: json['message'] as String? ??
+          json['error'] as String? ??
+          'harness link connect failed',
     );
   }
 

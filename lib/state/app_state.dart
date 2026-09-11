@@ -1515,6 +1515,30 @@ class AppNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onLocalFailure(String machineId, int code, String reason) {
+    final machine = machineStates[machineId];
+    if (machine == null || code != 4404) return;
+    // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
+    // A `harness link connect` run in a terminal (or another app instance) has no way to notify
+    // this one directly, so poll every few seconds until it's picked up instead of waiting for
+    // the user to click back into this machine.
+    machine.needsLink = true;
+    machine.agentLoadStatus = AgentLoadStatus.needsLink;
+    // A 4404 can also arrive MID-SESSION ("peer revoked trust" in the CLI's
+    // remoteRelay.ts) with terminals open on this machine. The disconnect
+    // that follows deliberately no longer marks the node offline (see the
+    // onStatus branch in _ensurePool), so the tiles have to be told here
+    // instead — otherwise they keep rendering as live until a heartbeat
+    // fails, and nothing records what to reattach once the machine is linked
+    // again.
+    _markSessionsUnreachable(
+      machine,
+      'This machine is no longer linked. Link it again to reconnect.',
+    );
+    notifyListeners();
+    _startLinkRetry(machineId);
+  }
+
   void _ensurePool() {
     if (_pool != null) return;
     _pool = WsPool(
@@ -1531,18 +1555,7 @@ class AppNotifier extends ChangeNotifier {
         );
       },
       onAuthFailure: _signedOutAtRuntime,
-      onLocalFailure: (machineId, code, reason) {
-        final machine = machineStates[machineId];
-        if (machine == null || code != 4404) return;
-        // The local CLI's relay found no linked trust for this machine — it now owns E2EE entirely.
-        // A `harness link connect` run in a terminal (or another app instance) has no way to notify
-        // this one directly, so poll every few seconds until it's picked up instead of waiting for
-        // the user to click back into this machine.
-        machine.needsLink = true;
-        machine.agentLoadStatus = AgentLoadStatus.needsLink;
-        notifyListeners();
-        _startLinkRetry(machineId);
-      },
+      onLocalFailure: _onLocalFailure,
       onEvent: _handleEvent,
       onStatus: (machineId, nextStatus) {
         final machine = machineStates[machineId];
@@ -1589,11 +1602,14 @@ class AppNotifier extends ChangeNotifier {
           // used to be local-only, which is why a remote machine's terminal never came back on its own
           // after `harness start` on that machine, even though the guide screen promised it would.
           //
-          // NOT when this disconnect IS the machine's own NO_PEER_LINK: needsLink is only ever set by
-          // onLocalFailure, which now runs before this branch for close code 4404 (see WsConn._onDone) —
-          // a NO_PEER_LINK rejection is proof the relay/daemon answered. Forcing nodeOnline false here
-          // would fight the REST status and node_status push, the only signals honest about real
-          // reachability; a machine merely unlinked from THIS app instance is not offline.
+          // NOT while the machine is unlinked. NO_PEER_LINK is the local CLI failing a lookup in its
+          // own peer table (remoteRelay.ts `dial`) before anything is dialled, so neither that close
+          // nor the one `_startLinkRetry`'s `closeMachine` fires every few seconds says anything about
+          // whether the OTHER computer is up — our socket never reaches it. Forcing nodeOnline false
+          // here overwrote the REST `/api/machines` status, the one signal that does, and painted
+          // every unlinked machine as off. Keyed on the sticky flag rather than the 4404 close on
+          // purpose: the retry loop's own close() lands as a plain `disconnected` too. needsLink is
+          // set by onLocalFailure, which runs before this branch for 4404 (see WsConn._onDone).
           if (!machine.needsLink) {
             unawaited(_applyNodeStatus(machine, false));
           }
@@ -2934,6 +2950,29 @@ class AppNotifier extends ChangeNotifier {
     return RestartAgentResult(resumed: resumed is bool ? resumed : true);
   }
 
+  /// Every tile on the machine, not just the focused one: the machine is what
+  /// went away, so a tile of the same machine sitting in another corner of the
+  /// grid is just as dead and must say so rather than keep showing a terminal
+  /// that can no longer receive anything. Records what was open so the next
+  /// `connected` can put it back (`_recoverPendingAgent`).
+  void _markSessionsUnreachable(MachineState machine, String message) {
+    for (final pane in panesFor(machine.machine.machineId)) {
+      final session = pane.session;
+      if (session == null) continue;
+      machine.activeAgentId ??= session.agentId;
+      // A pane someone else already took over must stay frozen until the user retries it
+      // themselves (see `_paneNeedsAttach`) — recording it here would have `_recoverPendingAgent`
+      // call `selectAgent` on reconnect and silently win it back the moment the connection
+      // returns, fighting whichever machine holds it now.
+      if (session.status != TerminalSessionStatus.takenOver) {
+        machine.pendingOfflineAgentId ??= session.agentId;
+      }
+      // Do not send terminal_close: the adapter is already gone and the
+      // next client attachment should be the only stream that owns the pane.
+      session.transportLost(message);
+    }
+  }
+
   Future<void> _applyNodeStatus(MachineState machine, bool online) async {
     if (_disposed) return;
     final machineId = machine.machine.machineId;
@@ -2941,28 +2980,12 @@ class AppNotifier extends ChangeNotifier {
     machine.nodeOnline = online;
 
     if (!online) {
-      // Every tile on it, not just the focused one: the machine is what went
-      // away, so a tile of the same machine sitting in another corner of the
-      // grid is just as dead and must say so rather than keep showing a
-      // terminal that can no longer receive anything.
-      final message = machine.isLocalMachine
-          ? 'Harness is offline. Run harness login to reconnect.'
-          : 'Harness is offline. Run harness start on that machine to reconnect.';
-      for (final pane in panesFor(machineId)) {
-        final session = pane.session;
-        if (session == null) continue;
-        machine.activeAgentId ??= session.agentId;
-        // A pane someone else already took over must stay frozen until the user retries it
-        // themselves (see `_paneNeedsAttach`) — recording it here would have `_recoverPendingAgent`
-        // call `selectAgent` on reconnect and silently win it back the moment the connection
-        // returns, fighting whichever machine holds it now.
-        if (session.status != TerminalSessionStatus.takenOver) {
-          machine.pendingOfflineAgentId ??= session.agentId;
-        }
-        // Do not send terminal_close: the adapter is already gone and the
-        // next client attachment should be the only stream that owns the pane.
-        session.transportLost(message);
-      }
+      _markSessionsUnreachable(
+        machine,
+        machine.isLocalMachine
+            ? 'Harness is offline. Run harness login to reconnect.'
+            : 'Harness is offline. Run harness start on that machine to reconnect.',
+      );
       _startOfflineRetry(machine);
     } else {
       _stopOfflineRetry(machineId);
@@ -4019,6 +4042,12 @@ class AppNotifier extends ChangeNotifier {
     String machineId,
     Map<String, dynamic> event,
   ) => _handleEvent(machineId, event);
+
+  /// What the local CLI closing this machine's socket with [code] does to the
+  /// model — the `WsPool.onLocalFailure` path, without a socket.
+  @visibleForTesting
+  void localFailureForTest(String machineId, int code, String reason) =>
+      _onLocalFailure(machineId, code, reason);
 
   @override
   void dispose() {
