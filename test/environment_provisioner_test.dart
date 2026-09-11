@@ -8,421 +8,337 @@ ProcessResult result(int exitCode, {String stdout = '', String stderr = ''}) =>
 
 void main() {
   late Directory scratch;
+  late File managedNode;
 
   setUp(() async {
-    scratch = await Directory.systemTemp.createTemp(
-      'harness-environment-test-',
-    );
+    scratch = await Directory.systemTemp.createTemp('harness-env-test-');
+    managedNode = File('${scratch.path}/runtime/node-v20/bin/node');
   });
 
   tearDown(() async {
     if (await scratch.exists()) await scratch.delete(recursive: true);
   });
 
-  test('installs the Harness CLI, letting it bring its own Node', () async {
-    var statusCalls = 0;
-    final installEnvironments = <Map<String, String>?>[];
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: true,
-      run: (executable, arguments, {environment}) async {
-        final command = arguments.join(' ');
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          statusCalls++;
-          return statusCalls == 1
-              ? result(1, stderr: 'harness: command not found')
-              : result(0, stdout: '{"loggedIn":false}\n');
-        }
-        // Matched exactly, not on a bare `curl -fsSL`: the Grid CLI's installer
-        // is one too, so a loose match would make this test depend on the Grid
-        // probe happening to succeed first.
-        if (command.contains('cdn.autonomous.ai/harness/cli/install.sh')) {
-          installEnvironments.add(environment);
-          return result(0, stdout: 'installed');
-        }
-        return result(0, stdout: 'tmux 3.4');
-      },
-    );
+  Future<void> createManagedHarness() async {
+    await managedNode.parent.create(recursive: true);
+    await managedNode.writeAsString('node');
+    await File('${scratch.path}/runtime/current-node')
+        .writeAsString(managedNode.path);
+    final cli = File('${scratch.path}/cli/cli.js');
+    await cli.parent.create(recursive: true);
+    await cli.writeAsString('cli');
+  }
 
-    final ready = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(ready.isReady, isTrue);
-    expect(statusCalls, 2);
-    expect(installEnvironments, hasLength(1));
-    // Deliberately NOT naming an interpreter any more: install.sh provisions and
-    // records the managed runtime itself, so the app has none to hand over.
-    expect(
-      installEnvironments.single?.containsKey('HARNESS_NODE_BINARY'),
-      isNot(isTrue),
-    );
-  });
-
-  test('probes through the Homebrew prefixes, Apple Silicon first', () async {
-    final shellCommands = <String>[];
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: true,
-      run: (executable, arguments, {environment}) async {
-        if (executable == '/bin/zsh') shellCommands.add(arguments.last);
-        return result(0, stdout: '{"loggedIn":false}\n');
-      },
-    );
-
-    await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(shellCommands, isNotEmpty);
-    // A Finder launch starts from launchd's bare PATH, so the prefixes have to
-    // be named. Intel last: a Mac with both must not install through it.
-    for (final command in shellCommands) {
-      expect(command, contains('/opt/homebrew/bin:/usr/local/bin'));
-    }
-  });
-
-  test('fails only when the platform is neither macOS, Linux nor Windows', () async {
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: false,
-      isLinux: false,
-      isWindows: false,
-      run: (executable, arguments, {environment}) async => result(0),
-    );
-
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(readiness.isReady, isFalse);
-    // The message hangs off the first step, which is now the CLI one.
-    expect(
-      readiness.steps[EnvironmentStep.harness],
-      EnvironmentStepStatus.failed,
-    );
-    expect(readiness.message, contains('macOS and Linux only'));
-  });
-
-  test('verifies rather than installs on Windows, and boots without tmux', () async {
-    final commands = <String>[];
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: false,
-      isLinux: false,
-      isWindows: true,
-      run: (executable, arguments, {environment}) async {
-        commands.add('$executable ${arguments.join(' ')}');
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":true}');
-        }
-        if (arguments.contains('--version')) return result(0, stdout: 'grid 0.3.45');
-        return result(1);
-      },
-    );
-
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(readiness.isReady, isTrue);
-    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.ready);
-    expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
-    // tmux cannot exist here, so it is reported and stepped over rather than blocking the boot.
-    expect(readiness.steps[EnvironmentStep.tmux], EnvironmentStepStatus.unavailable);
-    // Nothing POSIX was ever shelled out to: no shell, no package manager, no
-    // installer script.
-    //
-    // ⚠️ This used to read `c.contains('/bin/')`, and that passed on CI while
-    // failing on any machine that actually has a CLI at `~/.local/bin/harness`
-    // — the path `HarnessCliRunner` legitimately resolves on every platform,
-    // and one the fake `run` above never executes anyway. The assertion is
-    // about what the provisioner CHOSE to run, not about where the binary it
-    // found happens to live; a test that reads the developer's home directory
-    // is a test that only fails for whoever installed the CLI.
-    expect(commands.any((c) => c.startsWith('/bin/')), isFalse);
-    expect(
-      commands.any((c) => c.contains('/bin/sh') || c.contains('/bin/bash')),
-      isFalse,
-    );
-    expect(
-      commands.any((c) => c.contains('brew') || c.contains('apt-get')),
-      isFalse,
-    );
-    expect(commands.any((c) => c.contains('install.sh')), isFalse);
-  });
-
-  test('reports the Harness CLI as failed on Windows when it does not answer', () async {
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: false,
-      isLinux: false,
-      isWindows: true,
-      run: (executable, arguments, {environment}) async => result(1),
-    );
-
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(readiness.isReady, isFalse);
-    expect(readiness.steps[EnvironmentStep.harness], EnvironmentStepStatus.failed);
-    expect(readiness.message, contains('scripts/install-cli.sh'));
-  });
-
-  test('provisions on Linux', () async {
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: false,
-      isLinux: true,
-      run: (executable, arguments, {environment}) async {
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":false}\n');
-        }
-        return result(0, stdout: 'tmux 3.4');
-      },
-    );
-
-    final ready = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(ready.isReady, isTrue);
-  });
-
-  test('opens a terminal with an apt-based script on Linux', () async {
-    String? terminalScript;
-    final shellCommands = <String>[];
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: false,
-      isLinux: true,
-      openTerminal: (path) async => terminalScript = path,
-      run: (executable, arguments, {environment}) async {
-        final command = arguments.join(' ');
-        shellCommands.add(command);
-        if (command.contains('tmux')) return result(1);
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":false}\n');
-        }
-        return result(0);
-      },
-    );
-
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(readiness.isReady, isFalse);
-    expect(readiness.needsTerminal, isTrue);
-    expect(terminalScript, isNotNull);
-    // Linux never shells out to Homebrew.
-    expect(shellCommands.any((c) => c.contains('brew')), isFalse);
-    final script = await File(terminalScript!).readAsString();
-    expect(script, contains('apt-get install -y tmux'));
-    expect(script, isNot(contains('sudo apt-get update')));
-    expect(script, contains('tmux -V'));
-    expect(script, contains('tmux installation failed'));
-    expect(script, contains('Press Enter to close this window'));
-
-    // Execute the generated script with a failing fake sudo. The old `set -e`
-    // script disappeared as soon as apt failed, hiding the reason from the
-    // person repairing the app.
-    final fakeBin = Directory('${scratch.path}/bin')..createSync();
-    final fakeApt = File('${fakeBin.path}/apt-get')
-      ..writeAsStringSync('#!/bin/sh\nexit 0\n');
-    final fakeSudo = File('${fakeBin.path}/sudo')
-      ..writeAsStringSync('#!/bin/sh\nexit 42\n');
-    await Process.run('/bin/chmod', ['700', fakeApt.path, fakeSudo.path]);
-    final attempted = await Process.run(
-      '/bin/bash',
-      [terminalScript!],
-      environment: {'PATH': '${fakeBin.path}:/usr/bin:/bin'},
-    );
-    expect(attempted.exitCode, 42);
-    expect(attempted.stdout, contains('tmux installation failed'));
-  });
-
-  test('opens Terminal when tmux and Homebrew are unavailable', () async {
-    String? terminalScript;
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: true,
-      openTerminal: (path) async => terminalScript = path,
-      run: (executable, arguments, {environment}) async {
-        final command = arguments.join(' ');
-        if (command.contains('tmux')) return result(1);
-        if (command.contains('command -v brew')) return result(1);
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":false}\n');
-        }
-        return result(0);
-      },
-    );
-
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
-
-    expect(readiness.isReady, isFalse);
-    expect(readiness.needsTerminal, isTrue);
-    expect(
-      readiness.steps[EnvironmentStep.tmux],
-      EnvironmentStepStatus.needsTerminal,
-    );
-    expect(terminalScript, isNotNull);
-    expect(
-      await File(terminalScript!).readAsString(),
-      contains('brew install tmux'),
-    );
-  });
-
-  // --- resumeFrom: rechecking one stuck step without disturbing the others ---
+  ProcessRunner runner({
+    required bool Function() tmuxPresent,
+    required bool Function() gridPresent,
+    bool developerToolsPresent = true,
+    Future<void> Function()? installHarness,
+    Future<void> Function()? installGrid,
+    List<String>? calls,
+    int gridInstallExitCode = 0,
+  }) {
+    return (executable, arguments, {environment}) async {
+      final command = '$executable ${arguments.join(' ')}';
+      calls?.add(command);
+      final shell = arguments.isNotEmpty ? arguments.last : '';
+      if (shell.contains('command -v tmux')) {
+        return developerToolsPresent && tmuxPresent()
+            ? result(0, stdout: 'tmux 3.4')
+            : result(1);
+      }
+      if (shell.contains('/usr/bin/xcrun --find clang')) {
+        return developerToolsPresent
+            ? result(0, stdout: '/usr/bin/clang')
+            : result(1, stderr: 'unable to find utility clang');
+      }
+      if (shell.contains('command -v grid')) {
+        return gridPresent() ? result(0, stdout: 'grid 1.0') : result(1);
+      }
+      if (shell.contains('cdn.autonomous.ai/harness/cli/install.sh')) {
+        await installHarness?.call();
+        return result(0, stdout: 'Harness installed');
+      }
+      if (shell.contains('grid.autonomous.ai/install.sh')) {
+        if (gridInstallExitCode == 0) await installGrid?.call();
+        return result(
+          gridInstallExitCode,
+          stdout: gridInstallExitCode == 0 ? 'Grid installed' : '',
+          stderr: gridInstallExitCode == 0 ? '' : 'network unavailable',
+        );
+      }
+      if (executable == managedNode.path &&
+          arguments.length == 1 &&
+          arguments.first == '--version') {
+        return result(0, stdout: 'v20.18.0');
+      }
+      if (executable == managedNode.path && arguments.contains('version')) {
+        return result(0, stdout: 'harness 1.2.3');
+      }
+      // System tools, writable HOME and chmod.
+      return result(0);
+    };
+  }
 
   test(
-    'resumeFrom skips a step already ready instead of re-probing it',
+    'launch pre-flight is read-only when required tools are missing',
     () async {
-      var harnessProbes = 0;
+      var terminalLaunches = 0;
+      final calls = <String>[];
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
         isMacOS: true,
-        run: (executable, arguments, {environment}) async {
-          if (arguments.contains('auth') && arguments.contains('status')) {
-            harnessProbes++;
-            return result(0, stdout: '{"loggedIn":false}\n');
-          }
-          return result(0, stdout: 'tmux 3.4\n');
-        },
-      );
-      final resumeFrom = EnvironmentReadiness(
-        steps: {
-          EnvironmentStep.harness: EnvironmentStepStatus.ready,
-          EnvironmentStep.tmux: EnvironmentStepStatus.pending,
-          EnvironmentStep.grid: EnvironmentStepStatus.pending,
-        },
+        openTerminal: (_) async => terminalLaunches++,
+        run: runner(
+          tmuxPresent: () => false,
+          gridPresent: () => false,
+          calls: calls,
+        ),
       );
 
       final readiness = await provisioner.ensureReady(
         onProgress: (_) {},
-        resumeFrom: resumeFrom,
+        install: false,
       );
 
-      expect(readiness.isReady, isTrue);
-      // Never re-entered: the harness step's own check was never invoked.
-      expect(harnessProbes, 0);
-      expect(
-        readiness.steps[EnvironmentStep.tmux],
-        EnvironmentStepStatus.ready,
+      expect(readiness.isReady, isFalse);
+      expect(readiness.phase, EnvironmentSetupPhase.review);
+      expect(terminalLaunches, 0);
+      expect(calls.where((line) => line.contains('install.sh')), isEmpty);
+    },
+  );
+
+  test('an unusable selected developer directory is shown as missing during pre-flight', () async {
+    var terminalLaunches = 0;
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      openTerminal: (_) async => terminalLaunches++,
+      run: runner(
+        developerToolsPresent: false,
+        tmuxPresent: () => true,
+        gridPresent: () => false,
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: false,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.review);
+    expect(readiness.systemReady, isFalse);
+    expect(readiness.output.join('\n'), contains('xcrun --find clang'));
+    expect(
+      calls.any((line) => line.contains('/usr/bin/xcrun --find clang')),
+      isTrue,
+    );
+    expect(terminalLaunches, 0);
+  });
+
+  test('automatic setup repairs or installs Apple developer tools in Terminal', () async {
+    String? terminalScript;
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: true,
+      openTerminal: (path) async => terminalScript = path,
+      run: runner(
+        developerToolsPresent: false,
+        tmuxPresent: () => false,
+        gridPresent: () => false,
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+    expect(readiness.systemReady, isFalse);
+    expect(terminalScript, isNotNull);
+    expect(calls.where((line) => line.contains('install.sh')), isEmpty);
+    final script = await File(terminalScript!).readAsString();
+    expect(script, contains('/usr/bin/xcrun --find clang'));
+    expect(
+      script,
+      contains(
+        'sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer',
+      ),
+    );
+    expect(script, contains('xcode-select --install'));
+    expect(script, contains('did not become ready within 10 minutes'));
+    expect(
+      (await Process.run('/bin/zsh', ['-n', terminalScript!])).exitCode,
+      0,
+    );
+  });
+
+  test(
+    'automatic setup installs Harness before required Grid then verifies',
+    () async {
+      var gridPresent = false;
+      final calls = <String>[];
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        run: runner(
+          tmuxPresent: () => true,
+          gridPresent: () => gridPresent,
+          installHarness: createManagedHarness,
+          installGrid: () async => gridPresent = true,
+          calls: calls,
+        ),
       );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      final harnessInstall = calls.indexWhere(
+        (line) => line.contains('cdn.autonomous.ai/harness/cli/install.sh'),
+      );
+      final gridInstall = calls.indexWhere(
+        (line) => line.contains('grid.autonomous.ai/install.sh'),
+      );
+      expect(readiness.isReady, isTrue);
+      expect(readiness.phase, EnvironmentSetupPhase.ready);
+      expect(harnessInstall, greaterThan(-1));
+      expect(gridInstall, greaterThan(harnessInstall));
+      expect(calls[harnessInstall], contains('/bin/sh -s -- --desktop'));
     },
   );
 
   test(
-    'resumeFrom re-attempts a step still stuck and continues past it',
+    'missing tmux opens a real terminal before either CLI installer',
     () async {
-      var tmuxAttempts = 0;
+      String? terminalScript;
+      final calls = <String>[];
       final provisioner = EnvironmentProvisioner(
         harnessHome: scratch,
-        isMacOS: true,
-        run: (executable, arguments, {environment}) async {
-          final command = arguments.join(' ');
-          if (command.contains('tmux')) {
-            tmuxAttempts++;
-            // Missing on the first (pre-fix) probe, present once the user has
-            // supposedly run the guidance command by hand before clicking Recheck.
-            return tmuxAttempts == 1
-                ? result(1)
-                : result(0, stdout: 'tmux 3.4\n');
-          }
-          if (arguments.contains('auth') && arguments.contains('status')) {
-            return result(0, stdout: '{"loggedIn":false}\n');
-          }
-          if (command.contains('command -v brew')) return result(1);
-          return result(0);
-        },
-        openTerminal: (path) async {},
+        isMacOS: false,
+        isLinux: true,
+        openTerminal: (path) async => terminalScript = path,
+        run: runner(
+          tmuxPresent: () => false,
+          gridPresent: () => false,
+          calls: calls,
+        ),
       );
 
-      final stuck = await provisioner.ensureReady(onProgress: (_) {});
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
       expect(
-        stuck.steps[EnvironmentStep.tmux],
+        readiness.steps[EnvironmentStep.tmux],
         EnvironmentStepStatus.needsTerminal,
       );
-
-      final rechecked = await provisioner.ensureReady(
-        onProgress: (_) {},
-        resumeFrom: stuck,
-      );
-
-      expect(rechecked.isReady, isTrue);
+      expect(terminalScript, isNotNull);
+      expect(calls.where((line) => line.contains('install.sh')), isEmpty);
+      final script = await File(terminalScript!).readAsString();
+      expect(script, contains('install_with_apt tmux'));
+      expect(script, contains('if [ "\$(id -u)" -eq 0 ]'));
+      expect(script, contains('terminal.log'));
+      expect(script, contains('tmux -V'));
       expect(
-        rechecked.steps[EnvironmentStep.tmux],
-        EnvironmentStepStatus.ready,
-      );
-      // Continued straight into the grid step behind it, same run.
-      expect(
-        rechecked.steps[EnvironmentStep.grid],
-        isNot(EnvironmentStepStatus.pending),
+        (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
+        0,
       );
     },
   );
 
-  // --- The Grid CLI step, which the managed-runtime revert must not disturb ---
-
-  test('installs the Grid CLI once, and never over an existing one', () async {
-    var gridProbes = 0;
-    var gridInstalls = 0;
-    var gridPresent = false;
+  test('Grid install failure is a blocking, actionable error', () async {
+    await createManagedHarness();
     final provisioner = EnvironmentProvisioner(
       harnessHome: scratch,
       isMacOS: true,
-      run: (executable, arguments, {environment}) async {
-        final command = arguments.join(' ');
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":false}\n');
-        }
-        if (command.contains('grid.autonomous.ai/install.sh')) {
-          gridInstalls++;
-          gridPresent = true;
-          return result(0, stdout: 'installed');
-        }
-        if (command.contains('grid --version')) {
-          gridProbes++;
-          return gridPresent ? result(0, stdout: 'grid 0.3.37') : result(1);
-        }
-        return result(0, stdout: 'tmux 3.4\n');
-      },
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => false,
+        gridInstallExitCode: 7,
+      ),
     );
 
-    final first = await provisioner.ensureReady(onProgress: (_) {});
-    expect(first.isReady, isTrue);
-    expect(first.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
-    expect(gridInstalls, 1);
-    expect(gridProbes, 2); // missing, then verified after the install
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
 
-    final second = await provisioner.ensureReady(onProgress: (_) {});
-    expect(second.steps[EnvironmentStep.grid], EnvironmentStepStatus.ready);
-    expect(gridInstalls, 1, reason: 'a present Grid CLI is left alone');
+    expect(readiness.isReady, isFalse);
+    expect(readiness.phase, EnvironmentSetupPhase.failed);
+    expect(readiness.steps[EnvironmentStep.grid], EnvironmentStepStatus.failed);
+    expect(readiness.failure?.command, contains('grid --version'));
+    expect(readiness.failure?.detail, contains('network unavailable'));
   });
 
-  test('a Grid CLI that will not install does not block the app', () async {
-    final provisioner = EnvironmentProvisioner(
-      harnessHome: scratch,
-      isMacOS: true,
-      run: (executable, arguments, {environment}) async {
-        final command = arguments.join(' ');
-        if (arguments.contains('auth') && arguments.contains('status')) {
-          return result(0, stdout: '{"loggedIn":false}\n');
-        }
-        if (command.contains('grid.autonomous.ai/install.sh')) {
-          return result(1, stderr: 'could not resolve host');
-        }
-        if (command.contains('grid --version')) return result(1);
-        return result(0, stdout: 'tmux 3.4\n');
-      },
-    );
+  test(
+    'a failed admin Terminal run surfaces its exit code and full log',
+    () async {
+      var launches = 0;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        openTerminal: (_) async => launches++,
+        run: runner(tmuxPresent: () => false, gridPresent: () => false),
+      );
+      final waiting = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+      await File(waiting.terminalLogPath!).writeAsString('apt: package failed');
+      await File(waiting.terminalResultPath!).writeAsString('42\n');
 
-    final readiness = await provisioner.ensureReady(onProgress: (_) {});
+      final failed = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: waiting,
+        install: false,
+        mode: EnvironmentSetupMode.automatic,
+      );
 
-    // Optional means optional: `isReady` counts the REQUIRED steps, and the
-    // step reads `unavailable` rather than `failed` so the setup screen offers
-    // no Retry for something the app is content to go without.
-    expect(readiness.isReady, isTrue);
-    expect(
-      readiness.steps[EnvironmentStep.grid],
-      EnvironmentStepStatus.unavailable,
-    );
-    expect(readiness.needsTerminal, isFalse);
-    expect(readiness.output.last, contains('cannot be shared with a grid'));
-  });
+      expect(failed.phase, EnvironmentSetupPhase.failed);
+      expect(failed.failure?.exitCode, 42);
+      expect(failed.output.join('\n'), contains('apt: package failed'));
+      expect(launches, 1, reason: 'a polling probe must not reopen Terminal');
+    },
+  );
 
-  /// The one path nothing else covers, and the whole point of the managed
-  /// runtime: manifest → download → size → sha256 → `tar -xzf` → rename →
-  /// `current-node`. It was deleted from production for a while, so it gets a
-  /// real gzip archive and a real `tar`, not a stubbed one — the only fakes are
-  /// the two HTTP responses and the `--version` probe of the dummy binary.
+  test(
+    'a fully prepared machine passes a fresh read-only launch probe',
+    () async {
+      await createManagedHarness();
+      final calls = <String>[];
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: true,
+        run: runner(
+          tmuxPresent: () => true,
+          gridPresent: () => true,
+          calls: calls,
+        ),
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: false,
+      );
+
+      expect(readiness.isReady, isTrue);
+      expect(readiness.phase, EnvironmentSetupPhase.ready);
+      expect(calls.where((line) => line.contains('install.sh')), isEmpty);
+    },
+  );
 }

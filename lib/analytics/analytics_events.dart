@@ -60,7 +60,7 @@ extension AnalyticsEvents on Analytics {
   void signedOut() => track('signed_out');
 
   /// First-run provisioning finished. [ready] is false when a required step
-  /// could not be completed, [grid] whether the optional Grid CLI landed —
+  /// could not be completed, [grid] whether the required Grid CLI landed —
   /// together they say how much of a fresh Mac this app can actually set up on
   /// its own, which is otherwise only visible in a support thread.
   void environmentPrepared({required bool ready, required bool grid}) =>

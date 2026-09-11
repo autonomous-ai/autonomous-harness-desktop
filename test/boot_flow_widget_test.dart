@@ -67,6 +67,8 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
   Future<EnvironmentReadiness> ensureReady({
     required void Function(EnvironmentReadiness value) onProgress,
     EnvironmentReadiness? resumeFrom,
+    bool install = true,
+    EnvironmentSetupMode? mode,
   }) async {
     called = true;
     final ready = EnvironmentReadiness(
@@ -74,6 +76,7 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
         for (final step in EnvironmentStep.values)
           step: EnvironmentStepStatus.ready,
       },
+      systemReady: true,
     );
     onProgress(ready);
     return ready;
@@ -85,18 +88,29 @@ class _ReadyEnvironmentProvisioner extends EnvironmentProvisioner {
 /// current stuck state back in, and that a step already `ready` is never handed a fresh probe.
 class _ScriptedEnvironmentProvisioner extends EnvironmentProvisioner {
   final List<EnvironmentReadiness> results;
+  final List<List<EnvironmentReadiness>> progress;
   final List<EnvironmentReadiness?> resumeFromCalls = [];
+  final List<bool> installCalls = [];
   var callCount = 0;
-  _ScriptedEnvironmentProvisioner(this.results) : super(isMacOS: true);
+  _ScriptedEnvironmentProvisioner(this.results, {this.progress = const []})
+    : super(isMacOS: true);
 
   @override
   Future<EnvironmentReadiness> ensureReady({
     required void Function(EnvironmentReadiness value) onProgress,
     EnvironmentReadiness? resumeFrom,
+    bool install = true,
+    EnvironmentSetupMode? mode,
   }) async {
     resumeFromCalls.add(resumeFrom);
-    final result =
-        results[callCount < results.length ? callCount : results.length - 1];
+    installCalls.add(install);
+    final index = callCount < results.length ? callCount : results.length - 1;
+    final result = results[index];
+    if (index < progress.length) {
+      for (final value in progress[index]) {
+        onProgress(value);
+      }
+    }
     callCount++;
     onProgress(result);
     return result;
@@ -176,54 +190,48 @@ void main() {
     },
   );
 
-  test(
-    'a machine confirmed once skips environment setup on the next launch',
-    () async {
-      final storage = _FakeKeyValueStore()
-        ..values['environment_setup_version'] =
-            kEnvironmentSetupVersion.toString();
-      final provisioner = _ReadyEnvironmentProvisioner();
-      final app = AppNotifier(
-        config: AppConfig.dev,
-        authSession: AuthSession(),
-        configStore: ConfigStore(storage: storage),
-        cliLogin: _FakeCliLogin(loggedIn: false),
-        environmentProvisioner: provisioner,
-      );
+  test('a machine confirmed once still gets a quick readiness probe on next launch', () async {
+    final storage = _FakeKeyValueStore()
+      ..values['environment_setup_version'] = kEnvironmentSetupVersion
+          .toString();
+    final provisioner = _ReadyEnvironmentProvisioner();
+    final app = AppNotifier(
+      config: AppConfig.dev,
+      authSession: AuthSession(),
+      configStore: ConfigStore(storage: storage),
+      cliLogin: _FakeCliLogin(loggedIn: false),
+      environmentProvisioner: provisioner,
+    );
 
-      await app.bootstrap();
+    await app.bootstrap();
 
-      expect(provisioner.called, isFalse);
-      expect(app.environmentReadiness.isReady, isTrue);
-      // Reached the login check rather than getting stuck on preparingEnvironment.
-      expect(app.status, AppStatus.unauthenticated);
-    },
-  );
+    expect(provisioner.called, isTrue);
+    expect(app.environmentReadiness.isReady, isTrue);
+    // Reached the login check rather than getting stuck on preparingEnvironment.
+    expect(app.status, AppStatus.unauthenticated);
+  });
 
-  test(
-    'a machine on an older environment-setup version reruns provisioning and then persists the current version',
-    () async {
-      final storage = _FakeKeyValueStore()
-        ..values['environment_setup_version'] =
-            (kEnvironmentSetupVersion - 1).toString();
-      final provisioner = _ReadyEnvironmentProvisioner();
-      final app = AppNotifier(
-        config: AppConfig.dev,
-        authSession: AuthSession(),
-        configStore: ConfigStore(storage: storage),
-        cliLogin: _FakeCliLogin(loggedIn: false),
-        environmentProvisioner: provisioner,
-      );
+  test('a machine on an older environment-setup version reruns provisioning and then persists the current version', () async {
+    final storage = _FakeKeyValueStore()
+      ..values['environment_setup_version'] = (kEnvironmentSetupVersion - 1)
+          .toString();
+    final provisioner = _ReadyEnvironmentProvisioner();
+    final app = AppNotifier(
+      config: AppConfig.dev,
+      authSession: AuthSession(),
+      configStore: ConfigStore(storage: storage),
+      cliLogin: _FakeCliLogin(loggedIn: false),
+      environmentProvisioner: provisioner,
+    );
 
-      await app.bootstrap();
+    await app.bootstrap();
 
-      expect(provisioner.called, isTrue);
-      expect(
-        storage.values['environment_setup_version'],
-        kEnvironmentSetupVersion.toString(),
-      );
-    },
-  );
+    expect(provisioner.called, isTrue);
+    expect(
+      storage.values['environment_setup_version'],
+      kEnvironmentSetupVersion.toString(),
+    );
+  });
 
   test(
     'environment setup, once it succeeds, is remembered for next time',
@@ -249,6 +257,47 @@ void main() {
   );
 
   test(
+    'boot probes read-only and installs only after explicit confirmation',
+    () async {
+      final missing = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.failed,
+          EnvironmentStep.tmux: EnvironmentStepStatus.ready,
+          EnvironmentStep.grid: EnvironmentStepStatus.failed,
+        },
+        phase: EnvironmentSetupPhase.review,
+      );
+      final ready = EnvironmentReadiness(
+        steps: {
+          for (final step in EnvironmentStep.values)
+            step: EnvironmentStepStatus.ready,
+        },
+        phase: EnvironmentSetupPhase.ready,
+        mode: EnvironmentSetupMode.automatic,
+        systemReady: true,
+      );
+      final provisioner = _ScriptedEnvironmentProvisioner([missing, ready]);
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: _FakeKeyValueStore()),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+
+      await app.bootstrap();
+      expect(provisioner.installCalls, [isFalse]);
+
+      app.selectEnvironmentSetupMode(EnvironmentSetupMode.automatic);
+      await app.startEnvironmentSetup();
+      expect(provisioner.installCalls, [isFalse, isTrue]);
+      expect(app.status, AppStatus.preparingEnvironment);
+      expect(app.environmentReadiness.phase, EnvironmentSetupPhase.ready);
+      app.dispose();
+    },
+  );
+
+  test(
     'recheckEnvironmentStep succeeds and continues past environment setup',
     () async {
       final stuck = EnvironmentReadiness(
@@ -257,12 +306,15 @@ void main() {
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
           EnvironmentStep.grid: EnvironmentStepStatus.pending,
         },
+        phase: EnvironmentSetupPhase.waitingForTerminal,
+        mode: EnvironmentSetupMode.automatic,
       );
       final ready = EnvironmentReadiness(
         steps: {
           for (final step in EnvironmentStep.values)
             step: EnvironmentStepStatus.ready,
         },
+        systemReady: true,
       );
       final storage = _FakeKeyValueStore();
       final provisioner = _ScriptedEnvironmentProvisioner([stuck, ready]);
@@ -287,6 +339,8 @@ void main() {
       // what lets the provisioner skip the already-`ready` harness step during the recheck.
       expect(provisioner.resumeFromCalls.last, same(stuck));
       expect(app.environmentReadiness.isReady, isTrue);
+      expect(app.status, AppStatus.preparingEnvironment);
+      await app.continueAfterEnvironmentSetup();
       expect(app.status, AppStatus.unauthenticated);
       expect(
         storage.values['environment_setup_version'],
@@ -306,6 +360,8 @@ void main() {
           EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
           EnvironmentStep.grid: EnvironmentStepStatus.pending,
         },
+        phase: EnvironmentSetupPhase.waitingForTerminal,
+        mode: EnvironmentSetupMode.automatic,
       );
       final storage = _FakeKeyValueStore();
       final provisioner = _ScriptedEnvironmentProvisioner([stuck, stuck]);
@@ -318,8 +374,8 @@ void main() {
       );
 
       await app.bootstrap();
-      // The first stuck result schedules the 5s auto-poll.
-      expect(app.environmentRecheckPending, isTrue);
+      // Launch checks are read-only and do not start an install/poll loop.
+      expect(app.environmentRecheckPending, isFalse);
 
       await app.recheckEnvironmentStep(EnvironmentStep.tmux);
 
@@ -328,6 +384,62 @@ void main() {
       expect(storage.values['environment_setup_version'], isNull);
       // Rescheduled rather than given up on.
       expect(app.environmentRecheckPending, isTrue);
+      app.dispose();
+    },
+  );
+
+  test(
+    'automatic Terminal polling keeps the waiting UI phase stable',
+    () async {
+      final waiting = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.failed,
+          EnvironmentStep.tmux: EnvironmentStepStatus.needsTerminal,
+          EnvironmentStep.grid: EnvironmentStepStatus.failed,
+        },
+        phase: EnvironmentSetupPhase.waitingForTerminal,
+        mode: EnvironmentSetupMode.automatic,
+        systemReady: true,
+      );
+      final probing = waiting.copyWith(phase: EnvironmentSetupPhase.preflight);
+      final reviewed = waiting.copyWith(
+        phase: EnvironmentSetupPhase.review,
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.failed,
+          EnvironmentStep.tmux: EnvironmentStepStatus.failed,
+          EnvironmentStep.grid: EnvironmentStepStatus.failed,
+        },
+      );
+      final provisioner = _ScriptedEnvironmentProvisioner(
+        [waiting, reviewed],
+        progress: [
+          const [],
+          [probing, reviewed],
+        ],
+      );
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: _FakeKeyValueStore()),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+      await app.bootstrap();
+      final paintedPhases = <EnvironmentSetupPhase>[];
+      app.addListener(() => paintedPhases.add(app.environmentReadiness.phase));
+
+      await app.recheckEnvironmentStep(EnvironmentStep.tmux);
+
+      expect(paintedPhases, isNot(contains(EnvironmentSetupPhase.preflight)));
+      expect(paintedPhases, isNot(contains(EnvironmentSetupPhase.review)));
+      expect(
+        app.environmentReadiness.phase,
+        EnvironmentSetupPhase.waitingForTerminal,
+      );
+      expect(
+        app.environmentReadiness.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.needsTerminal,
+      );
       app.dispose();
     },
   );
@@ -381,6 +493,8 @@ void main() {
         },
         message:
             'Complete the setup in the terminal window, then click Recheck.',
+        phase: EnvironmentSetupPhase.waitingForTerminal,
+        mode: EnvironmentSetupMode.automatic,
       );
       await tester.pumpWidget(
         ProviderScope(
@@ -390,14 +504,76 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Preparing this computer'), findsOneWidget);
-      expect(find.text('Harness CLI & runtime'), findsOneWidget);
-      // The already-ready harness step gets no guidance block or Recheck button — only the stuck
-      // tmux step does, plus the always-present "Start over" full-reset escape hatch.
-      expect(find.text('Recheck'), findsOneWidget);
-      expect(find.text('Start over'), findsOneWidget);
+      expect(find.text('Finish the secure Terminal step'), findsOneWidget);
+      expect(find.text('Managed Node 20+ & Harness CLI'), findsOneWidget);
+      expect(find.text('Recheck now'), findsOneWidget);
+      expect(find.text('Harness cannot see your password'), findsOneWidget);
     },
   );
+
+  testWidgets('environment wizard exposes automatic and manual setup paths', (
+    tester,
+  ) async {
+    final app = makeNotifier(AppStatus.preparingEnvironment);
+    app.environmentReadiness = EnvironmentReadiness(
+      steps: {
+        EnvironmentStep.harness: EnvironmentStepStatus.failed,
+        EnvironmentStep.tmux: EnvironmentStepStatus.ready,
+        EnvironmentStep.grid: EnvironmentStepStatus.failed,
+      },
+      phase: EnvironmentSetupPhase.review,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Here is exactly what is required'), findsOneWidget);
+    expect(find.text('Grid CLI'), findsWidgets);
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+
+    expect(find.text('Automatic'), findsOneWidget);
+    expect(find.text('Manual'), findsOneWidget);
+    expect(find.text('Admin prompts stay in Terminal'), findsOneWidget);
+    await tester.tap(find.text('Manual'));
+    await tester.pump();
+
+    expect(
+      find.textContaining('grid.autonomous.ai/install.sh'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('/bin/sh -s -- --desktop'), findsOneWidget);
+    expect(find.text('I ran these · Recheck'), findsOneWidget);
+  });
+
+  testWidgets('review marks unusable Apple developer tools as missing', (
+    tester,
+  ) async {
+    final app = makeNotifier(AppStatus.preparingEnvironment);
+    app.environmentReadiness = const EnvironmentReadiness(
+      steps: {
+        EnvironmentStep.harness: EnvironmentStepStatus.ready,
+        EnvironmentStep.tmux: EnvironmentStepStatus.ready,
+        EnvironmentStep.grid: EnvironmentStepStatus.ready,
+      },
+      phase: EnvironmentSetupPhase.review,
+      systemReady: false,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appStateProvider.overrideWithValue(app)],
+        child: const DesktopApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('System tools & writable home'), findsOneWidget);
+    expect(find.text('Missing'), findsOneWidget);
+  });
 
   testWidgets('RootShell rebuilds to LoginScreen when status flips after boot', (
     tester,
