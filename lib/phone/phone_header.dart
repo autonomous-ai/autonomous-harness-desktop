@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../shared/theme/app_theme.dart';
 import '../shared/widgets/app_icon_button.dart';
@@ -39,7 +40,7 @@ class PhoneHeader extends StatelessWidget {
         children: [
           if (canPop) ...[
             AppIconButton(
-              icon: Icons.chevron_left_rounded,
+              icon: LucideIcons.chevronLeft300,
               size: 30,
               tooltip: 'Back',
               color: AppPalette.textPrimary,

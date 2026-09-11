@@ -1,13 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../shared/theme/app_theme.dart';
+import '../shared/widgets/app_icon_button.dart';
 import '../shared/widgets/empty_state.dart';
 import '../state/app_state.dart';
+import 'agent_hero.dart';
 import 'agent_tile.dart';
 import 'link_page.dart';
 import 'phone_card.dart';
 import 'phone_header.dart';
 import 'phone_navigation.dart';
+import 'phone_sheet.dart';
 import 'phone_status.dart';
 import 'status_pill.dart';
 
@@ -39,6 +45,17 @@ class AgentsPage extends StatelessWidget {
                 subtitle: machine == null
                     ? null
                     : StatusPill(summary: phoneMachineSummary(machine)),
+                trailing: [
+                  if (machine != null)
+                    AppIconButton(
+                      icon: LucideIcons.ellipsis300,
+                      size: 20,
+                      tooltip: 'Machine actions',
+                      color: AppPalette.textSecondary,
+                      onPressed: () =>
+                          _showMachineActions(context, notifier, machine),
+                    ),
+                ],
               ),
               if (machine != null)
                 Expanded(
@@ -50,6 +67,75 @@ class AgentsPage extends StatelessWidget {
       );
     },
   );
+
+  void _showMachineActions(
+    BuildContext context,
+    AppNotifier notifier,
+    MachineState machine,
+  ) {
+    final machineId = machine.machine.machineId;
+    final linked = !machine.needsLink;
+    showPhoneSheet(
+      context,
+      title: machine.machine.displayName,
+      actions: [
+        PhoneSheetAction(
+          icon: LucideIcons.refreshCw300,
+          label: 'Reload agents',
+          onTap: () => unawaited(notifier.reloadMachineData(machineId)),
+        ),
+        // Only where there is a link to replace. A machine that never had one reaches its form by
+        // being tapped, which is the same screen this would open.
+        if (linked)
+          PhoneSheetAction(
+            icon: LucideIcons.keyRound300,
+            label: 'Re-enter password…',
+            onTap: () => Navigator.of(context).push(
+              phoneRoute(
+                (_) => LinkPage(notifier: notifier, machineId: machineId),
+              ),
+            ),
+          ),
+        if (linked)
+          PhoneSheetAction(
+            icon: LucideIcons.unlink300,
+            label: 'Unlink this phone…',
+            destructive: true,
+            onTap: () => unawaited(_confirmUnlink(context, notifier, machine)),
+          ),
+      ],
+    );
+  }
+
+  /// Unlinking drops THIS device's trust pin for the machine — see `AppNotifier.unlinkMachine`,
+  /// which is deliberately not `deleteMachine`. The wording says so, because "Unlink" alone reads
+  /// as removing the machine from the account, which is a different and much larger thing.
+  Future<void> _confirmUnlink(
+    BuildContext context,
+    AppNotifier notifier,
+    MachineState machine,
+  ) async {
+    final name = machine.machine.displayName;
+    final confirmed = await confirmPhoneAction(
+      context,
+      title: 'Unlink $name?',
+      message:
+          'This phone will need $name\'s password again to open its agents. '
+          'The machine itself is not changed, and its agents keep running.',
+      confirmLabel: 'Unlink',
+    );
+    if (!confirmed || !context.mounted) return;
+    final error = await notifier.unlinkMachine(machine.machine.machineId);
+    if (!context.mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    // The page is now showing a machine this phone can no longer open; the list behind it is where
+    // the re-link starts.
+    Navigator.of(context).maybePop();
+  }
 }
 
 class _AgentsBody extends StatelessWidget {
@@ -66,7 +152,7 @@ class _AgentsBody extends StatelessWidget {
     final status = phoneMachineStatusOf(machine);
     if (status == PhoneMachineStatus.needsPassword) {
       return EmptyState(
-        icon: Icons.lock_outline_rounded,
+        icon: LucideIcons.lockKeyhole300,
         title: 'This machine needs its password',
         message: 'Every machine has its own. Enter it once to link this phone.',
         action: FilledButton(
@@ -81,7 +167,7 @@ class _AgentsBody extends StatelessWidget {
     }
     if (status == PhoneMachineStatus.offline) {
       return EmptyState(
-        icon: Icons.cloud_off_rounded,
+        icon: LucideIcons.cloudOff300,
         title: "Harness isn't running there",
         message:
             'Start Harness on ${machine.machine.displayName} and its agents '
@@ -94,7 +180,7 @@ class _AgentsBody extends StatelessWidget {
     final loadError = machine.agentsLoadError;
     if (agents.isEmpty && loadError != null) {
       return EmptyState(
-        icon: Icons.error_outline_rounded,
+        icon: LucideIcons.circleAlert300,
         title: "Couldn't load its agents",
         message: loadError,
         action: FilledButton(
@@ -105,7 +191,7 @@ class _AgentsBody extends StatelessWidget {
     }
     if (agents.isEmpty) {
       return const EmptyState(
-        icon: Icons.smart_toy_outlined,
+        icon: LucideIcons.squareTerminal300,
         title: 'No agents yet',
         message:
             'Start one from Harness on that machine and it will appear here.',
@@ -117,7 +203,13 @@ class _AgentsBody extends StatelessWidget {
       itemBuilder: (context, index) => AgentTile(
         machine: machine,
         agent: agents[index],
-        onTap: () => openAgent(context, notifier, _machineId, agents[index].id),
+        onTap: () => openAgent(
+          context,
+          notifier,
+          _machineId,
+          agents[index].id,
+          heroSource: AgentHeroSource.machine,
+        ),
       ),
     );
   }

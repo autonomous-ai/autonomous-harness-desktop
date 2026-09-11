@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../shared/theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -25,7 +26,7 @@ class MachineTile extends StatelessWidget {
         children: [
           PhoneCardGlyph(
             child: Icon(
-              Icons.computer_rounded,
+              LucideIcons.laptopMinimal300,
               size: 22,
               color: offline ? AppPalette.textFaint : AppPalette.textSecondary,
             ),
@@ -54,8 +55,8 @@ class MachineTile extends StatelessWidget {
           const SizedBox(width: 8),
           Icon(
             status == PhoneMachineStatus.needsPassword
-                ? Icons.lock_outline_rounded
-                : Icons.chevron_right_rounded,
+                ? LucideIcons.lockKeyhole300
+                : LucideIcons.chevronRight300,
             size: 22,
             color: AppPalette.textFaint,
           ),

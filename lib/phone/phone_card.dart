@@ -17,10 +17,14 @@ EdgeInsets phoneListPadding(BuildContext context) =>
 /// A tappable row on the phone: a glass card that sinks a little under the finger. Without an
 /// [onTap] it is drawn dimmed and does not move.
 class PhoneCard extends StatefulWidget {
-  const PhoneCard({super.key, required this.child, this.onTap});
+  const PhoneCard({super.key, required this.child, this.onTap, this.border});
 
   final Widget child;
   final VoidCallback? onTap;
+
+  /// Overrides the card's hairline rim. Used to mark a row that needs attention — a waiting agent —
+  /// so it is findable in a long list before a word of it is read. Null keeps the ordinary rim.
+  final BoxBorder? border;
 
   @override
   State<PhoneCard> createState() => _PhoneCardState();
@@ -55,7 +59,7 @@ class _PhoneCardState extends State<PhoneCard> {
           decoration: BoxDecoration(
             color: _pressed ? AppGlass.rowHoverFill : AppGlass.rowFill,
             borderRadius: BorderRadius.circular(AppCard.radius),
-            border: Border.all(color: AppGlass.hair),
+            border: widget.border ?? Border.all(color: AppGlass.hair),
           ),
           child: Opacity(
             opacity: widget.onTap == null ? 0.55 : 1,
