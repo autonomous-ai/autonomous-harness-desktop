@@ -743,6 +743,50 @@ void main() {
     expect(polled.terminalSetup, EnvironmentTerminalSetup.linuxHost);
   });
 
+  test(
+    'a Terminal poll trusts live Linux probes when terminal.exit is absent',
+    () async {
+      await createManagedHarness();
+      var launches = 0;
+      var tmuxPresent = false;
+      var xclipPresent = false;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        platformEnvironment: const {'DISPLAY': ':0'},
+        openTerminal: (_) async => launches++,
+        run: runner(
+          tmuxPresent: () => tmuxPresent,
+          gridPresent: () => true,
+          xclipPresent: () => xclipPresent,
+        ),
+      );
+      final waiting = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+      expect(await File(waiting.terminalResultPath!).exists(), isFalse);
+
+      // The visible terminal completed the actual installation, but its EXIT
+      // handoff file was never produced (for example because the terminal
+      // profile keeps the launched command alive).
+      tmuxPresent = true;
+      xclipPresent = true;
+      final rechecked = await provisioner.ensureReady(
+        onProgress: (_) {},
+        resumeFrom: waiting,
+        install: false,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(launches, 1);
+      expect(rechecked.isReady, isTrue);
+      expect(rechecked.phase, EnvironmentSetupPhase.ready);
+    },
+  );
+
   test('a completed host transaction that still misses clipboard fails without reopening Terminal', () async {
     await createManagedHarness();
     var launches = 0;
@@ -818,6 +862,11 @@ void main() {
       );
       final script = await File(terminalScript!).readAsString();
       expect(script, contains('apt_as_root install -y xclip tmux'));
+      expect(
+        script,
+        contains('This window will close automatically in 5 seconds.'),
+      );
+      expect(script, contains('sleep 5'));
       expect(
         (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
         0,

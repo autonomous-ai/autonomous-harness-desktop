@@ -351,13 +351,21 @@ class EnvironmentProvisioner {
       }
     }
     final previousTerminalResult = state.terminalResultPath;
+    var terminalResultPending = false;
     if (previousTerminalResult != null) {
       if (!await File(previousTerminalResult).exists()) {
+        terminalResultPending = true;
+        // `terminal.exit` is a handoff hint, not the source of truth. Some
+        // Linux terminal emulators keep the launched shell/window alive after
+        // apt has already finished, and an interrupted EXIT trap can omit the
+        // file entirely. Continue into the read-only command probes below so
+        // the 5-second poll (and the user's Recheck button) can observe that
+        // the host is actually ready instead of waiting forever for a file a
+        // cold app launch does not need either.
         emit(
           message: state.message ?? 'Complete the visible prompts in Terminal.',
           phase: EnvironmentSetupPhase.waitingForTerminal,
         );
-        return state;
       }
       try {
         final exitCode = int.tryParse(
@@ -424,7 +432,8 @@ class EnvironmentProvisioner {
         }
         if (exitCode == 0) completedTerminalSetup = state.terminalSetup;
       } on FileSystemException {
-        // Still running: the result file is written by the terminal script's EXIT trap.
+        // The result can disappear between exists() and readAsString(). The
+        // live dependency probes below remain the authoritative fallback.
       }
     }
     onProgress(state);
@@ -568,6 +577,15 @@ class EnvironmentProvisioner {
           ...linuxMissingBasePackages,
           ?linuxMissingClipboardPackage,
         ];
+        if (terminalResultPending &&
+            (!systemReady || !clipboardReady || !tmuxReady)) {
+          emit(
+            message:
+                state.message ?? 'Complete the visible prompts in Terminal.',
+            phase: EnvironmentSetupPhase.waitingForTerminal,
+          );
+          return state;
+        }
         if (completedTerminalSetup == EnvironmentTerminalSetup.linuxHost &&
             (linuxMissingPackages.isNotEmpty || !tmuxBinaryReady)) {
           emit(
@@ -1489,9 +1507,7 @@ exec > >(tee -a "\$LOG_FILE") 2>&1
 finish() {
   status=\$?
   printf '%s\\n' "\$status" > "\$RESULT_FILE"
-  if [ "\$status" -eq 0 ]; then
-    echo 'Linux host dependencies are ready. Return to Harness and click Retry.'
-  else
+  if [ "\$status" -ne 0 ]; then
     echo
     echo 'Linux package installation failed. Review the error above, then try again.'
     read -r -p 'Press Enter to close this window…' || true
@@ -1505,6 +1521,8 @@ if command -v apt-get >/dev/null 2>&1; then
   $aptInstallCommand
   $verification
   echo 'Installed packages: $packages'
+  echo 'Linux host dependencies are ready. This window will close automatically in 5 seconds.'
+  sleep 5
 else
   echo 'Automatic Linux package installation only supports apt-based distributions (Ubuntu/Debian).'
   echo 'Install these packages with your distribution package manager: $packages'
