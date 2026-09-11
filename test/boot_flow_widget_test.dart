@@ -439,6 +439,46 @@ void main() {
     },
   );
 
+  test(
+    'Linux system-only Terminal waiting polls without starting another install',
+    () async {
+      final waiting = EnvironmentReadiness(
+        steps: {
+          EnvironmentStep.harness: EnvironmentStepStatus.failed,
+          EnvironmentStep.tmux: EnvironmentStepStatus.ready,
+          EnvironmentStep.grid: EnvironmentStepStatus.failed,
+        },
+        phase: EnvironmentSetupPhase.waitingForTerminal,
+        mode: EnvironmentSetupMode.automatic,
+        terminalSetup: EnvironmentTerminalSetup.linuxHost,
+        systemReady: false,
+      );
+      final provisioner = _ScriptedEnvironmentProvisioner([waiting, waiting]);
+      final app = AppNotifier(
+        config: AppConfig.dev,
+        authSession: AuthSession(),
+        configStore: ConfigStore(storage: _FakeKeyValueStore()),
+        cliLogin: _FakeCliLogin(loggedIn: false),
+        environmentProvisioner: provisioner,
+      );
+      await app.bootstrap();
+
+      await app.recheckEnvironmentStep(EnvironmentStep.tmux);
+
+      expect(provisioner.installCalls, [false, false]);
+      expect(
+        app.environmentReadiness.terminalSetup,
+        EnvironmentTerminalSetup.linuxHost,
+      );
+      expect(
+        app.environmentReadiness.phase,
+        EnvironmentSetupPhase.waitingForTerminal,
+      );
+      expect(app.environmentRecheckPending, isTrue);
+      app.dispose();
+    },
+  );
+
   testWidgets('boot -> unauthenticated shows LoginScreen', (tester) async {
     final app = makeNotifier(AppStatus.unauthenticated);
     await tester.pumpWidget(

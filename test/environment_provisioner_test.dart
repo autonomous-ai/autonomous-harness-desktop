@@ -33,18 +33,58 @@ void main() {
     required bool Function() tmuxPresent,
     required bool Function() gridPresent,
     bool Function()? homebrewPresent,
+    bool Function()? xclipPresent,
+    bool Function()? wlCopyPresent,
     bool developerToolsPresent = true,
+    bool aptPresent = true,
+    bool runAsRoot = false,
+    bool passwordlessSudo = false,
+    Set<String> missingCommands = const {},
     Future<void> Function()? installTmux,
+    Future<void> Function(List<String> packages)? installLinuxPackages,
     Future<void> Function()? installHarness,
     Future<void> Function()? installGrid,
     List<String>? calls,
     int tmuxInstallExitCode = 0,
+    int linuxInstallExitCode = 0,
     int gridInstallExitCode = 0,
   }) {
     return (executable, arguments, {environment}) async {
       final command = '$executable ${arguments.join(' ')}';
       calls?.add(command);
       final shell = arguments.isNotEmpty ? arguments.last : '';
+      for (final missing in missingCommands) {
+        if (shell.contains('command -v $missing ')) return result(1);
+      }
+      if (shell.contains('apt-get install -y')) {
+        final packages = <String>[
+          for (final package in [
+            'dash',
+            'bash',
+            'curl',
+            'tar',
+            'sed',
+            'gawk',
+            'coreutils',
+            'tmux',
+            'xclip',
+            'wl-clipboard',
+          ])
+            if (RegExp('(?:^| )${RegExp.escape(package)}(?: |;|\$)')
+                .hasMatch(shell))
+              package,
+        ];
+        if (linuxInstallExitCode == 0) {
+          await installLinuxPackages?.call(packages);
+        }
+        return result(
+          linuxInstallExitCode,
+          stdout: linuxInstallExitCode == 0
+              ? 'apt installed ${packages.join(' ')}'
+              : '',
+          stderr: linuxInstallExitCode == 0 ? '' : 'apt install failed',
+        );
+      }
       if (shell.contains('brew install tmux')) {
         if (tmuxInstallExitCode == 0) await installTmux?.call();
         return result(
@@ -60,6 +100,21 @@ void main() {
       }
       if (shell.contains('command -v tmux')) {
         return tmuxPresent() ? result(0, stdout: 'tmux 3.4') : result(1);
+      }
+      if (shell.contains('command -v wl-copy')) {
+        return (wlCopyPresent?.call() ?? true) ? result(0) : result(1);
+      }
+      if (shell.contains('command -v xclip')) {
+        return (xclipPresent?.call() ?? true) ? result(0) : result(1);
+      }
+      if (shell.contains('command -v apt-get')) {
+        return aptPresent ? result(0) : result(1);
+      }
+      if (shell.endsWith('id -u')) {
+        return result(0, stdout: runAsRoot ? '0' : '1000');
+      }
+      if (shell.contains('sudo -n true')) {
+        return passwordlessSudo ? result(0) : result(1);
       }
       if (shell.contains('/usr/bin/xcrun --find clang')) {
         return developerToolsPresent
@@ -371,6 +426,288 @@ void main() {
       );
     },
   );
+
+  test(
+    'X11 with tmux ready still opens Terminal when xclip needs sudo',
+    () async {
+      await createManagedHarness();
+      String? terminalScript;
+      final provisioner = EnvironmentProvisioner(
+        harnessHome: scratch,
+        isMacOS: false,
+        isLinux: true,
+        platformEnvironment: const {'DISPLAY': ':0'},
+        openTerminal: (path) async => terminalScript = path,
+        run: runner(
+          tmuxPresent: () => true,
+          gridPresent: () => true,
+          xclipPresent: () => false,
+        ),
+      );
+
+      final readiness = await provisioner.ensureReady(
+        onProgress: (_) {},
+        install: true,
+        mode: EnvironmentSetupMode.automatic,
+      );
+
+      expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+      expect(readiness.systemReady, isFalse);
+      expect(
+        readiness.steps[EnvironmentStep.tmux],
+        EnvironmentStepStatus.ready,
+      );
+      expect(readiness.terminalSetup, EnvironmentTerminalSetup.linuxHost);
+      expect(terminalScript, isNotNull);
+      final script = await File(terminalScript!).readAsString();
+      expect(script, contains('install_with_apt xclip'));
+      expect(script, isNot(contains('install_with_apt tmux')));
+      expect(
+        (await Process.run('/bin/bash', ['-n', terminalScript!])).exitCode,
+        0,
+      );
+    },
+  );
+
+  test('Wayland installs wl-clipboard in-app with passwordless sudo', () async {
+    await createManagedHarness();
+    var wlCopyPresent = false;
+    var terminalLaunches = 0;
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'WAYLAND_DISPLAY': 'wayland-0'},
+      openTerminal: (_) async => terminalLaunches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        wlCopyPresent: () => wlCopyPresent,
+        passwordlessSudo: true,
+        installLinuxPackages: (packages) async {
+          if (packages.contains('wl-clipboard')) wlCopyPresent = true;
+        },
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.isReady, isTrue);
+    expect(terminalLaunches, 0);
+    final install = calls.singleWhere(
+      (line) => line.contains('apt-get install -y'),
+    );
+    expect(install, contains('wl-clipboard'));
+    expect(install, isNot(contains(' xclip')));
+    expect(readiness.output.join('\n'), contains('installed and verified'));
+  });
+
+  test('failed background apt falls back to a visible Terminal', () async {
+    await createManagedHarness();
+    String? terminalScript;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (path) async => terminalScript = path,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+        passwordlessSudo: true,
+        linuxInstallExitCode: 7,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.waitingForTerminal);
+    expect(terminalScript, isNotNull);
+    expect(readiness.output.join('\n'), contains('exited 7'));
+    expect(readiness.output.join('\n'), contains('Terminal opened'));
+  });
+
+  test('non-apt Linux returns package-manager guidance', () async {
+    await createManagedHarness();
+    var terminalLaunches = 0;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (_) async => terminalLaunches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+        aptPresent: false,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(readiness.phase, EnvironmentSetupPhase.failed);
+    expect(terminalLaunches, 0);
+    expect(readiness.failure?.title, contains('package manager'));
+    expect(readiness.failure?.detail, contains('xclip'));
+    expect(
+      readiness.failure?.command,
+      contains('distribution package manager'),
+    );
+  });
+
+  test('Wayland wins when both Linux display variables exist', () async {
+    await createManagedHarness();
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {
+        'WAYLAND_DISPLAY': 'wayland-0',
+        'DISPLAY': ':0',
+      },
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        wlCopyPresent: () => true,
+        xclipPresent: () => false,
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: false,
+    );
+
+    expect(readiness.isReady, isTrue);
+    expect(calls.any((line) => line.contains('command -v wl-copy')), isTrue);
+    expect(calls.any((line) => line.contains('command -v xclip')), isFalse);
+  });
+
+  test('headless Linux does not require an OS clipboard helper', () async {
+    await createManagedHarness();
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {},
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+        wlCopyPresent: () => false,
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: false,
+    );
+
+    expect(readiness.isReady, isTrue);
+    expect(calls.any((line) => line.contains('command -v xclip')), isFalse);
+    expect(calls.any((line) => line.contains('command -v wl-copy')), isFalse);
+  });
+
+  test('a running Linux Terminal setup is not opened a second time', () async {
+    await createManagedHarness();
+    var launches = 0;
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {'DISPLAY': ':0'},
+      openTerminal: (_) async => launches++,
+      run: runner(
+        tmuxPresent: () => true,
+        gridPresent: () => true,
+        xclipPresent: () => false,
+      ),
+    );
+    final waiting = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    final polled = await provisioner.ensureReady(
+      onProgress: (_) {},
+      resumeFrom: waiting,
+      install: false,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(launches, 1);
+    expect(polled.phase, EnvironmentSetupPhase.waitingForTerminal);
+    expect(polled.terminalSetup, EnvironmentTerminalSetup.linuxHost);
+  });
+
+  test('missing Linux base tools are installed before Harness', () async {
+    var tmuxPresent = true;
+    var curlPresent = false;
+    var harnessInstalled = false;
+    var gridPresent = true;
+    final missing = <String>{'curl'};
+    final calls = <String>[];
+    final provisioner = EnvironmentProvisioner(
+      harnessHome: scratch,
+      isMacOS: false,
+      isLinux: true,
+      platformEnvironment: const {},
+      run: runner(
+        tmuxPresent: () => tmuxPresent,
+        gridPresent: () => gridPresent,
+        runAsRoot: true,
+        missingCommands: missing,
+        installLinuxPackages: (packages) async {
+          if (packages.contains('curl')) {
+            curlPresent = true;
+            missing.remove('curl');
+          }
+        },
+        installHarness: () async {
+          harnessInstalled = true;
+          await createManagedHarness();
+        },
+        calls: calls,
+      ),
+    );
+
+    final readiness = await provisioner.ensureReady(
+      onProgress: (_) {},
+      install: true,
+      mode: EnvironmentSetupMode.automatic,
+    );
+
+    expect(curlPresent, isTrue);
+    expect(harnessInstalled, isTrue);
+    expect(readiness.isReady, isTrue);
+    final apt = calls.indexWhere((line) => line.contains('apt-get install -y'));
+    final harness = calls.indexWhere(
+      (line) => line.contains('cdn.autonomous.ai/harness/cli/install.sh'),
+    );
+    expect(apt, greaterThan(-1));
+    expect(harness, greaterThan(apt));
+  });
 
   test('Grid install failure is a blocking, actionable error', () async {
     await createManagedHarness();

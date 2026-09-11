@@ -819,6 +819,7 @@ class AppNotifier extends ChangeNotifier {
             output: value.output,
             terminalLogPath: value.terminalLogPath,
             terminalResultPath: value.terminalResultPath,
+            terminalSetup: value.terminalSetup,
             systemReady: value.systemReady,
           );
         } else {
@@ -971,6 +972,7 @@ class AppNotifier extends ChangeNotifier {
       );
       if (!result.isReady &&
           mode == EnvironmentSetupMode.automatic &&
+          result.phase != EnvironmentSetupPhase.waitingForTerminal &&
           result.steps[EnvironmentStep.tmux] == EnvironmentStepStatus.ready) {
         result = await _runProvisioner(
           resumeFrom: result,
@@ -986,6 +988,7 @@ class AppNotifier extends ChangeNotifier {
             output: result.output,
             terminalLogPath: result.terminalLogPath,
             terminalResultPath: result.terminalResultPath,
+            terminalSetup: result.terminalSetup,
             systemReady: result.systemReady,
           );
         }
@@ -1025,8 +1028,11 @@ class AppNotifier extends ChangeNotifier {
         break;
       }
     }
-    if (stuck == null) return;
-    final step = stuck;
+    if (stuck == null && environmentReadiness.terminalSetup == null) return;
+    // System/clipboard setup has no EnvironmentStep row of its own. The
+    // callback argument is only a UI trigger; the provisioner rechecks the
+    // complete environment and uses terminalSetup to attribute any failure.
+    final step = stuck ?? EnvironmentStep.tmux;
     _environmentRecheckTimer = Timer(const Duration(seconds: 5), () {
       unawaited(recheckEnvironmentStep(step));
     });
