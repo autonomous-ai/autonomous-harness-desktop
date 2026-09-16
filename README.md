@@ -1,12 +1,12 @@
-> [!IMPORTANT]
-> # ⚠️ This repository has MOVED and is archived
+> [!WARNING]
+> # 🚨 Archived — this project has moved
 >
-> **Harness Desktop is now developed in the `autonomous-harness` repository:**
+> This repository is **no longer maintained** and is kept **read-only** for historical reference only.
+> All development, new features, bug fixes, releases and issue tracking now happen in the new repository:
 >
-> ## 👉 https://github.com/autonomous-ai/autonomous-harness
+> ## 👉 [autonomous-harness](https://github.com/autonomous-ai/autonomous-harness)
 >
-> Development, issues, pull requests and releases all happen there. This repository is
-> read-only and kept only as history. Do not open PRs here.
+> Please update your bookmarks, clones and dependencies. Issues and pull requests opened here will not be reviewed.
 
 ---
 
