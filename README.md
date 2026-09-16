@@ -1,3 +1,15 @@
+> [!IMPORTANT]
+> # ⚠️ This repository has MOVED and is archived
+>
+> **Harness Desktop now lives in the `autonomous-harness` monorepo, under `desktop/`:**
+>
+> ## 👉 https://github.com/autonomous-ai/autonomous-harness/tree/main/desktop
+>
+> Development, issues, pull requests and releases (tags `vX.Y.Z_desktop`) all happen **there**.
+> This repository is read-only and is kept only as history, up to `v1.1.13`. Do not open PRs here.
+
+---
+
 # Harness Desktop
 
 Harness Desktop is the native Flutter client for browsing Harness machines and
