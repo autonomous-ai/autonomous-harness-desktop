@@ -1,12 +1,12 @@
 > [!IMPORTANT]
 > # ⚠️ This repository has MOVED and is archived
 >
-> **Harness Desktop now lives in the `autonomous-harness` monorepo, under `desktop/`:**
+> **Harness Desktop is now developed in the `autonomous-harness` repository:**
 >
-> ## 👉 https://github.com/autonomous-ai/autonomous-harness/tree/main/desktop
+> ## 👉 https://github.com/autonomous-ai/autonomous-harness
 >
-> Development, issues, pull requests and releases (tags `vX.Y.Z_desktop`) all happen **there**.
-> This repository is read-only and is kept only as history, up to `v1.1.13`. Do not open PRs here.
+> Development, issues, pull requests and releases all happen there. This repository is
+> read-only and kept only as history. Do not open PRs here.
 
 ---
 
